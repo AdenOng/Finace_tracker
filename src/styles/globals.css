@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/*
+ * Finfolio design tokens.
+ * Pure white canvas, bottle-green structure, one mint accent. Square geometry: panels have no
+ * radius, controls have a 2px radius. Headlines use Archivo's expanded width; figures are tabular.
+ */
+@theme {
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #ffffff;
+  --color-ink: #0b1f19;
+  --color-ink-2: #3e524b;
+  --color-ink-3: #6b7d76;
+  --color-line: #d4ddd8;
+  --color-wash: #e8f3ee;
+
+  --color-forest: #0f3b2e;
+  --color-forest-2: #17543f;
+  --color-forest-3: #0a2a20;
+  --color-mint: #4be3a1;
+  --color-mint-soft: #b9f5d8;
+
+  --color-gain: #0d8a5d;
+  --color-loss: #cf3a2c;
+  --color-loss-wash: #fbe9e6;
+  --color-warn: #b77d00;
+  --color-warn-wash: #fdf3d8;
+
+  --radius-ctl: 2px;
+
+  --animate-rise: rise 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --animate-slide: slide 900ms linear infinite;
+  --animate-drawer: drawer 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  @keyframes drawer {
+    from {
+      transform: translateX(24px);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+@layer base {
+  html {
+    color: var(--color-ink);
+    background: var(--color-canvas);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-mint);
+    color: var(--color-forest-3);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-mint);
+    outline-offset: 2px;
+  }
+
+  dialog::backdrop {
+    background: rgb(10 42 32 / 0.55);
+  }
+}
+
+@utility font-wide {
+  font-stretch: 125%;
+  letter-spacing: -0.02em;
+}
+
+@utility font-narrow {
+  font-stretch: 85%;
+}
+
+@utility figures {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Heading sitting on a heavy ink rule — the signature "ledger" divider. */
+@utility ruled {
+  border-top: 3px solid var(--color-ink);
+  padding-top: 0.75rem;
+}

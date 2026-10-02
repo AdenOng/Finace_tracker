@@ -1,0 +1,10 @@
+frontend/
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+next-env.d.ts
+*.tsbuildinfo
+drizzle/meta/

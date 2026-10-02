@@ -1,0 +1,22 @@
+# Core dependencies
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+
+# API
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+pydantic==2.5.3
+
+# OCR
+paddlepaddle==2.5.2
+paddleocr==2.7.0.3
+pymupdf==1.23.8
+
+# LLM
+llama-cpp-python==0.2.28
+
+# Utils
+Pillow==10.1.0
+PyYAML==6.0.1

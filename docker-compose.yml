@@ -1,0 +1,89 @@
+name: finfolio
+
+x-db-env: &db-env
+  POSTGRES_USER: ${POSTGRES_USER:-finfolio}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  POSTGRES_DB: ${POSTGRES_DB:-finfolio}
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment: *db-env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Published on localhost only, so `bun run dev` and drizzle-kit can reach it.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  opencode:
+    build:
+      context: ./docker/opencode
+      args:
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set OPENCODE_SERVER_PASSWORD in .env}
+    volumes:
+      # Credentials from `opencode auth login` on the host (your opencode Go subscription).
+      - ${OPENCODE_AUTH_FILE:-~/.local/share/opencode/auth.json}:/home/node/.local/share/opencode/auth.json
+    ports:
+      - "127.0.0.1:4096:4096"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-finfolio}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-finfolio}
+      OPENCODE_URL: http://opencode:4096
+    volumes:
+      - uploads:/app/data
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+
+  # Nightly logical backup, 14 days retained, written to ./backups on the host.
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *db-env
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          ts=$$(date +%Y%m%d-%H%M%S)
+          pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "/backups/finfolio-$$ts.dump" && echo "backup $$ts ok"
+          find /backups -name 'finfolio-*.dump' -mtime +14 -delete
+          sleep 86400
+        done
+
+  # Optional: only started with `docker compose --profile tunnel up`. If a tunnel already runs
+  # elsewhere, point its ingress at http://<this-host>:3000 instead.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  uploads:
