@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { asc, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { adminProcedure, createTRPCRouter } from "~/server/api/trpc";
@@ -11,6 +11,7 @@ import {
   findSharedProvider,
   sharedProviderFilter,
 } from "~/server/modules/llm/providers";
+import { recordAudit } from "~/server/lib/audit";
 import { decryptSecret, encryptSecret, maskSecret } from "~/server/lib/secrets";
 
 const providerInput = z.object({
@@ -67,6 +68,14 @@ export const adminAiRouter = createTRPCRouter({
           isDefault: isFirst,
         })
         .returning({ id: llmProvider.id });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "provider.created",
+        targetType: "provider",
+        targetId: row?.id,
+        targetLabel: input.name,
+        details: { kind: input.kind, model: input.defaultModel },
+      });
       return row;
     }),
 
@@ -74,6 +83,14 @@ export const adminAiRouter = createTRPCRouter({
     .input(providerInput.extend({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const { id, apiKey, ...values } = input;
+      const current = await loadProvider(ctx.db, id);
+      if (current.isDefault && !values.isEnabled) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "This is the default provider. Make another provider the default before disabling it.",
+        });
+      }
       const [row] = await ctx.db
         .update(llmProvider)
         .set({
@@ -85,25 +102,75 @@ export const adminAiRouter = createTRPCRouter({
         .where(sharedProviderFilter(id))
         .returning({ id: llmProvider.id });
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "provider.updated",
+        targetType: "provider",
+        targetId: id,
+        targetLabel: values.name,
+        details: {
+          model: values.defaultModel,
+          enabled: values.isEnabled,
+          apiKey:
+            apiKey === undefined
+              ? "unchanged"
+              : apiKey
+                ? "replaced"
+                : "cleared",
+        },
+      });
     }),
 
   remove: adminProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      const [row] = await ctx.db
-        .delete(llmProvider)
-        .where(sharedProviderFilter(input.id))
-        .returning({ id: llmProvider.id });
-      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-    }),
+    .mutation(({ ctx, input }) =>
+      ctx.db.transaction(async (tx) => {
+        const [row] = await tx
+          .delete(llmProvider)
+          .where(sharedProviderFilter(input.id))
+          .returning({
+            id: llmProvider.id,
+            name: llmProvider.name,
+            isDefault: llmProvider.isDefault,
+          });
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        // Imports need a default; hand it to the oldest enabled provider that is left.
+        let promoted: { id: string; name: string } | null = null;
+        if (row.isDefault) {
+          const [next] = await tx
+            .select({ id: llmProvider.id, name: llmProvider.name })
+            .from(llmProvider)
+            .where(
+              and(isNull(llmProvider.ownerId), eq(llmProvider.isEnabled, true)),
+            )
+            .orderBy(asc(llmProvider.createdAt))
+            .limit(1);
+          if (next) {
+            await tx
+              .update(llmProvider)
+              .set({ isDefault: true })
+              .where(sharedProviderFilter(next.id));
+            promoted = next;
+          }
+        }
+        await recordAudit(tx, {
+          actorId: ctx.session.user.id,
+          action: "provider.removed",
+          targetType: "provider",
+          targetId: row.id,
+          targetLabel: row.name,
+          details: promoted ? { newDefault: promoted.name } : undefined,
+        });
+        return { promoted };
+      }),
+    ),
 
   setDefault: adminProcedure
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db.transaction(async (tx) => {
-        if (!(await findSharedProvider(tx, input.id))) {
-          throw new TRPCError({ code: "NOT_FOUND" });
-        }
+        const target = await findSharedProvider(tx, input.id);
+        if (!target) throw new TRPCError({ code: "NOT_FOUND" });
         await tx
           .update(llmProvider)
           .set({ isDefault: false })
@@ -112,6 +179,13 @@ export const adminAiRouter = createTRPCRouter({
           .update(llmProvider)
           .set({ isDefault: true, isEnabled: true })
           .where(sharedProviderFilter(input.id));
+        await recordAudit(tx, {
+          actorId: ctx.session.user.id,
+          action: "provider.set_default",
+          targetType: "provider",
+          targetId: target.id,
+          targetLabel: target.name,
+        });
       });
     }),
 

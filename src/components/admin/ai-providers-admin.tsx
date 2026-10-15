@@ -4,6 +4,7 @@ import { CircleCheck, CircleX, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Drawer } from "~/components/ui/dialog";
 import { Checkbox, Field, Input, Select } from "~/components/ui/field";
 import { EmptyState, Notice, Tag } from "~/components/ui/panel";
@@ -260,7 +261,9 @@ function ProviderDrawer({
       baseUrl: formText(form, "baseUrl"),
       defaultModel: formText(form, "defaultModel"),
       supportsVision: form.get("supportsVision") === "on",
-      isEnabled: form.get("isEnabled") === "on",
+      // The default provider stays enabled; the server rejects disabling it.
+      isEnabled:
+        (existing?.isDefault ?? false) || form.get("isEnabled") === "on",
       // Blank key on edit means "keep the stored one".
       apiKey: meta.needsKey ? apiKeyRaw || (existing ? undefined : null) : null,
     };
@@ -278,11 +281,16 @@ function ProviderDrawer({
       footer={
         <>
           {existing ? (
-            <Button
+            <ConfirmButton
               variant="danger"
               className="mr-auto"
               loading={remove.isPending}
-              onClick={() =>
+              confirmLabel={
+                existing.isDefault
+                  ? "Delete default? Click again"
+                  : "Click again to delete"
+              }
+              onConfirm={() =>
                 void remove
                   .mutateAsync({ id: existing.id })
                   .then(onSaved)
@@ -290,7 +298,7 @@ function ProviderDrawer({
               }
             >
               Delete
-            </Button>
+            </ConfirmButton>
           ) : null}
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -380,7 +388,15 @@ function ProviderDrawer({
           <Checkbox
             name="isEnabled"
             label="Enabled"
-            defaultChecked={existing?.isEnabled ?? true}
+            description={
+              existing?.isDefault
+                ? "The default provider is always enabled. Make another provider the default to disable this one; deleting it hands the default to the oldest enabled provider."
+                : undefined
+            }
+            disabled={existing?.isDefault}
+            defaultChecked={
+              (existing?.isDefault ?? false) || (existing?.isEnabled ?? true)
+            }
           />
         </div>
       </form>

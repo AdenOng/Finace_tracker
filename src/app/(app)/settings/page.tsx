@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
@@ -37,6 +38,19 @@ export default async function SettingsPage({
       ) : null}
 
       <div className="space-y-14">
+        {!mustEnrol ? (
+          <Section
+            title="Shared workspaces"
+            description="Create a family or fund workspace and choose which accounts to share."
+          >
+            <Link
+              className="font-semibold underline underline-offset-4"
+              href="/workspaces"
+            >
+              Manage workspaces
+            </Link>
+          </Section>
+        ) : null}
         <Section
           title="Display currency"
           description="Totals and charts are converted into this currency. Each record keeps its original currency."

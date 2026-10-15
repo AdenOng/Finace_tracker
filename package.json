@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --turbo",
-    "build": "next build",
+    "build": "node ./node_modules/next/dist/bin/next build",
     "start": "next start",
     "check": "bun run lint && tsc --noEmit",
     "lint": "eslint .",

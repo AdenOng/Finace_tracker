@@ -1,8 +1,12 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+
 import {
   ArrowLeftRight,
   Bot,
+  Gauge,
+  History,
   Building2,
   FileUp,
   LayoutGrid,
@@ -26,31 +30,36 @@ type NavItem = {
   label: string;
   icon: LucideIcon;
   soon?: boolean;
+  /** Only active on this exact path, not its children. */
+  exact?: boolean;
 };
 
 const mainNav: NavItem[] = [
-  { href: "/", label: "Overview", icon: LayoutGrid },
-  { href: "/accounts", label: "Accounts", icon: Wallet, soon: true },
-  { href: "/spending", label: "Spending", icon: ArrowLeftRight, soon: true },
+  { href: "/", label: "Overview", icon: LayoutGrid, exact: true },
+  { href: "/accounts", label: "Accounts", icon: Wallet },
+  { href: "/spending", label: "Spending", icon: ArrowLeftRight },
   { href: "/imports", label: "Imports", icon: FileUp, soon: true },
+  { href: "/workspaces", label: "Workspaces", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 const adminNav: NavItem[] = [
+  { href: "/admin", label: "Status", icon: Gauge, exact: true },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/institutions", label: "Brokers & banks", icon: Building2 },
   { href: "/admin/categories", label: "Categories", icon: Tags },
   { href: "/admin/ai", label: "AI providers", icon: Bot },
+  { href: "/admin/activity", label: "Activity log", icon: History },
 ];
 
-function isActive(pathname: string, href: string) {
-  return href === "/"
-    ? pathname === "/"
-    : pathname === href || pathname.startsWith(`${href}/`);
+function isActive(pathname: string, item: NavItem) {
+  return item.exact
+    ? pathname === item.href
+    : pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
 function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
-  const active = isActive(pathname, item.href);
+  const active = isActive(pathname, item);
   const Icon = item.icon;
   if (item.soon) {
     return (
@@ -97,9 +106,11 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   async function signOut() {
     await authClient.signOut();
+    queryClient.clear();
     router.replace("/sign-in");
     router.refresh();
   }

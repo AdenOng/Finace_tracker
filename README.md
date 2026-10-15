@@ -27,14 +27,45 @@ using the same database and encrypted provider credentials. The Compose project 
 | Area | State |
 | --- | --- |
 | Auth: invite-only sign-up, first user is admin, TOTP two-step, passkeys, rate limits | Done |
-| Admin console: users and invitations, brokers & banks, categories, AI providers | Done |
+| Admin console: status overview, users and invitations, account recovery (sessions, two-step reset, password reset links), brokers & banks, categories, AI providers, activity log | Done |
 | LLM layer: opencode / OpenAI-compatible / Anthropic adapters, structured output | Done |
 | Extraction: PDF text layer, scanned-PDF rasterising, admin playground | Done |
-| Accounts, holdings, spending views | Next |
+| Accounts: bank, card, brokerage and wallet accounts; archive instead of delete when in use | Done |
+| Portfolio: manual balance and holdings entries, net worth in the display currency | Done |
+| Spending: manual transactions, monthly summary by category, transfers excluded | Done |
+| Reconciliation: statement-period review, exact balance checks, protected entries and reopening | Done |
+| Merchant rules: per-user text matching, automatic categorization and previewed application | Done |
+| Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion | Done |
 | Import pipeline: upload → background job → review & dedupe → commit | Next |
 | Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), live prices, FX, net-worth history | Later |
 
 The full database schema for the later phases already exists (`src/server/db/schema`).
+
+## Checking statements and organizing spending
+
+- **Reconciliation:** open a bank, card, cash or wallet account and choose **Reconcile statement**.
+  Enter the inclusive statement dates, currency, opening balance before the first day and closing
+  balance after the last day. Review every transaction against the statement. Transfers count in
+  this check; other currencies are checked separately. Credit-card amounts owed are negative.
+  Finish only when opening balance plus signed transactions equals closing balance exactly.
+  Reconciled entries are cleared and protected against changes to their amount, date, account,
+  currency, description or cleared status, and against deletion. Adding or moving an entry into
+  that period is also blocked. Category, merchant, transfer labels and notes stay editable.
+  Choose **Reopen** on the account to unlock a period; entries retain their cleared status.
+  Reconciliation verifies the spending ledger and does not update portfolio balance snapshots.
+- **Merchant rules:** in **Spending → Merchant rules**, add text to match in a merchant or
+  description and choose a category. Matching ignores case and repeated whitespace and treats
+  wildcard characters literally. Longer patterns win; ties use the oldest rule, then its id.
+  New uncategorised, non-transfer entries use the rules automatically. Select existing entries
+  and choose **Apply rules** to review and confirm suggested categories. Manual choices,
+  including categories deliberately cleared through editing, are preserved.
+- **Bulk edits:** select up to 500 visible transactions in Spending and choose **Bulk edit**.
+  Fields default to keeping their existing values; selecting a blank value clears that field.
+  Bulk deletion has a separate review step. Each operation succeeds for the whole selection or
+  leaves every entry unchanged. Refresh a preview if another edit changes its underlying data.
+
+The new reconciliation schema is applied by the existing startup migrations. No additional
+configuration is required.
 
 ## Quick start (local development)
 
@@ -68,6 +99,11 @@ docker compose up -d --build  # db, opencode, app, nightly backup
 Set `BETTER_AUTH_URL` to the public Cloudflare hostname in production so cookies and passkeys
 work. Putting Cloudflare Access in front of `/admin` is a cheap extra layer.
 
+There is no outgoing email. If someone forgets their password or loses their authenticator, an
+admin opens **Admin → Users → Manage** to create a single-use password reset link (valid 24 hours,
+served at `/reset/<token>`) or reset their two-step setup. Both sign the person out everywhere and
+are recorded in **Admin → Activity log**.
+
 ## Architecture
 
 ```
@@ -84,7 +120,10 @@ src/
     modules/
       llm/                 Provider-agnostic interface + adapters (opencode, ai-sdk)
       extraction/          Zod output schema, prompt builder, PDF/image preparation
-    api/routers/           tRPC routers (catalog, settings, admin/*)
+      accounts/            Ownership checks shared by the finance routers
+      portfolio/           Holdings loading, valuation and FX conversion (decimal arithmetic)
+    api/routers/           tRPC routers: accounts, portfolio (holdings, net worth),
+                           spending (transactions), catalog, settings, admin/*
   components/ui/           Design-system primitives
   app/(auth) app/(app)     Route groups: sign-in flows vs the signed-in shell
 ```
@@ -103,10 +142,19 @@ src/
   invent one.
 - **Scanned PDFs are rendered to page images**, because most vision models accept images but not
   PDFs. PDFs with a text layer send the text instead, which is cheaper and more accurate.
-- **Per-user data, household-ready.** Every financial row has `owner_id`; reads go through
-  `readableBy(scope, …)`. A future household view only has to widen `resolveAccessScope`.
+- **Personal ownership, explicit workspace sharing.** Every financial row has `owner_id`; reads go through
+  `readableAccount(scope, ownerId, accountId)`. Personal scope is the default; an explicit
+  `workspaceId` selects only accounts granted to that audience. Owner-scoped settings, rules,
+  uploads, and credentials never inherit workspace access.
 - **Money is `NUMERIC`**, surfaced as strings; each row keeps its original currency and conversion
   to the display currency happens at read time.
+- **Spending and net worth are separate flows over shared accounts.** Transactions record money in
+  and out (`spending` router). Balances and holdings are point-in-time snapshots per account
+  (`portfolio` router); net worth is the latest snapshot of every open account. Re-entering a date
+  replaces that day's manual snapshot.
+- **No silent currency mixing.** Amounts are converted with the latest stored FX rate; anything
+  without a rate is shown separately rather than dropped or guessed. Until the FX feed lands,
+  `fx_rate` is empty, so only amounts already in the display currency are totalled.
 
 ## Scripts
 
@@ -122,4 +170,64 @@ src/
 | `bun run format:check` | Check formatting of the active application |
 | `bun audit` | Audit the installed dependency versions |
 
+If a Bun launcher substitutes Bun for Node and Next.js build workers fail, run
+`node node_modules/next/dist/bin/next build` with Node 22. Docker already runs Next.js on Node.
+
 See [architecture and maintenance](docs/architecture.md) for module boundaries and verification.
+
+
+### Shared workspaces
+
+Open **Workspaces** in the sidebar (also linked from Settings) to create a Family, Fund, or Other
+workspace. Each user can belong to several workspaces. These purposes are labels; all use the same
+membership and account-sharing permissions:
+
+- **Owner:** manages workspace settings, invitations, member roles, and ownership transfer;
+  can revoke any account share.
+- **Member:** views shared accounts and shares/unshares their own accounts.
+- **Viewer:** views shared accounts without sharing accounts or managing membership.
+- Financial edits, snapshots, reconciliation, merchant rules, and imports remain restricted to
+  the account owner in Personal view. Workspace ownership does not grant financial write access.
+
+Use **Sharing & members** to choose accounts and generate an email-bound invitation link. Links
+are handed over directly, work once, and expire after seven days; no outgoing email is needed.
+Existing users sign in and explicitly join. New users can register from the workspace invitation
+and join as a normal app user, then complete the existing two-factor enrollment requirement.
+Reissuing or revoking an invitation invalidates the old link. Ownership transfer revokes pending
+invitations. A member must receive a new invitation after being removed.
+
+Everyone in a workspace sees all of its shared accounts, including their balances, holdings and
+transaction history. Use separate workspaces for separate audiences. Account sharing does not
+share uploaded statements, passwords, API keys, or other private accounts. Demoting a member to
+Viewer, removing them, or leaving deletes their shares. Deleting a workspace retains personal
+accounts and financial history. Owners must transfer ownership or delete the workspace before
+leaving. The account owner can always stop sharing; the workspace owner can also revoke shares.
+
+Personal and shared routes/query keys are separate. The workspace selector returns to Personal
+view or switches audience. Membership and account grants are checked by the server on every
+financial request; visible shared pages refresh every 15 seconds and on window focus. Shared
+account detail pages are read-only, including for their owner; edit from Personal view.
+
+The dashboard counts each account once, omits archived accounts from combined value, uses the
+workspace display currency, and reports missing FX rates and unpriced holdings. Spending remains
+grouped by its original currency and excludes marked transfers. Snapshot dates can differ among
+accounts.
+
+**Fund extension:** a Fund workspace currently provides shared portfolio visibility. Its totals
+represent whole accounts, not an investor's stake. The reusable foundation is `workspace`,
+`workspace_member`, and `workspace_account_share`, with centralized membership permissions in
+`src/server/modules/workspaces/permissions.ts` and account reads in `src/server/lib/access.ts`.
+Future contributions, withdrawals, investor allocations, and per-investor reports should be
+separate workspace-scoped records with their own permissions; do not infer capital ownership
+from a login, account `ownerId`, or workspace role. See [workspace design](docs/workspaces.md).
+
+The additive migration runs on application startup; it creates no default memberships or shares.
+Existing records remain private. Run `bun run check`, `bun run test`, and `bun run build` to verify
+changes. Tests apply the migration chain to disposable Postgres-compatible databases and exercise
+sharing isolation, invitations, revocation, role changes, ownership transfer, and read-only UI.
+
+`bun run build` explicitly launches the Next.js compiler with Node. Bun remains the package
+manager and test runner. The Snap Bun wrapper on some Linux systems removes NVM Node from
+`PATH`, causing Next workers to fall back to Bun and fail during page collection. With that
+installation, preserve the normal Node path by invoking the Bun binary directly, for example:
+`/snap/bun-js/current/_bun/bin/bun run build`.

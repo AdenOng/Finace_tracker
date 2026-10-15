@@ -455,6 +455,12 @@ function ArchiveDrawer({
       : [],
   );
   const targets = options.filter((o) => !excluded.has(o.id));
+  const affected = category
+    ? category.transactionCount +
+      options
+        .filter((o) => o.parentId === category.id)
+        .reduce((total, o) => total + o.transactionCount, 0)
+    : 0;
   const fallback = targets.find((t) => t.key === "other")?.id ?? "";
 
   return (
@@ -503,6 +509,14 @@ function ArchiveDrawer({
         ) : null}
         {category && options.some((o) => o.parentId === category.id) ? (
           <Notice tone="warn">Its subcategories will be archived too.</Notice>
+        ) : null}
+        {affected > 0 ? (
+          <Notice tone="warn">
+            This recategorises {affected} transaction
+            {affected === 1 ? "" : "s"} across all users. Merchant rules move
+            with them, or are deleted if you leave them uncategorised. The
+            change is recorded in the activity log.
+          </Notice>
         ) : null}
         <Field label="Move existing transactions to" htmlFor="reassign">
           <Select id="reassign" name="reassignToId" defaultValue={fallback}>

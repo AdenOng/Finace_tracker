@@ -11,6 +11,7 @@ import {
   ingestMethod,
 } from "~/server/db/schema";
 import { reseedFromActivePack } from "~/server/db/seed/defaults";
+import { recordAudit } from "~/server/lib/audit";
 
 const institutionInput = z.object({
   name: z.string().trim().min(1).max(120),
@@ -97,7 +98,16 @@ export const adminInstitutionsRouter = createTRPCRouter({
           .values({ ...input, key, sortOrder: 1000 })
           .onConflictDoNothing({ target: institution.key })
           .returning();
-        if (row) return row;
+        if (row) {
+          await recordAudit(ctx.db, {
+            actorId: ctx.session.user.id,
+            action: "institution.created",
+            targetType: "institution",
+            targetId: row.id,
+            targetLabel: row.name,
+          });
+          return row;
+        }
       }
       throw new TRPCError({
         code: "CONFLICT",
@@ -115,6 +125,13 @@ export const adminInstitutionsRouter = createTRPCRouter({
         .where(eq(institution.id, id))
         .returning();
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "institution.updated",
+        targetType: "institution",
+        targetId: row.id,
+        targetLabel: row.name,
+      });
       return row;
     }),
 
@@ -127,7 +144,7 @@ export const adminInstitutionsRouter = createTRPCRouter({
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const [target] = await ctx.db
-        .select({ isSystem: institution.isSystem })
+        .select({ isSystem: institution.isSystem, name: institution.name })
         .from(institution)
         .where(eq(institution.id, input.id));
       if (!target) throw new TRPCError({ code: "NOT_FOUND" });
@@ -137,27 +154,46 @@ export const adminInstitutionsRouter = createTRPCRouter({
           eq(financialAccount.institutionId, input.id),
         )) +
         (await ctx.db.$count(document, eq(document.institutionId, input.id)));
+      const audit = (outcome: string) =>
+        recordAudit(ctx.db, {
+          actorId: ctx.session.user.id,
+          action: `institution.${outcome}`,
+          targetType: "institution",
+          targetId: input.id,
+          targetLabel: target.name,
+        });
       if (target.isSystem || inUse > 0) {
         await ctx.db
           .update(institution)
           .set({ archivedAt: new Date() })
           .where(eq(institution.id, input.id));
+        await audit("archived");
         return {
           outcome: "archived" as const,
           reason: target.isSystem ? ("default" as const) : ("in_use" as const),
         };
       }
       await ctx.db.delete(institution).where(eq(institution.id, input.id));
+      await audit("deleted");
       return { outcome: "deleted" as const };
     }),
 
   restore: adminProcedure
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.db
+      const [row] = await ctx.db
         .update(institution)
         .set({ archivedAt: null })
-        .where(eq(institution.id, input.id));
+        .where(eq(institution.id, input.id))
+        .returning({ id: institution.id, name: institution.name });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "institution.restored",
+        targetType: "institution",
+        targetId: row.id,
+        targetLabel: row.name,
+      });
     }),
 
   /** Brings back every default from the preset pack: re-inserts missing ones, un-archives archived ones. */
@@ -170,6 +206,12 @@ export const adminInstitutionsRouter = createTRPCRouter({
         and(eq(institution.isSystem, true), isNotNull(institution.archivedAt)),
       )
       .returning({ id: institution.id });
+    await recordAudit(ctx.db, {
+      actorId: ctx.session.user.id,
+      action: "institution.defaults_restored",
+      targetType: "institution",
+      details: { inserted: report.institutions, unarchived: restored.length },
+    });
     return { inserted: report.institutions, unarchived: restored.length };
   }),
 });

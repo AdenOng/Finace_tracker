@@ -16,7 +16,7 @@ export const timestamps = () => ({
 
 /**
  * Money is stored as NUMERIC and surfaced as strings to avoid float rounding. Use decimal.js for
- * arithmetic (see src/lib/money.ts).
+ * arithmetic (see src/server/modules/portfolio/valuation.ts and src/lib/format.ts).
  */
 export const money = (name: string) =>
   numeric(name, { precision: 20, scale: 4 });

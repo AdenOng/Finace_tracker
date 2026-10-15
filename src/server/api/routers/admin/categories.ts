@@ -11,6 +11,7 @@ import {
 } from "~/server/db/schema";
 import { reseedFromActivePack } from "~/server/db/seed/defaults";
 import type { Database } from "~/server/db";
+import { recordAudit } from "~/server/lib/audit";
 import {
   CategoryTreeError,
   validateCategoryParent,
@@ -100,6 +101,13 @@ export const adminCategoriesRouter = createTRPCRouter({
         .insert(category)
         .values({ ...input, key, sortOrder: 1000 })
         .returning();
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "category.created",
+        targetType: "category",
+        targetId: row?.id,
+        targetLabel: input.name,
+      });
       return row;
     }),
 
@@ -114,6 +122,13 @@ export const adminCategoriesRouter = createTRPCRouter({
         .where(eq(category.id, id))
         .returning();
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "category.updated",
+        targetType: "category",
+        targetId: row.id,
+        targetLabel: row.name,
+      });
       return row;
     }),
 
@@ -126,7 +141,7 @@ export const adminCategoriesRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       return ctx.db.transaction(async (tx) => {
         const [target] = await tx
-          .select({ id: category.id })
+          .select({ id: category.id, name: category.name })
           .from(category)
           .where(eq(category.id, input.id));
         if (!target) throw new TRPCError({ code: "NOT_FOUND" });
@@ -172,6 +187,18 @@ export const adminCategoriesRouter = createTRPCRouter({
           .update(category)
           .set({ archivedAt: new Date() })
           .where(inArray(category.id, ids));
+        await recordAudit(tx, {
+          actorId: ctx.session.user.id,
+          action: "category.archived",
+          targetType: "category",
+          targetId: target.id,
+          targetLabel: target.name,
+          details: {
+            archived: ids.length,
+            transactionsMoved: moved.length,
+            reassignToId: input.reassignToId,
+          },
+        });
         return { archived: ids.length, transactionsMoved: moved.length };
       });
     }),
@@ -191,6 +218,13 @@ export const adminCategoriesRouter = createTRPCRouter({
         .set({ archivedAt: null })
         .where(and(inArray(category.id, ids), isNotNull(category.archivedAt)))
         .returning({ id: category.id });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "category.restored",
+        targetType: "category",
+        targetId: input.id,
+        details: { restored: restored.length },
+      });
       return { restored: restored.length };
     }),
 
@@ -201,6 +235,12 @@ export const adminCategoriesRouter = createTRPCRouter({
       .set({ archivedAt: null })
       .where(and(eq(category.isSystem, true), isNotNull(category.archivedAt)))
       .returning({ id: category.id });
+    await recordAudit(ctx.db, {
+      actorId: ctx.session.user.id,
+      action: "category.defaults_restored",
+      targetType: "category",
+      details: { inserted: report.categories, unarchived: restored.length },
+    });
     return { inserted: report.categories, unarchived: restored.length };
   }),
 });

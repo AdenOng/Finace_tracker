@@ -149,6 +149,31 @@ export const invitation = pgTable(
 );
 
 /**
+ * Admin-issued password reset links. There is no outgoing email, so an admin hands the link over
+ * directly. Only the token hash is stored; a link works once.
+ */
+export const passwordReset = pgTable(
+  "password_reset",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdById: text("created_by_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("password_reset_user_idx").on(t.userId)],
+);
+
+/**
  * Single-row claim on the initial-admin slot. Signing up as the first user must win this row, so
  * concurrent first sign-ups cannot both become admin. See `claimInitialAdmin`.
  */

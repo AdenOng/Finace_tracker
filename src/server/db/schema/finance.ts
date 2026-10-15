@@ -1,6 +1,6 @@
 /**
  * Per-user financial records. Every row carries `ownerId`; queries must be filtered through the
- * access scope (src/server/lib/access.ts) so a future household view only has to widen the scope.
+ * account access scope (src/server/lib/access.ts), including explicit workspace account grants.
  */
 import { relations } from "drizzle-orm";
 import {
@@ -190,7 +190,7 @@ export const investmentTransaction = pgTable(
     currency: varchar("currency", { length: 3 }).notNull(),
     description: text("description"),
     source: recordSource("source").default("manual").notNull(),
-    /** Deterministic hash used for exact duplicate detection (see dedupe module). */
+    /** Deterministic hash for exact duplicate detection on import; manual entries use a random one. */
     fingerprint: text("fingerprint").notNull(),
     documentId: uuid("document_id").references(() => document.id, {
       onDelete: "set null",
@@ -207,6 +207,34 @@ export const investmentTransaction = pgTable(
 );
 
 export const categorySource = pgEnum("category_source", ["ai", "user", "rule"]);
+
+/** Verified statement periods. Transactions in these periods cannot change financially. */
+export const accountReconciliation = pgTable(
+  "account_reconciliation",
+  {
+    id: id(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => financialAccount.id, { onDelete: "cascade" }),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    openingBalance: money("opening_balance").notNull(),
+    closingBalance: money("closing_balance").notNull(),
+    ...timestamps(),
+  },
+  (t) => [
+    index("reconciliation_account_period_idx").on(
+      t.accountId,
+      t.currency,
+      t.startDate,
+      t.endDate,
+    ),
+  ],
+);
 
 /** Line-item spending / income from bank and card statements. Negative amount = money out. */
 export const transaction = pgTable(
@@ -233,8 +261,14 @@ export const transaction = pgTable(
     }),
     categorySource: categorySource("category_source"),
     isTransfer: boolean("is_transfer").default(false).notNull(),
+    cleared: boolean("cleared").default(false).notNull(),
+    reconciliationId: uuid("reconciliation_id").references(
+      () => accountReconciliation.id,
+      { onDelete: "set null" },
+    ),
     notes: text("notes"),
     source: recordSource("source").default("manual").notNull(),
+    /** Deterministic hash for exact duplicate detection on import; manual entries use a random one. */
     fingerprint: text("fingerprint").notNull(),
     documentId: uuid("document_id").references(() => document.id, {
       onDelete: "set null",

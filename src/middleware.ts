@@ -2,7 +2,14 @@ import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
 
 /** Routes reachable without a session. Everything else bounces to /sign-in. */
-const PUBLIC_PREFIXES = ["/sign-in", "/setup", "/invite/", "/two-factor"];
+const PUBLIC_PREFIXES = [
+  "/sign-in",
+  "/setup",
+  "/invite/",
+  "/workspace-invite/",
+  "/reset/",
+  "/two-factor",
+];
 
 /**
  * Optimistic check on the session cookie only — real validation happens in layouts and tRPC

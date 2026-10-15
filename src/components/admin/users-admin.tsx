@@ -4,19 +4,24 @@ import { Copy, Link2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ConfirmButton } from "~/components/ui/confirm-button";
+import { Drawer } from "~/components/ui/dialog";
 import { Field, Input, Select } from "~/components/ui/field";
 import { Notice, Section, Tag } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
-import { formatDate } from "~/lib/format";
-import { api } from "~/trpc/react";
+import { formatDate, formatDateTime } from "~/lib/format";
+import { api, type RouterOutputs } from "~/trpc/react";
 import { formText } from "~/lib/form";
+
+type AdminUser = RouterOutputs["admin"]["users"]["list"][number];
 
 export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
   const utils = api.useUtils();
   const [users] = api.admin.users.list.useSuspenseQuery();
   const [invites] = api.admin.users.invitations.useSuspenseQuery();
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [managingId, setManagingId] = useState<string | null>(null);
+  const managing = users.find((u) => u.id === managingId) ?? null;
 
   const refresh = () =>
     Promise.all([
@@ -24,21 +29,17 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
       utils.admin.users.invitations.invalidate(),
     ]);
   const setRole = api.admin.users.setRole.useMutation({ onSettled: refresh });
-  const setBanned = api.admin.users.setBanned.useMutation({
-    onSettled: refresh,
-  });
   const revoke = api.admin.users.revokeInvite.useMutation({
     onSettled: refresh,
   });
   const invite = api.admin.users.invite.useMutation({
     onSuccess: async (data) => {
       setInviteUrl(data.url);
-      setCopied(false);
       await refresh();
     },
   });
 
-  const mutationError = setRole.error ?? setBanned.error ?? revoke.error;
+  const mutationError = setRole.error ?? revoke.error;
 
   return (
     <div className="space-y-14">
@@ -84,22 +85,7 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
           </Notice>
         ) : null}
         {inviteUrl ? (
-          <div className="border-forest bg-wash mt-5 flex flex-wrap items-center gap-3 border-2 p-4">
-            <code className="min-w-0 flex-1 text-[13px] break-all">
-              {inviteUrl}
-            </code>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                void navigator.clipboard.writeText(inviteUrl);
-                setCopied(true);
-              }}
-            >
-              <Copy className="size-3.5" />
-              {copied ? "Copied" : "Copy link"}
-            </Button>
-          </div>
+          <CopyLink key={inviteUrl} url={inviteUrl} className="mt-5" />
         ) : null}
 
         {invites.length ? (
@@ -123,13 +109,14 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                     <Td>{inv.role === "admin" ? "Admin" : "Member"}</Td>
                     <Td className="text-ink-2">{formatDate(inv.expiresAt)}</Td>
                     <Td className="text-right">
-                      <Button
+                      <ConfirmButton
                         variant="ghost"
                         size="sm"
-                        onClick={() => revoke.mutate({ id: inv.id })}
+                        confirmLabel="Revoke?"
+                        onConfirm={() => revoke.mutate({ id: inv.id })}
                       >
                         Revoke
-                      </Button>
+                      </ConfirmButton>
                     </Td>
                   </Tr>
                 ))}
@@ -155,8 +142,11 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
               <Th>Email</Th>
               <Th>Two-step</Th>
               <Th>Joined</Th>
+              <Th>Last active</Th>
               <Th>Role</Th>
-              <Th className="text-right">Access</Th>
+              <Th className="text-right">
+                <span className="sr-only">Actions</span>
+              </Th>
             </tr>
           </thead>
           <tbody>
@@ -171,6 +161,11 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                         You
                       </Tag>
                     ) : null}
+                    {u.banned ? (
+                      <Tag tone="loss" className="ml-2">
+                        Disabled
+                      </Tag>
+                    ) : null}
                   </Td>
                   <Td>{u.email}</Td>
                   <Td>
@@ -181,6 +176,9 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                     )}
                   </Td>
                   <Td className="text-ink-2">{formatDate(u.createdAt)}</Td>
+                  <Td className="text-ink-2">
+                    {u.lastActiveAt ? formatDate(u.lastActiveAt) : "—"}
+                  </Td>
                   <Td>
                     <Select
                       aria-label={`Role for ${u.name}`}
@@ -201,13 +199,11 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                   <Td className="text-right">
                     {self ? null : (
                       <Button
-                        variant={u.banned ? "secondary" : "danger"}
+                        variant="secondary"
                         size="sm"
-                        onClick={() =>
-                          setBanned.mutate({ userId: u.id, banned: !u.banned })
-                        }
+                        onClick={() => setManagingId(u.id)}
                       >
-                        {u.banned ? "Re-enable" : "Disable"}
+                        Manage
                       </Button>
                     )}
                   </Td>
@@ -217,6 +213,255 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
           </tbody>
         </Table>
       </Section>
+
+      <UserDrawer
+        key={managingId ?? "closed"}
+        user={managing}
+        onClose={() => setManagingId(null)}
+        onChanged={refresh}
+      />
     </div>
+  );
+}
+
+function CopyLink({ url, className }: { url: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div
+      className={`border-forest bg-wash flex flex-wrap items-center gap-3 border-2 p-4 ${className ?? ""}`}
+    >
+      <code className="min-w-0 flex-1 text-[13px] break-all">{url}</code>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          void navigator.clipboard.writeText(url);
+          setCopied(true);
+        }}
+      >
+        <Copy className="size-3.5" />
+        {copied ? "Copied" : "Copy link"}
+      </Button>
+    </div>
+  );
+}
+
+/** Short "Chrome on macOS" label; the raw string is kept in the tooltip. */
+function describeUserAgent(userAgent: string | null) {
+  if (!userAgent) return "Unknown device";
+  const browser =
+    [
+      ["Edg/", "Edge"],
+      ["Firefox/", "Firefox"],
+      ["Chrome/", "Chrome"],
+      ["Safari/", "Safari"],
+    ].find(([needle]) => userAgent.includes(needle!))?.[1] ?? "Browser";
+  const os =
+    [
+      ["iPhone", "iPhone"],
+      ["iPad", "iPad"],
+      ["Android", "Android"],
+      ["Windows", "Windows"],
+      ["Mac OS", "macOS"],
+      ["Linux", "Linux"],
+    ].find(([needle]) => userAgent.includes(needle!))?.[1] ?? null;
+  return os ? `${browser} on ${os}` : browser;
+}
+
+function UserDrawer({
+  user,
+  onClose,
+  onChanged,
+}: {
+  user: AdminUser | null;
+  onClose: () => void;
+  onChanged: () => Promise<unknown>;
+}) {
+  const userId = user?.id ?? "";
+  const utils = api.useUtils();
+  const sessions = api.admin.users.sessions.useQuery(
+    { userId },
+    { enabled: !!user },
+  );
+  const [notice, setNotice] = useState<string | null>(null);
+  const [reset, setReset] = useState<{ url: string; expiresAt: Date } | null>(
+    null,
+  );
+  const afterChange = (message: string) => async () => {
+    setNotice(message);
+    await Promise.all([
+      onChanged(),
+      utils.admin.users.sessions.invalidate({ userId }),
+    ]);
+  };
+
+  const revokeSessions = api.admin.users.revokeSessions.useMutation({
+    onSuccess: (r) =>
+      afterChange(
+        `Signed out of ${r.revoked} session${r.revoked === 1 ? "" : "s"}.`,
+      )(),
+  });
+  const resetTwoFactor = api.admin.users.resetTwoFactor.useMutation({
+    onSuccess: afterChange(
+      "Two-step removed and signed out. They set it up again at next sign-in.",
+    ),
+  });
+  const createReset = api.admin.users.createPasswordReset.useMutation({
+    onSuccess: async (data) => {
+      setReset(data);
+      await afterChange("Reset link created. Older links no longer work.")();
+    },
+  });
+  const setBanned = api.admin.users.setBanned.useMutation({
+    onSuccess: (_, input) =>
+      afterChange(
+        input.banned
+          ? "Account disabled and signed out."
+          : "Account re-enabled.",
+      )(),
+  });
+  const error =
+    revokeSessions.error ??
+    resetTwoFactor.error ??
+    createReset.error ??
+    setBanned.error;
+
+  return (
+    <Drawer
+      open={user !== null}
+      onClose={onClose}
+      title={user?.name ?? ""}
+      description={user?.email}
+    >
+      {user ? (
+        <div className="space-y-10">
+          {error ? <Notice tone="error">{error.message}</Notice> : null}
+          {notice ? <Notice tone="success">{notice}</Notice> : null}
+
+          <Section
+            title="Sessions"
+            description="Devices signed in to this account."
+            actions={
+              sessions.data?.length ? (
+                <ConfirmButton
+                  variant="danger"
+                  size="sm"
+                  confirmLabel="Sign out all?"
+                  loading={revokeSessions.isPending}
+                  onConfirm={() => revokeSessions.mutate({ userId })}
+                >
+                  Sign out everywhere
+                </ConfirmButton>
+              ) : null
+            }
+          >
+            {sessions.isLoading ? (
+              <p className="text-ink-3 text-sm">Loading…</p>
+            ) : sessions.data?.length ? (
+              <ul className="border-ink border-t-2">
+                {sessions.data.map((s) => (
+                  <li key={s.id} className="border-line border-b py-3 text-sm">
+                    <p
+                      className="font-semibold"
+                      title={s.userAgent ?? undefined}
+                    >
+                      {describeUserAgent(s.userAgent)}
+                    </p>
+                    <p className="text-ink-2 text-[13px]">
+                      {s.ipAddress ?? "Unknown IP"} · last active{" "}
+                      {formatDateTime(s.lastActiveAt)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-ink-3 text-sm">Not signed in anywhere.</p>
+            )}
+          </Section>
+
+          <Section
+            title="Two-step verification"
+            description={
+              user.twoFactorEnabled
+                ? "For someone who lost their authenticator. Removes it and signs them out; they enrol again at next sign-in."
+                : "Not set up."
+            }
+            actions={
+              user.twoFactorEnabled ? (
+                <ConfirmButton
+                  variant="danger"
+                  size="sm"
+                  confirmLabel="Reset two-step?"
+                  loading={resetTwoFactor.isPending}
+                  onConfirm={() => resetTwoFactor.mutate({ userId })}
+                >
+                  Reset two-step
+                </ConfirmButton>
+              ) : null
+            }
+          >
+            {null}
+          </Section>
+
+          <Section
+            title="Password"
+            description="Create a single-use reset link valid for 24 hours and hand it over yourself. Using it signs them out everywhere."
+            actions={
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={createReset.isPending}
+                onClick={() => createReset.mutate({ userId })}
+              >
+                <Link2 className="size-3.5" />
+                Create reset link
+              </Button>
+            }
+          >
+            {reset ? (
+              <>
+                <CopyLink url={reset.url} />
+                <p className="text-ink-3 mt-2 text-[13px]">
+                  Shown once. Expires {formatDateTime(reset.expiresAt)}.
+                </p>
+              </>
+            ) : null}
+          </Section>
+
+          <Section
+            title="Access"
+            description={
+              user.banned
+                ? "This account is disabled and cannot sign in."
+                : "Disabling signs them out and blocks sign-in. Their data is kept."
+            }
+            actions={
+              user.banned ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={setBanned.isPending}
+                  onClick={() => setBanned.mutate({ userId, banned: false })}
+                >
+                  Re-enable
+                </Button>
+              ) : (
+                <ConfirmButton
+                  variant="danger"
+                  size="sm"
+                  confirmLabel="Disable account?"
+                  loading={setBanned.isPending}
+                  onConfirm={() => setBanned.mutate({ userId, banned: true })}
+                >
+                  Disable
+                </ConfirmButton>
+              )
+            }
+          >
+            {null}
+          </Section>
+        </div>
+      ) : null}
+    </Drawer>
   );
 }

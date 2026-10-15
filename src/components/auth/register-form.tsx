@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -13,13 +15,16 @@ import { formText } from "~/lib/form";
 export function RegisterForm({
   lockedEmail,
   inviteToken,
+  workspaceInviteToken,
   submitLabel,
 }: {
   lockedEmail?: string;
   inviteToken?: string;
+  workspaceInviteToken?: string;
   submitLabel: string;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -38,10 +43,15 @@ export function RegisterForm({
         email: lockedEmail ?? formText(form, "email"),
         password,
       },
-      inviteToken ? { headers: { "x-invite-token": inviteToken } } : undefined,
+      workspaceInviteToken
+        ? { headers: { "x-workspace-invite-token": workspaceInviteToken } }
+        : inviteToken
+          ? { headers: { "x-invite-token": inviteToken } }
+          : undefined,
     );
     setPending(false);
     if (error) return setError(error.message ?? "Could not create the account");
+    queryClient.clear();
     router.replace("/settings?welcome=1");
     router.refresh();
   }

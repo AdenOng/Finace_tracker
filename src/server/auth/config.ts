@@ -11,6 +11,11 @@ import { eq } from "drizzle-orm";
 import { env } from "~/env";
 import { db } from "~/server/db";
 import * as schema from "~/server/db/schema";
+import {
+  acceptWorkspaceInvitation,
+  findPendingWorkspaceInvitation,
+  WORKSPACE_INVITE_HEADER,
+} from "~/server/modules/workspaces/invitations";
 import { claimInitialAdmin } from "./bootstrap";
 import { findPendingInvitation, INVITE_TOKEN_HEADER } from "./invitations";
 
@@ -63,6 +68,20 @@ export const auth = betterAuth({
           if (existingUsers === 0 && (await claimInitialAdmin(db))) {
             return { data: { ...user, role: "admin" } };
           }
+          const workspaceToken = ctx?.headers?.get(WORKSPACE_INVITE_HEADER);
+          if (workspaceToken) {
+            const invite = await findPendingWorkspaceInvitation(
+              db,
+              workspaceToken,
+            );
+            if (invite?.email.toLowerCase() !== user.email.toLowerCase()) {
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "This workspace invitation no longer works for this email.",
+              });
+            }
+            return { data: { ...user, role: "user" } };
+          }
           const token = ctx?.headers?.get(INVITE_TOKEN_HEADER);
           const invite = token ? await findPendingInvitation(db, token) : null;
           if (invite?.email.toLowerCase() !== user.email.toLowerCase()) {
@@ -74,6 +93,9 @@ export const auth = betterAuth({
         },
         after: async (user, ctx) => {
           await db.insert(schema.userSettings).values({ userId: user.id });
+          const workspaceToken = ctx?.headers?.get(WORKSPACE_INVITE_HEADER);
+          if (workspaceToken)
+            await acceptWorkspaceInvitation(db, workspaceToken, user);
           const token = ctx?.headers?.get(INVITE_TOKEN_HEADER);
           const invite = token ? await findPendingInvitation(db, token) : null;
           if (invite) {

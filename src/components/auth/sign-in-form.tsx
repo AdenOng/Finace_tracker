@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+
 import { KeyRound } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -13,6 +15,7 @@ import { safeNextPath } from "~/lib/navigation";
 
 export function SignInForm() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const next = safeNextPath(useSearchParams().get("next"));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"password" | "passkey" | null>(null);
@@ -30,6 +33,7 @@ export function SignInForm() {
     if (error) return setError(error.message ?? "Sign-in failed");
     // With 2FA enabled the client plugin redirects to /two-factor itself.
     if (data && !("twoFactorRedirect" in data && data.twoFactorRedirect)) {
+      queryClient.clear();
       router.replace(next);
       router.refresh();
     }
@@ -42,6 +46,7 @@ export function SignInForm() {
     setPending(null);
     if (result?.error)
       return setError(result.error.message ?? "Passkey sign-in failed");
+    queryClient.clear();
     router.replace(next);
     router.refresh();
   }

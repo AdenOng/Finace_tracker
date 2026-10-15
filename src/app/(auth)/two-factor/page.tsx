@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -8,10 +10,12 @@ import { Button } from "~/components/ui/button";
 import { Checkbox, Field, Input } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
 import { authClient } from "~/server/auth/client";
+import { safeNextPath } from "~/lib/navigation";
 import { formText } from "~/lib/form";
 
 export default function TwoFactorPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [mode, setMode] = useState<"totp" | "backup">("totp");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -29,7 +33,10 @@ export default function TwoFactorPage() {
         : await authClient.twoFactor.verifyBackupCode({ code, trustDevice });
     setPending(false);
     if (error) return setError(error.message ?? "That code did not work");
-    router.replace("/");
+    queryClient.clear();
+    router.replace(
+      safeNextPath(new URL(window.location.href).searchParams.get("next")),
+    );
     router.refresh();
   }
 

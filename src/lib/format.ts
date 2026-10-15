@@ -51,14 +51,62 @@ export function formatMoney(
   return `${sign}${symbol}${separator}${formatted}`;
 }
 
+/** Share counts and other quantities: grouped, with as many decimals as recorded. */
+export function formatQuantity(quantity: string) {
+  const value = new Decimal(quantity);
+  const [integer, fraction] = value.abs().toFixed().split(".");
+  return (
+    (value.isNegative() && !value.isZero() ? "−" : "") +
+    integerFormatter.format(BigInt(integer!)) +
+    (fraction ? `.${fraction}` : "")
+  );
+}
+
 const dateFormatter = new Intl.DateTimeFormat("en-SG", {
   day: "numeric",
   month: "short",
   year: "numeric",
 });
 
+const calendarDateFormatter = new Intl.DateTimeFormat("en-SG", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/** Dates and timestamps; a bare YYYY-MM-DD is a calendar day and never shifts with the time zone. */
 export function formatDate(value: Date | string) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return calendarDateFormatter.format(new Date(`${value}T00:00:00Z`));
+  }
   return dateFormatter.format(
     typeof value === "string" ? new Date(value) : value,
   );
+}
+
+const dateTimeFormatter = new Intl.DateTimeFormat("en-SG", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** Timestamps where the time of day matters, e.g. audit entries and sessions. */
+export function formatDateTime(value: Date | string) {
+  return dateTimeFormatter.format(
+    typeof value === "string" ? new Date(value) : value,
+  );
+}
+
+const monthFormatter = new Intl.DateTimeFormat("en-SG", {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/** "2026-10" → "October 2026" */
+export function formatMonth(month: string) {
+  return monthFormatter.format(new Date(`${month}-01T00:00:00Z`));
 }

@@ -1,0 +1,1822 @@
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test";
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle } from "drizzle-orm/pglite";
+import { eq } from "drizzle-orm";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createHTTPServer } from "@trpc/server/adapters/standalone";
+
+import { api, TRPCReactProvider } from "../src/trpc/react";
+
+import type { Database } from "../src/server/db";
+import * as schema from "../src/server/db/schema";
+import {
+  convertAmounts,
+  ratesFromRows,
+  sumByCurrency,
+  valuePosition,
+} from "../src/server/modules/portfolio/valuation";
+
+const engine = new PGlite();
+const db = drizzle(engine, { schema });
+await mock.module("server-only", () => ({}));
+await mock.module("~/server/db", () => ({ db }));
+await mock.module("~/server/auth/config", () => ({
+  auth: { api: { getSession: async () => null } },
+}));
+const { accountsRouter } = await import("../src/server/api/routers/accounts");
+const { portfolioRouter } = await import("../src/server/api/routers/portfolio");
+const { spendingRouter } = await import("../src/server/api/routers/spending");
+const { merchantRulesRouter } =
+  await import("../src/server/api/routers/merchant-rules");
+const { reconciliationRouter } =
+  await import("../src/server/api/routers/reconciliation");
+const { workspacesRouter } =
+  await import("../src/server/api/routers/workspaces");
+const { findPendingWorkspaceInvitation, acceptWorkspaceInvitation } =
+  await import("../src/server/modules/workspaces/invitations");
+const { resolveAccessScope, resolveWorkspaceScope } =
+  await import("../src/server/lib/access");
+const { latestHoldings } =
+  await import("../src/server/modules/portfolio/holdings");
+const { createTRPCRouter } = await import("../src/server/api/trpc");
+
+function contextFor(id: string) {
+  return {
+    db: db as unknown as Database,
+    headers: new Headers(),
+    session: {
+      session: {
+        id: `session-${id}`,
+        userId: id,
+        token: `synthetic-token-${id}`,
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ipAddress: null,
+        userAgent: null,
+        impersonatedBy: null,
+      },
+      user: {
+        id,
+        name: `Example ${id}`,
+        email: `${id}@example.com`,
+        emailVerified: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        image: null,
+        role: "user",
+        banned: false,
+        banReason: null,
+        banExpires: null,
+        twoFactorEnabled: true,
+      },
+    },
+  };
+}
+
+const callers = (id: string) => ({
+  workspaces: workspacesRouter.createCaller(contextFor(id)),
+  accounts: accountsRouter.createCaller(contextFor(id)),
+  portfolio: portfolioRouter.createCaller(contextFor(id)),
+  spending: spendingRouter.createCaller(contextFor(id)),
+  rules: merchantRulesRouter.createCaller(contextFor(id)),
+  reconciliation: reconciliationRouter.createCaller(contextFor(id)),
+});
+const alice = callers("alice");
+const bob = callers("bob");
+const charlie = callers("charlie");
+
+let groceriesId: string;
+
+beforeAll(async () => {
+  const journal = (await Bun.file(
+    new URL("../drizzle/meta/_journal.json", import.meta.url),
+  ).json()) as { entries: { tag: string }[] };
+  for (const { tag } of journal.entries) {
+    await engine.exec(
+      await Bun.file(new URL(`../drizzle/${tag}.sql`, import.meta.url)).text(),
+    );
+  }
+  await db.insert(schema.user).values([
+    { id: "alice", name: "Example Alice", email: "alice@example.com" },
+    { id: "bob", name: "Example Bob", email: "bob@example.com" },
+    { id: "charlie", name: "Example Charlie", email: "charlie@example.com" },
+  ]);
+  await db.insert(schema.currency).values([
+    { code: "SGD", name: "Singapore dollar", symbol: "S$" },
+    { code: "USD", name: "US dollar", symbol: "US$" },
+  ]);
+  const [groceries] = await db
+    .insert(schema.category)
+    .values({ key: "groceries", name: "Groceries" })
+    .returning();
+  groceriesId = groceries!.id;
+}, 30_000);
+beforeEach(async () => {
+  await engine.exec(
+    "TRUNCATE TABLE workspace, audit_log, financial_account, security, fx_rate, user_settings, merchant_rule CASCADE",
+  );
+});
+afterAll(async () => {
+  await engine.close();
+});
+
+const bank = {
+  name: "Everyday",
+  type: "checking" as const,
+  institutionId: null,
+  currency: "SGD",
+  last4: "",
+  notes: "",
+};
+const broker = { ...bank, name: "Broker", type: "brokerage" as const };
+
+describe("account access", () => {
+  test("allows type changes only before any financial history exists", async () => {
+    const empty = await alice.accounts.create(bank);
+    await alice.accounts.update({ ...broker, id: empty.id });
+    expect((await alice.accounts.get(empty)).type).toBe("brokerage");
+
+    const withSnapshot = await alice.accounts.create(broker);
+    await alice.portfolio.recordSnapshot({
+      accountId: withSnapshot.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [],
+    });
+    const withSpending = await alice.accounts.create(bank);
+    await spendingEntry(withSpending.id);
+    const withInvestment = await alice.accounts.create(broker);
+    await db.insert(schema.investmentTransaction).values({
+      ownerId: "alice",
+      accountId: withInvestment.id,
+      type: "other",
+      tradeDate: "2026-10-01",
+      amount: "1",
+      currency: "SGD",
+      fingerprint: "test-investment",
+    });
+    for (const [account, original, changed] of [
+      [withSnapshot, broker, bank],
+      [withSpending, bank, broker],
+      [withInvestment, broker, bank],
+    ] as const) {
+      await expect(
+        alice.accounts.update({ ...changed, id: account.id }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      await alice.accounts.update({
+        ...original,
+        id: account.id,
+        notes: "Keep history",
+      });
+      expect(await alice.accounts.remove(account)).toEqual({
+        outcome: "archived",
+      });
+    }
+  });
+  test("other users can neither see nor change an account", async () => {
+    const { id } = await alice.accounts.create(bank);
+    expect(await bob.accounts.list()).toHaveLength(0);
+    await expect(bob.accounts.get({ id })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      bob.accounts.update({ ...bank, id, name: "Taken" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(bob.accounts.remove({ id })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      bob.spending.create({
+        accountId: id,
+        postedDate: "2026-10-01",
+        description: "Not mine",
+        merchant: null,
+        amount: "-1",
+        currency: null,
+        categoryId: null,
+        isTransfer: false,
+        notes: null,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      bob.portfolio.recordSnapshot({
+        accountId: id,
+        asOf: "2026-10-01",
+        positions: [],
+        cash: [{ currency: "SGD", amount: "1" }],
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await alice.accounts.get({ id })).name).toBe("Everyday");
+  });
+
+  test("an account with history is archived, an empty one deleted", async () => {
+    const empty = await alice.accounts.create(bank);
+    expect(await alice.accounts.remove(empty)).toEqual({ outcome: "deleted" });
+    const used = await alice.accounts.create(bank);
+    await alice.portfolio.recordSnapshot({
+      accountId: used.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "10" }],
+    });
+    expect(await alice.accounts.remove(used)).toEqual({ outcome: "archived" });
+    const [row] = await alice.accounts.list();
+    expect(row?.archivedAt).toBeInstanceOf(Date);
+  });
+
+  test("rejects unknown currencies", async () => {
+    await expect(
+      alice.accounts.create({ ...bank, currency: "XYZ" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("portfolio", () => {
+  test("reports unpriced holdings on each account and rejects archived snapshot writes", async () => {
+    const account = await alice.accounts.create(broker);
+    const entry = {
+      accountId: account.id,
+      asOf: "2026-10-01",
+      positions: [
+        {
+          symbol: "UNPRICED",
+          exchange: "",
+          name: "",
+          assetClass: "stock" as const,
+          currency: "SGD",
+          quantity: "2",
+          averageCost: null,
+          price: null,
+        },
+      ],
+      cash: [],
+    };
+    await alice.portfolio.recordSnapshot(entry);
+    expect((await alice.portfolio.netWorth()).accounts[0]).toMatchObject({
+      unpriced: 1,
+      total: null,
+      totals: [],
+    });
+    await alice.accounts.remove(account);
+    await expect(alice.portfolio.recordSnapshot(entry)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+  test("values the latest snapshot and converts with known FX rates", async () => {
+    const savings = await alice.accounts.create(bank);
+    const brokerage = await alice.accounts.create(broker);
+    await alice.portfolio.recordSnapshot({
+      accountId: savings.id,
+      asOf: "2026-09-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: savings.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "1500.25" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: brokerage.id,
+      asOf: "2026-10-02",
+      positions: [
+        {
+          symbol: "aapl",
+          exchange: "xnas",
+          name: "Apple",
+          assetClass: "stock",
+          currency: "USD",
+          quantity: "10",
+          averageCost: "150",
+          price: "200.5",
+        },
+        {
+          symbol: "NOPRICE",
+          exchange: "",
+          name: "",
+          assetClass: "fund",
+          currency: "USD",
+          quantity: "3",
+          averageCost: null,
+          price: null,
+        },
+      ],
+      cash: [{ currency: "USD", amount: "50" }],
+    });
+
+    const before = await alice.portfolio.netWorth();
+    expect(before.currency).toBe("SGD");
+    expect(before.total).toBe("1500.25");
+    expect(before.unconverted).toEqual([{ currency: "USD", amount: "2055" }]);
+    expect(before.unpriced).toBe(1);
+    expect(before.asOf).toBe("2026-10-02");
+
+    await db.insert(schema.fxRate).values([
+      {
+        date: "2026-09-01",
+        base: "USD",
+        quote: "SGD",
+        rate: "1.2",
+        source: "test",
+      },
+      {
+        date: "2026-10-01",
+        base: "SGD",
+        quote: "USD",
+        rate: "0.8",
+        source: "test",
+      },
+    ]);
+    const after = await alice.portfolio.netWorth();
+    // 1500.25 + 2055 / 0.8
+    expect(after.total).toBe("4069");
+    expect(after.unconverted).toEqual([]);
+    expect(after.allocation.map((a) => [a.assetClass, a.total])).toEqual([
+      ["stock", "2506.25"],
+      ["cash", "1562.75"],
+    ]);
+
+    const detail = await alice.accounts.get(brokerage);
+    expect(detail.holdings?.positions.map((p) => p.symbol)).toEqual([
+      "AAPL",
+      "NOPRICE",
+    ]);
+    expect(await bob.portfolio.netWorth()).toMatchObject({
+      total: null,
+      accounts: [],
+    });
+  });
+
+  test("re-entering a date replaces the manual snapshot", async () => {
+    const savings = await alice.accounts.create(bank);
+    const entry = {
+      accountId: savings.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "10" }],
+    };
+    expect((await alice.portfolio.recordSnapshot(entry)).replaced).toBe(false);
+    const again = await alice.portfolio.recordSnapshot({
+      ...entry,
+      cash: [{ currency: "SGD", amount: "20" }],
+    });
+    expect(again.replaced).toBe(true);
+    expect((await alice.accounts.get(savings)).holdings?.totals).toEqual([
+      { currency: "SGD", amount: "20" },
+    ]);
+  });
+
+  test("simultaneous saves leave one manual snapshot for the date", async () => {
+    const account = await alice.accounts.create(bank);
+    const saved = await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        alice.portfolio.recordSnapshot({
+          accountId: account.id,
+          asOf: "2026-10-01",
+          positions: [],
+          cash: [{ currency: "SGD", amount: String(i + 1) }],
+        }),
+      ),
+    );
+    expect(saved.filter((s) => !s.replaced)).toHaveLength(1);
+    const snapshots = await db
+      .select()
+      .from(schema.accountSnapshot)
+      .where(eq(schema.accountSnapshot.accountId, account.id));
+    expect(snapshots).toHaveLength(1);
+    expect((await alice.accounts.get(account)).holdings?.cash).toHaveLength(1);
+  });
+
+  test("cash accounts cannot hold securities and listings keep their currency", async () => {
+    const savings = await alice.accounts.create(bank);
+    const position = {
+      symbol: "D05",
+      exchange: "XSES",
+      name: "",
+      assetClass: "stock" as const,
+      currency: "SGD",
+      quantity: "100",
+      averageCost: null,
+      price: "40",
+    };
+    await expect(
+      alice.portfolio.recordSnapshot({
+        accountId: savings.id,
+        asOf: "2026-10-01",
+        positions: [position],
+        cash: [],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const brokerage = await alice.accounts.create(broker);
+    await alice.portfolio.recordSnapshot({
+      accountId: brokerage.id,
+      asOf: "2026-10-01",
+      positions: [position],
+      cash: [],
+    });
+    await expect(
+      alice.portfolio.recordSnapshot({
+        accountId: brokerage.id,
+        asOf: "2026-10-02",
+        positions: [{ ...position, currency: "USD" }],
+        cash: [],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("spending", () => {
+  test("keeps an archived category and its provenance on unrelated edits", async () => {
+    const account = await alice.accounts.create(bank);
+    const [archived] = await db
+      .insert(schema.category)
+      .values({
+        key: "archive-regression",
+        name: "Old category",
+      })
+      .returning();
+    await alice.rules.create({
+      pattern: "supermarket",
+      categoryId: archived!.id,
+    });
+    await spendingEntry(account.id);
+    const [row] = await alice.spending.list(october);
+    await db
+      .update(schema.category)
+      .set({ archivedAt: new Date() })
+      .where(eq(schema.category.id, archived!.id));
+    await alice.spending.update({ ...row!, notes: "Only notes changed" });
+    expect((await alice.spending.list(october))[0]).toMatchObject({
+      categoryId: archived!.id,
+      categorySource: "rule",
+      notes: "Only notes changed",
+    });
+    await expect(
+      spendingEntry(account.id, { categoryId: archived!.id }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await alice.spending.update({ ...row!, categoryId: null });
+    expect((await alice.spending.list(october))[0]).toMatchObject({
+      categoryId: null,
+      categorySource: "user",
+    });
+    await expect(alice.spending.update({ ...row! })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+  });
+  test("lists a month and summarises it without transfers", async () => {
+    const account = await alice.accounts.create(bank);
+    const base = {
+      accountId: account.id,
+      merchant: null,
+      currency: null,
+      categoryId: null,
+      isTransfer: false,
+      notes: null,
+    };
+    await alice.spending.create({
+      ...base,
+      postedDate: "2026-10-03",
+      description: "Supermarket",
+      amount: "-45.10",
+      categoryId: groceriesId,
+    });
+    await alice.spending.create({
+      ...base,
+      postedDate: "2026-10-04",
+      description: "Market",
+      amount: "-4.90",
+      categoryId: groceriesId,
+    });
+    await alice.spending.create({
+      ...base,
+      postedDate: "2026-10-05",
+      description: "Card bill",
+      amount: "-500",
+      isTransfer: true,
+    });
+    await alice.spending.create({
+      ...base,
+      postedDate: "2026-09-30",
+      description: "Last month",
+      amount: "-1",
+    });
+
+    const rows = await alice.spending.list({
+      month: "2026-10",
+      accountId: null,
+      categoryId: null,
+    });
+    expect(rows.map((r) => r.description)).toEqual([
+      "Card bill",
+      "Market",
+      "Supermarket",
+    ]);
+    expect(rows[0]?.currency).toBe("SGD");
+
+    const summary = await alice.spending.summary({ month: "2026-10" });
+    expect(summary).toHaveLength(1);
+    expect(summary[0]).toMatchObject({
+      categoryName: "Groceries",
+      spent: "50.0000",
+      received: "0",
+      count: 2,
+    });
+
+    expect(
+      await bob.spending.list({
+        month: "2026-10",
+        accountId: null,
+        categoryId: null,
+      }),
+    ).toHaveLength(0);
+    await expect(
+      bob.spending.remove({ id: rows[0]!.id }),
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      alice.spending.create({
+        ...base,
+        postedDate: "2026-10-05",
+        description: "Zero",
+        amount: "0.00",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  test("transactions in an archived account stay editable but cannot be added", async () => {
+    const account = await alice.accounts.create(bank);
+    const entry = {
+      accountId: account.id,
+      postedDate: "2026-10-03",
+      description: "Coffee",
+      merchant: null,
+      amount: "-5",
+      currency: null,
+      categoryId: null,
+      isTransfer: false,
+      notes: null,
+    };
+    const { id } = await alice.spending.create(entry);
+    await alice.accounts.remove(account);
+    await alice.spending.update({ ...entry, id, categoryId: groceriesId });
+    await expect(alice.spending.create(entry)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+});
+
+describe("valuation", () => {
+  test("prefers a live quote, then the statement value, then quantity × price", () => {
+    const base = {
+      quantity: "2",
+      currency: "USD",
+      statementPrice: "10",
+      statementValue: "21",
+    };
+    expect(
+      valuePosition({ ...base, quote: { price: "11.5", currency: "USD" } }),
+    ).toEqual({ amount: "23", currency: "USD" });
+    expect(valuePosition({ ...base, quote: null })).toEqual({
+      amount: "21",
+      currency: "USD",
+    });
+    expect(
+      valuePosition({ ...base, statementValue: null, quote: null }),
+    ).toEqual({ amount: "20", currency: "USD" });
+    expect(
+      valuePosition({
+        ...base,
+        statementPrice: null,
+        statementValue: null,
+        quote: null,
+      }),
+    ).toBeNull();
+  });
+
+  test("adds decimals exactly and reports amounts without a rate", () => {
+    expect(
+      sumByCurrency([
+        { amount: "0.1", currency: "USD" },
+        { amount: "0.2", currency: "USD" },
+        { amount: "1", currency: "HKD" },
+      ]),
+    ).toEqual([
+      { amount: "1", currency: "HKD" },
+      { amount: "0.3", currency: "USD" },
+    ]);
+    const rates = ratesFromRows(
+      [
+        { date: "2026-01-01", base: "USD", quote: "SGD", rate: "1.3" },
+        { date: "2026-02-01", base: "USD", quote: "SGD", rate: "1.35" },
+      ],
+      "SGD",
+    );
+    expect(
+      convertAmounts(
+        [
+          { amount: "10", currency: "USD" },
+          { amount: "5", currency: "SGD" },
+          { amount: "7", currency: "HKD" },
+        ],
+        "SGD",
+        rates,
+      ),
+    ).toEqual({
+      total: "18.5",
+      unconverted: [{ amount: "7", currency: "HKD" }],
+    });
+  });
+});
+
+async function spendingEntry(
+  accountId: string,
+  overrides: Partial<Parameters<typeof alice.spending.create>[0]> = {},
+) {
+  return alice.spending.create({
+    accountId,
+    postedDate: "2026-10-03",
+    description: "Supermarket",
+    merchant: null,
+    amount: "-0.1",
+    currency: "SGD",
+    categoryId: null,
+    isTransfer: false,
+    notes: null,
+    ...overrides,
+  });
+}
+const october = { month: "2026-10", accountId: null, categoryId: null };
+
+describe("merchant rules", () => {
+  test("previews 500 IDs through the production HTTP client and applies multiple categories", async () => {
+    const account = await alice.accounts.create(bank);
+    const [other] = await db
+      .insert(schema.category)
+      .values({
+        key: "bulk-rule-category",
+        name: "Other bulk category",
+      })
+      .returning();
+    await alice.rules.create({ pattern: "coffee", categoryId: groceriesId });
+    await alice.rules.create({ pattern: "books", categoryId: other!.id });
+    const rows = await db
+      .insert(schema.transaction)
+      .values(
+        Array.from({ length: 500 }, (_, i) => ({
+          ownerId: "alice",
+          accountId: account.id,
+          postedDate: "2026-10-03",
+          description: i % 2 === 0 ? "Coffee" : "Books",
+          amount: "-1",
+          currency: "SGD",
+          source: "manual" as const,
+          fingerprint: `bulk-http-${i}`,
+        })),
+      )
+      .returning({ id: schema.transaction.id });
+    const ids = rows.map((r) => r.id);
+    // Exercise the provider's real transport, rather than bypassing HTTP with a caller.
+    const server = createHTTPServer({
+      basePath: "/api/trpc/",
+      router: createTRPCRouter({ merchantRules: merchantRulesRouter }),
+      createContext: () => contextFor("alice"),
+      allowMethodOverride: true,
+    });
+    const requests: { method: string | undefined; url: string | undefined }[] =
+      [];
+    server.on("request", (req) =>
+      requests.push({ method: req.method, url: req.url }),
+    );
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Missing test port");
+    const previousPort = process.env.PORT;
+    process.env.PORT = String(address.port);
+    let client: ReturnType<typeof api.useUtils>["client"] | undefined;
+    function CaptureClient() {
+      client = api.useUtils().client;
+      return null;
+    }
+    try {
+      renderToStaticMarkup(
+        createElement(TRPCReactProvider, null, createElement(CaptureClient)),
+      );
+      const preview = await client!.merchantRules.preview.query({ ids });
+      expect(preview.changes).toHaveLength(500);
+      expect(requests[0]?.method).toBe("POST");
+      expect(requests[0]?.url?.length).toBeLessThan(1000);
+      expect(
+        await client!.merchantRules.applyRules.mutate({
+          ids,
+          revision: preview.revision,
+        }),
+      ).toEqual({ count: 500 });
+      const saved = await alice.spending.list(october);
+      expect(
+        saved.filter(
+          (r) => r.categoryId === groceriesId && r.categorySource === "rule",
+        ),
+      ).toHaveLength(250);
+      expect(
+        saved.filter(
+          (r) => r.categoryId === other!.id && r.categorySource === "rule",
+        ),
+      ).toHaveLength(250);
+    } finally {
+      process.env.PORT = previousPort;
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+    }
+  });
+  test("uses normalized, literal contains matches and gives specific rules precedence", async () => {
+    const account = await alice.accounts.create(bank);
+    const [other] = await db
+      .insert(schema.category)
+      .values({ key: "other-rule-test", name: "Other" })
+      .returning();
+    await alice.rules.create({ pattern: "MARKET", categoryId: other!.id });
+    const rule = await alice.rules.create({
+      pattern: "  Supermarket   online  ",
+      categoryId: groceriesId,
+    });
+    await spendingEntry(account.id, {
+      description: "CARD SUPERMARKET ONLINE 123",
+    });
+    const [row] = await alice.spending.list(october);
+    expect(row).toMatchObject({
+      categoryId: groceriesId,
+      categorySource: "rule",
+    });
+    expect((await alice.rules.list())[0]?.pattern).toBe("supermarket online");
+    expect(await bob.rules.list()).toHaveLength(0);
+    await expect(
+      bob.rules.update({ ...rule, pattern: "taken", categoryId: groceriesId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(bob.rules.remove(rule)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    // SQL wildcard characters are literal text, never patterns.
+    await alice.rules.create({ pattern: "%", categoryId: groceriesId });
+    await spendingEntry(account.id, { description: "Unmatched" });
+    expect(
+      (await alice.spending.list(october)).find(
+        (r) => r.description === "Unmatched",
+      )?.categoryId,
+    ).toBeNull();
+    await expect(
+      alice.rules.create({ pattern: "x", categoryId: crypto.randomUUID() }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  test("previews existing entries, preserves manual choices and transfers, and detects stale reviews", async () => {
+    const account = await alice.accounts.create(bank);
+    const automatic = await spendingEntry(account.id);
+    const manual = await spendingEntry(account.id, { categoryId: groceriesId });
+    const transfer = await spendingEntry(account.id, { isTransfer: true });
+    const clearedCategory = await spendingEntry(account.id);
+    await alice.spending.bulkUpdate({
+      ids: [clearedCategory.id],
+      changes: { categoryId: null },
+    });
+    const rule = await alice.rules.create({
+      pattern: "market",
+      categoryId: groceriesId,
+    });
+    const ids = [automatic.id, manual.id, transfer.id, clearedCategory.id];
+    const preview = await alice.rules.preview({ ids });
+    expect(preview.changes.map((r) => r.id)).toEqual([automatic.id]);
+    expect(preview.skipped).toBe(3);
+    await expect(bob.rules.preview({ ids })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await alice.rules.update({
+      ...rule,
+      pattern: "supermarket",
+      categoryId: groceriesId,
+    });
+    await expect(
+      alice.rules.applyRules({ ids, revision: preview.revision }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const reviewed = await alice.rules.preview({ ids });
+    expect(
+      await alice.rules.applyRules({ ids, revision: reviewed.revision }),
+    ).toEqual({ count: 1 });
+    expect(
+      (await alice.spending.list(october)).find((r) => r.id === automatic.id)
+        ?.categorySource,
+    ).toBe("rule");
+    expect((await alice.rules.preview({ ids })).changes).toHaveLength(0);
+  });
+
+  test("a manually changed category is preserved on later rule application", async () => {
+    const account = await alice.accounts.create(bank);
+    await alice.rules.create({
+      pattern: "supermarket",
+      categoryId: groceriesId,
+    });
+    const entry = await spendingEntry(account.id);
+    const [row] = await alice.spending.list(october);
+    await alice.spending.update({
+      ...row!,
+      merchant: null,
+      categoryId: null,
+      notes: null,
+    });
+    expect((await alice.spending.list(october))[0]).toMatchObject({
+      categoryId: null,
+      categorySource: "user",
+    });
+    expect(
+      (await alice.rules.preview({ ids: [entry.id] })).changes,
+    ).toHaveLength(0);
+  });
+});
+
+describe("bulk transactions", () => {
+  test("updates only chosen fields and rejects mixed ownership atomically", async () => {
+    const account = await alice.accounts.create(bank);
+    const first = await spendingEntry(account.id, {
+      notes: "Keep",
+      merchant: "Market",
+    });
+    const second = await spendingEntry(account.id, {
+      amount: "-0.2",
+      notes: "Also keep",
+    });
+    const result = await alice.spending.bulkUpdate({
+      ids: [first.id, second.id],
+      changes: { categoryId: groceriesId, cleared: true },
+    });
+    expect(result.count).toBe(2);
+    let rows = await alice.spending.list(october);
+    expect(rows.every((r) => r.cleared && r.categorySource === "user")).toBe(
+      true,
+    );
+    expect(rows.find((r) => r.id === first.id)).toMatchObject({
+      notes: "Keep",
+      merchant: "Market",
+      amount: "-0.1000",
+    });
+    const other = await bob.accounts.create(bank);
+    const foreign = await bob.spending.create({
+      accountId: other.id,
+      postedDate: "2026-10-03",
+      description: "Private",
+      merchant: null,
+      amount: "-1",
+      currency: null,
+      categoryId: null,
+      isTransfer: false,
+      notes: null,
+    });
+    await expect(
+      alice.spending.bulkUpdate({
+        ids: [first.id, foreign.id],
+        changes: { notes: "Taken" },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      alice.spending.bulkRemove({ ids: [first.id, foreign.id] }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    rows = await alice.spending.list(october);
+    expect(rows.find((r) => r.id === first.id)?.notes).toBe("Keep");
+    await alice.spending.bulkUpdate({
+      ids: [first.id],
+      changes: { merchant: "", notes: "", categoryId: null },
+    });
+    expect(
+      (await alice.spending.list(october)).find((r) => r.id === first.id),
+    ).toMatchObject({
+      merchant: null,
+      notes: null,
+      categoryId: null,
+      categorySource: "user",
+    });
+    await expect(
+      alice.spending.bulkUpdate({ ids: [first.id], changes: {} }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.spending.bulkRemove({ ids: [first.id, first.id] }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.spending.bulkUpdate({
+        ids: [first.id, second.id],
+        changes: { categoryId: crypto.randomUUID() },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(
+      await alice.spending.bulkRemove({ ids: [first.id, second.id] }),
+    ).toEqual({ count: 2 });
+    expect(await alice.spending.list(october)).toHaveLength(0);
+  });
+});
+
+describe("account reconciliation", () => {
+  test("preserves sub-cent precision when large credits and debits cancel", async () => {
+    const account = await alice.accounts.create(bank);
+    for (const [index, amount] of [
+      "9999999999999999.9999",
+      "9999999999999999.9999",
+      "-9999999999999999.9999",
+      "-9999999999999999.9999",
+    ].entries()) {
+      await spendingEntry(account.id, {
+        postedDate: `2026-10-0${index + 1}`,
+        amount,
+      });
+    }
+    const preview = await alice.reconciliation.preview({
+      accountId: account.id,
+      currency: "SGD",
+      startDate: "2026-10-01",
+      endDate: "2026-10-31",
+      openingBalance: "0",
+      closingBalance: "0",
+    });
+    expect(preview.movement).toBe("0");
+    expect(preview.difference).toBe("0");
+  });
+  async function statement() {
+    const account = await alice.accounts.create(bank);
+    const first = await spendingEntry(account.id);
+    const transfer = await spendingEntry(account.id, {
+      amount: "-0.2",
+      isTransfer: true,
+    });
+    await spendingEntry(account.id, {
+      postedDate: "2026-09-30",
+      amount: "-99",
+    });
+    await spendingEntry(account.id, { currency: "USD", amount: "-99" });
+    const period = {
+      accountId: account.id,
+      currency: "SGD",
+      startDate: "2026-10-01",
+      endDate: "2026-10-31",
+      openingBalance: "100",
+      closingBalance: "99.7",
+    };
+    return { account, first, transfer, period };
+  }
+
+  test("reconciles exact decimal balances including transfers and only the statement currency", async () => {
+    const { period, first, transfer } = await statement();
+    const preview = await alice.reconciliation.preview(period);
+    expect(preview).toMatchObject({
+      movement: "-0.3",
+      expectedClosing: "99.7",
+      difference: "0",
+      overlaps: false,
+    });
+    expect(new Set(preview.rows.map((r) => r.id))).toEqual(
+      new Set([first.id, transfer.id]),
+    );
+    await expect(
+      alice.reconciliation.finish({
+        ...period,
+        revision: preview.revision,
+        verifiedIds: [first.id],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const saved = await alice.reconciliation.finish({
+      ...period,
+      revision: preview.revision,
+      verifiedIds: [first.id, transfer.id],
+    });
+    const rows = await alice.spending.list(october);
+    expect(rows.filter((r) => r.reconciliationId === saved.id)).toHaveLength(2);
+    expect(
+      rows
+        .filter((r) => r.reconciliationId === saved.id)
+        .every((r) => r.cleared),
+    ).toBe(true);
+    expect(rows.find((r) => r.currency === "USD")?.reconciliationId).toBeNull();
+    const history = await alice.reconciliation.list({
+      accountId: period.accountId,
+    });
+    expect(history[0]).toMatchObject({
+      closingBalance: "99.7000",
+      openingBalance: "100.0000",
+    });
+    await expect(
+      alice.reconciliation.finish({
+        ...period,
+        revision: preview.revision,
+        verifiedIds: [first.id, transfer.id],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      bob.reconciliation.list({ accountId: period.accountId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(bob.reconciliation.preview(period)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      bob.reconciliation.finish({
+        ...period,
+        revision: preview.revision,
+        verifiedIds: [first.id, transfer.id],
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(bob.reconciliation.reopen(saved)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+
+  test("blocks balance-affecting writes until reopening, while allowing categorization", async () => {
+    const { period, first, transfer } = await statement();
+    const preview = await alice.reconciliation.preview(period);
+    const saved = await alice.reconciliation.finish({
+      ...period,
+      revision: preview.revision,
+      verifiedIds: [first.id, transfer.id],
+    });
+    const row = (await alice.spending.list(october)).find(
+      (r) => r.id === first.id,
+    )!;
+    await expect(
+      alice.spending.update({ ...row, amount: "-3" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      alice.spending.update({ ...row, description: "Changed" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(alice.spending.remove(first)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await expect(
+      alice.spending.bulkRemove({ ids: [first.id] }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      alice.spending.bulkUpdate({
+        ids: [first.id],
+        changes: { cleared: false },
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(spendingEntry(period.accountId)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    const outside = (await alice.spending.list(october)).find(
+      (r) => r.currency === "USD",
+    )!;
+    await expect(
+      alice.spending.update({ ...outside, currency: "SGD" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await alice.spending.update({
+      ...row,
+      categoryId: groceriesId,
+      notes: "Verified",
+    });
+    await alice.spending.bulkUpdate({
+      ids: [first.id, transfer.id],
+      changes: { merchant: "Reviewed" },
+    });
+    // Re-categorizing with rules also preserves the financial check.
+    await alice.rules.create({
+      pattern: "supermarket",
+      categoryId: groceriesId,
+    });
+    const rulePreview = await alice.rules.preview({
+      ids: [first.id, transfer.id],
+    });
+    expect(rulePreview.changes).toHaveLength(0);
+    await alice.reconciliation.reopen(saved);
+    expect(
+      (await alice.spending.list(october)).filter((r) => r.reconciliationId),
+    ).toHaveLength(0);
+    expect(
+      (await alice.spending.list(october)).find((r) => r.id === first.id)
+        ?.cleared,
+    ).toBe(true);
+    await alice.spending.update({ ...row, amount: "-0.4" });
+    await alice.spending.remove(transfer);
+    await spendingEntry(period.accountId);
+  });
+
+  test("rejects discrepancies, stale previews, malformed dates and investment accounts", async () => {
+    const { period, first, transfer } = await statement();
+    const mismatch = { ...period, closingBalance: "100" };
+    const preview = await alice.reconciliation.preview(mismatch);
+    expect(preview.difference).toBe("0.3");
+    await expect(
+      alice.reconciliation.finish({
+        ...mismatch,
+        revision: preview.revision,
+        verifiedIds: [first.id, transfer.id],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const matching = await alice.reconciliation.preview(period);
+    await spendingEntry(period.accountId, { amount: "1" });
+    await expect(
+      alice.reconciliation.finish({
+        ...period,
+        revision: matching.revision,
+        verifiedIds: [first.id, transfer.id],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      alice.reconciliation.preview({ ...period, startDate: "2026-11-01" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const brokerage = await alice.accounts.create(broker);
+    await expect(
+      alice.reconciliation.preview({ ...period, accountId: brokerage.id }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(
+      await alice.reconciliation.list({ accountId: period.accountId }),
+    ).toHaveLength(0);
+  });
+
+  test("protects an empty reconciled period and retains it when archiving an account", async () => {
+    const account = await alice.accounts.create(bank);
+    const period = {
+      accountId: account.id,
+      currency: "SGD",
+      startDate: "2026-10-01",
+      endDate: "2026-10-31",
+      openingBalance: "0",
+      closingBalance: "0",
+    };
+    const preview = await alice.reconciliation.preview(period);
+    const saved = await alice.reconciliation.finish({
+      ...period,
+      revision: preview.revision,
+      verifiedIds: [],
+    });
+    await expect(
+      alice.accounts.update({ ...broker, id: account.id }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(spendingEntry(account.id)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect(await alice.accounts.remove(account)).toEqual({
+      outcome: "archived",
+    });
+    expect(
+      await alice.reconciliation.list({ accountId: account.id }),
+    ).toHaveLength(1);
+    await alice.reconciliation.reopen(saved);
+    await alice.accounts.restore(account);
+    await spendingEntry(account.id);
+  });
+});
+
+const workspaceDefaults = {
+  name: "Our family",
+  kind: "family" as const,
+  displayCurrency: "SGD",
+};
+const workspaceToken = (url: string) =>
+  new URL(url).pathname.split("/").at(-1)!;
+async function addWorkspaceMember(
+  workspaceId: string,
+  id: "bob" | "charlie",
+  role: "member" | "viewer" = "member",
+) {
+  const invite = await alice.workspaces.invite({
+    workspaceId,
+    email: `${id}@example.com`,
+    role,
+  });
+  await callers(id).workspaces.acceptInvitation({
+    token: workspaceToken(invite.url),
+  });
+  return invite;
+}
+async function workspaceFixture() {
+  const { id: workspaceId } = await alice.workspaces.create(workspaceDefaults);
+  await addWorkspaceMember(workspaceId, "bob");
+  const shared = await alice.accounts.create({ ...bank, name: "Shared bank" });
+  const privateAccount = await alice.accounts.create({
+    ...bank,
+    name: "Private bank",
+  });
+  await alice.workspaces.shareAccount({ workspaceId, accountId: shared.id });
+  await alice.portfolio.recordSnapshot({
+    accountId: shared.id,
+    asOf: "2026-10-01",
+    positions: [],
+    cash: [{ currency: "SGD", amount: "100.1234" }],
+  });
+  await alice.portfolio.recordSnapshot({
+    accountId: privateAccount.id,
+    asOf: "2026-10-01",
+    positions: [],
+    cash: [{ currency: "SGD", amount: "900" }],
+  });
+  const entry = await spendingEntry(shared.id);
+  await spendingEntry(privateAccount.id);
+  return { workspaceId, shared, privateAccount, entry };
+}
+
+describe("workspace visibility", () => {
+  test("shows only explicitly shared accounts and preserves personal scope", async () => {
+    const { workspaceId, shared, privateAccount } = await workspaceFixture();
+    const own = await bob.accounts.create({ ...bank, name: "Bob private" });
+    await bob.portfolio.recordSnapshot({
+      accountId: own.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "50" }],
+    });
+    const rows = await bob.accounts.list({ workspaceId });
+    expect(rows.map((r) => r.id)).toEqual([shared.id]);
+    expect(rows[0]).toMatchObject({
+      ownerId: "alice",
+      ownerName: "Example Alice",
+      totals: [{ currency: "SGD", amount: "100.1234" }],
+    });
+    expect(
+      (await bob.accounts.get({ ...shared, workspaceId })).holdings?.cash,
+    ).toEqual([{ currency: "SGD", amount: "100.1234" }]);
+    expect((await bob.portfolio.netWorth({ workspaceId })).total).toBe(
+      "100.1234",
+    );
+    expect((await bob.portfolio.netWorth()).total).toBe("50");
+    expect((await alice.portfolio.netWorth()).total).toBe("1000.1234");
+    expect((await alice.portfolio.netWorth({ workspaceId })).total).toBe(
+      "100.1234",
+    );
+    await expect(
+      bob.accounts.get({ ...privateAccount, workspaceId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(bob.accounts.get(shared)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    const transactions = await bob.spending.list({
+      workspaceId,
+      month: "2026-10",
+      accountId: null,
+      categoryId: null,
+    });
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]!.accountId).toBe(shared.id);
+    expect(
+      await bob.spending.list({
+        workspaceId,
+        month: "2026-10",
+        accountId: privateAccount.id,
+        categoryId: null,
+      }),
+    ).toEqual([]);
+    expect(
+      await bob.spending.list({
+        month: "2026-10",
+        accountId: null,
+        categoryId: null,
+      }),
+    ).toEqual([]);
+    expect(await bob.workspaces.get({ workspaceId })).toMatchObject({
+      role: "member",
+      invitations: [],
+    });
+  });
+
+  test("membership does not grant private access and separate audiences cannot see each other's accounts", async () => {
+    const { workspaceId, privateAccount, shared } = await workspaceFixture();
+    const other = await alice.workspaces.create({
+      ...workspaceDefaults,
+      name: "Investor audience",
+      kind: "fund",
+    });
+    await addWorkspaceMember(other.id, "charlie", "viewer");
+    await alice.workspaces.shareAccount({
+      workspaceId: other.id,
+      accountId: privateAccount.id,
+    });
+    expect(
+      (await charlie.accounts.list({ workspaceId: other.id })).map((a) => a.id),
+    ).toEqual([privateAccount.id]);
+    await expect(
+      charlie.accounts.get({ ...shared, workspaceId: other.id }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    for (const operation of [
+      () => charlie.workspaces.get({ workspaceId }),
+      () => charlie.accounts.list({ workspaceId }),
+      () => charlie.portfolio.netWorth({ workspaceId }),
+      () => charlie.spending.summary({ workspaceId, month: "2026-10" }),
+      () => bob.accounts.list({ workspaceId: other.id }),
+    ])
+      await expect(operation()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // Instance admins have no implicit access to shared or private finances.
+    const adminContext = contextFor("charlie");
+    adminContext.session.user.role = "admin";
+    await expect(
+      accountsRouter.createCaller(adminContext).list({ workspaceId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const empty = await alice.workspaces.create({
+      ...workspaceDefaults,
+      name: "Empty",
+    });
+    expect(await alice.accounts.list({ workspaceId: empty.id })).toEqual([]);
+  });
+
+  test("sharing never permits financial mutations, snapshots, bulk edits, or reconciliation", async () => {
+    const { workspaceId, shared, entry } = await workspaceFixture();
+    expect(await bob.accounts.list({ workspaceId })).toHaveLength(1);
+    for (const operation of [
+      () => bob.accounts.update({ ...bank, id: shared.id }),
+      () => bob.accounts.remove(shared),
+      () => bob.accounts.restore(shared),
+      () =>
+        bob.portfolio.recordSnapshot({
+          accountId: shared.id,
+          asOf: "2026-10-02",
+          positions: [],
+          cash: [],
+        }),
+      () =>
+        bob.spending.create({
+          accountId: shared.id,
+          postedDate: "2026-10-01",
+          description: "Forbidden",
+          amount: "-1",
+          currency: null,
+          merchant: null,
+          categoryId: null,
+          notes: null,
+          isTransfer: false,
+        }),
+      () =>
+        bob.spending.update({
+          id: entry.id,
+          accountId: shared.id,
+          postedDate: "2026-10-03",
+          description: "Forbidden",
+          merchant: null,
+          amount: "-0.1",
+          currency: "SGD",
+          categoryId: null,
+          isTransfer: false,
+          notes: null,
+        }),
+      () => bob.spending.remove({ id: entry.id }),
+      () => bob.spending.bulkRemove({ ids: [entry.id] }),
+      () =>
+        bob.spending.bulkUpdate({
+          ids: [entry.id],
+          changes: { notes: "Forbidden" },
+        }),
+      () => bob.reconciliation.list({ accountId: shared.id }),
+    ])
+      await expect(operation()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await alice.accounts.get(shared)).holdings?.cash[0]?.amount).toBe(
+      "100.1234",
+    );
+  });
+
+  test("unsharing and removal revoke access even for a previously resolved scope", async () => {
+    const { workspaceId, shared } = await workspaceFixture();
+    const scope = await resolveWorkspaceScope(
+      db,
+      resolveAccessScope("bob"),
+      workspaceId,
+    );
+    expect(
+      (await latestHoldings(db as unknown as Database, scope, [shared.id]))
+        .size,
+    ).toBe(1);
+    await alice.workspaces.unshareAccount({
+      workspaceId,
+      accountId: shared.id,
+    });
+    expect(await bob.accounts.list({ workspaceId })).toEqual([]);
+    expect(
+      (await latestHoldings(db as unknown as Database, scope, [shared.id]))
+        .size,
+    ).toBe(0);
+    await alice.workspaces.shareAccount({ workspaceId, accountId: shared.id });
+    await alice.workspaces.removeMember({ workspaceId, userId: "bob" });
+    await expect(bob.accounts.list({ workspaceId })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(
+      (await latestHoldings(db as unknown as Database, scope, [shared.id]))
+        .size,
+    ).toBe(0);
+    expect((await alice.accounts.get(shared)).name).toBe("Shared bank");
+  });
+
+  test("duplicates and sharing with multiple audiences never double-count; transfers are excluded", async () => {
+    const { workspaceId, shared } = await workspaceFixture();
+    await alice.workspaces.shareAccount({ workspaceId, accountId: shared.id });
+    const other = await alice.workspaces.create({
+      ...workspaceDefaults,
+      name: "Second audience",
+    });
+    await alice.workspaces.shareAccount({
+      workspaceId: other.id,
+      accountId: shared.id,
+    });
+    expect(await db.$count(schema.workspaceAccountShare)).toBe(2);
+    expect((await alice.portfolio.netWorth({ workspaceId })).total).toBe(
+      "100.1234",
+    );
+    await alice.spending.create({
+      accountId: shared.id,
+      postedDate: "2026-10-02",
+      amount: "-999",
+      currency: "SGD",
+      description: "Transfer",
+      merchant: null,
+      notes: null,
+      categoryId: null,
+      isTransfer: true,
+    });
+    const summary = await bob.spending.summary({
+      workspaceId,
+      month: "2026-10",
+    });
+    expect(summary).toHaveLength(1);
+    expect(summary[0]!.count).toBe(1);
+    expect(summary[0]!.spent).not.toBe("999");
+  });
+
+  test("uses workspace currency and reports missing rates, unpriced holdings and archived accounts", async () => {
+    const { workspaceId, shared } = await workspaceFixture();
+    await alice.workspaces.update({
+      ...workspaceDefaults,
+      workspaceId,
+      displayCurrency: "USD",
+    });
+    let worth = await bob.portfolio.netWorth({ workspaceId });
+    expect(worth.currency).toBe("USD");
+    expect(worth.unconverted).toEqual([
+      { currency: "SGD", amount: "100.1234" },
+    ]);
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-10-01",
+      rate: "0.75",
+      source: "test",
+    });
+    worth = await bob.portfolio.netWorth({ workspaceId });
+    expect(worth.total).toBe("75.0926");
+    const investment = await alice.accounts.create(broker);
+    await alice.workspaces.shareAccount({
+      workspaceId,
+      accountId: investment.id,
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: investment.id,
+      asOf: "2026-10-01",
+      cash: [],
+      positions: [
+        {
+          symbol: "UNPRICED",
+          exchange: "",
+          name: "",
+          assetClass: "stock",
+          currency: "USD",
+          quantity: "1",
+          averageCost: null,
+          price: null,
+        },
+      ],
+    });
+    expect((await bob.portfolio.netWorth({ workspaceId })).unpriced).toBe(1);
+    await alice.accounts.remove(shared);
+    expect(
+      (await bob.portfolio.netWorth({ workspaceId })).accounts.map((a) => a.id),
+    ).toEqual([investment.id]);
+    expect(
+      (await bob.accounts.list({ workspaceId })).find((a) => a.id === shared.id)
+        ?.archivedAt,
+    ).toBeInstanceOf(Date);
+  });
+});
+
+describe("workspace management and invitations", () => {
+  test("requires authentication and required two-factor enrollment", async () => {
+    const signedOut = { ...contextFor("alice"), session: null };
+    await expect(
+      workspacesRouter.createCaller(signedOut).list(),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    const unenrolled = contextFor("alice");
+    unenrolled.session.user.twoFactorEnabled = false;
+    await expect(
+      workspacesRouter.createCaller(unenrolled).create(workspaceDefaults),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  test("only owners manage membership; members share only their own accounts; viewers only read", async () => {
+    const { workspaceId, shared, privateAccount } = await workspaceFixture();
+    await addWorkspaceMember(workspaceId, "charlie", "viewer");
+    const charlieOwn = await charlie.accounts.create(bank);
+    await expect(
+      charlie.workspaces.shareAccount({
+        workspaceId,
+        accountId: charlieOwn.id,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    for (const operation of [
+      () => bob.workspaces.update({ ...workspaceDefaults, workspaceId }),
+      () =>
+        bob.workspaces.invite({
+          workspaceId,
+          email: "other@example.com",
+          role: "member",
+        }),
+      () => bob.workspaces.removeMember({ workspaceId, userId: "charlie" }),
+      () =>
+        bob.workspaces.setMemberRole({
+          workspaceId,
+          userId: "charlie",
+          role: "member",
+        }),
+      () => bob.workspaces.transferOwnership({ workspaceId, userId: "bob" }),
+      () => bob.workspaces.remove({ workspaceId }),
+    ])
+      await expect(operation()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      bob.workspaces.shareAccount({
+        workspaceId,
+        accountId: privateAccount.id,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      bob.workspaces.unshareAccount({ workspaceId, accountId: shared.id }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const bobOwn = await bob.accounts.create(bank);
+    await bob.workspaces.shareAccount({ workspaceId, accountId: bobOwn.id });
+    expect(
+      (await charlie.accounts.list({ workspaceId })).map((a) => a.id),
+    ).toContain(bobOwn.id);
+    // Owner can revoke a member's grant without obtaining write access to their records.
+    await alice.workspaces.unshareAccount({
+      workspaceId,
+      accountId: bobOwn.id,
+    });
+    await expect(
+      alice.accounts.update({ ...bank, id: bobOwn.id }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await bob.accounts.get(bobOwn)).id).toBe(bobOwn.id);
+  });
+
+  test("departure and viewer demotion remove the member's shares across all financial queries", async () => {
+    const { workspaceId } = await workspaceFixture();
+    const own = await bob.accounts.create(bank);
+    await bob.workspaces.shareAccount({ workspaceId, accountId: own.id });
+    await alice.workspaces.setMemberRole({
+      workspaceId,
+      userId: "bob",
+      role: "viewer",
+    });
+    expect(
+      (await alice.accounts.list({ workspaceId })).map((a) => a.id),
+    ).not.toContain(own.id);
+    expect((await bob.workspaces.get({ workspaceId })).role).toBe("viewer");
+    await alice.workspaces.setMemberRole({
+      workspaceId,
+      userId: "bob",
+      role: "member",
+    });
+    await bob.workspaces.shareAccount({ workspaceId, accountId: own.id });
+    await bob.workspaces.removeMember({ workspaceId, userId: "bob" });
+    expect(await bob.workspaces.list()).toEqual([]);
+    expect(
+      (await alice.workspaces.get({ workspaceId })).shares.some(
+        (s) => s.accountId === own.id,
+      ),
+    ).toBe(false);
+    expect((await bob.accounts.get(own)).id).toBe(own.id);
+  });
+
+  test("owners must transfer before leaving; transfers revoke pending invites; deletion retains finances", async () => {
+    const { workspaceId, shared } = await workspaceFixture();
+    await expect(
+      alice.workspaces.removeMember({ workspaceId, userId: "alice" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.workspaces.setMemberRole({
+        workspaceId,
+        userId: "alice",
+        role: "viewer",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const invite = await alice.workspaces.invite({
+      workspaceId,
+      email: "charlie@example.com",
+      role: "viewer",
+    });
+    await alice.workspaces.transferOwnership({ workspaceId, userId: "bob" });
+    expect((await bob.workspaces.get({ workspaceId })).role).toBe("owner");
+    expect((await alice.workspaces.get({ workspaceId })).role).toBe("member");
+    await expect(
+      charlie.workspaces.acceptInvitation({
+        token: workspaceToken(invite.url),
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.workspaces.remove({ workspaceId }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await bob.workspaces.remove({ workspaceId });
+    expect(await alice.workspaces.list()).toEqual([]);
+    expect(await db.$count(schema.workspaceMember)).toBe(0);
+    expect(await db.$count(schema.workspaceAccountShare)).toBe(0);
+    expect((await alice.accounts.get(shared)).holdings?.cash[0]?.amount).toBe(
+      "100.1234",
+    );
+  });
+
+  test("invites are email-bound, hashed, single-use, replaceable, revocable and expiring", async () => {
+    const { id: workspaceId } =
+      await alice.workspaces.create(workspaceDefaults);
+    const first = await alice.workspaces.invite({
+      workspaceId,
+      email: "BOB@example.com",
+      role: "viewer",
+    });
+    const token = workspaceToken(first.url);
+    const [stored] = await db.select().from(schema.workspaceInvitation);
+    expect(stored!.email).toBe("bob@example.com");
+    expect(stored!.tokenHash).not.toBe(token);
+    expect(stored!.tokenHash).toHaveLength(64);
+    const invite = await findPendingWorkspaceInvitation(db, token);
+    expect(invite).toMatchObject({
+      workspaceName: "Our family",
+      role: "viewer",
+    });
+    await expect(
+      charlie.workspaces.acceptInvitation({ token }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await db.$count(schema.workspaceMember)).toBe(1);
+    const second = await alice.workspaces.invite({
+      workspaceId,
+      email: "bob@example.com",
+      role: "member",
+    });
+    await expect(
+      bob.workspaces.acceptInvitation({ token }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await bob.workspaces.acceptInvitation({
+      token: workspaceToken(second.url),
+    });
+    await expect(
+      bob.workspaces.acceptInvitation({ token: workspaceToken(second.url) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.workspaces.invite({
+        workspaceId,
+        email: "bob@example.com",
+        role: "viewer",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const third = await alice.workspaces.invite({
+      workspaceId,
+      email: "charlie@example.com",
+      role: "viewer",
+    });
+    const pending = (await alice.workspaces.get({ workspaceId }))
+      .invitations[0]!;
+    await alice.workspaces.revokeInvitation({
+      workspaceId,
+      invitationId: pending.id,
+    });
+    await expect(
+      charlie.workspaces.acceptInvitation({ token: workspaceToken(third.url) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const fourth = await alice.workspaces.invite({
+      workspaceId,
+      email: "charlie@example.com",
+      role: "viewer",
+    });
+    const fresh = (await alice.workspaces.get({ workspaceId })).invitations[0]!;
+    await db
+      .update(schema.workspaceInvitation)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.workspaceInvitation.id, fresh.id));
+    expect(
+      await findPendingWorkspaceInvitation(
+        db as unknown as Database,
+        workspaceToken(fourth.url),
+      ),
+    ).toBeNull();
+    expect(
+      await findPendingWorkspaceInvitation(
+        db as unknown as Database,
+        "invalid-token",
+      ),
+    ).toBeNull();
+    await expect(
+      charlie.workspaces.acceptInvitation({
+        token: workspaceToken(fourth.url),
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const audit = await db.select().from(schema.auditLog);
+    expect(JSON.stringify(audit)).not.toContain(token);
+    expect(audit.some((a) => a.action === "workspace.invitation.accept")).toBe(
+      true,
+    );
+  });
+
+  test("registration acceptance creates membership once and never grants an application role", async () => {
+    const { id: workspaceId } = await alice.workspaces.create({
+      ...workspaceDefaults,
+      kind: "fund",
+    });
+    const invitation = await alice.workspaces.invite({
+      workspaceId,
+      email: "new-user@example.com",
+      role: "viewer",
+    });
+    await db.insert(schema.user).values({
+      id: "new-user",
+      name: "New viewer",
+      email: "new-user@example.com",
+      role: "user",
+    });
+    const token = workspaceToken(invitation.url);
+    await acceptWorkspaceInvitation(db as unknown as Database, token, {
+      id: "new-user",
+      email: "new-user@example.com",
+    });
+    const [newUser] = await db
+      .select()
+      .from(schema.user)
+      .where(eq(schema.user.id, "new-user"));
+    expect(newUser!.role).toBe("user");
+    expect(
+      (await callers("new-user").workspaces.get({ workspaceId })).role,
+    ).toBe("viewer");
+    await expect(
+      acceptWorkspaceInvitation(db as unknown as Database, token, {
+        id: "new-user",
+        email: "new-user@example.com",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await db.delete(schema.user).where(eq(schema.user.id, "new-user"));
+  });
+
+  test("rejects invalid names, currencies, IDs and cross-workspace invitation revocation", async () => {
+    await expect(
+      alice.workspaces.create({ ...workspaceDefaults, name: " " }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.workspaces.create({ ...workspaceDefaults, displayCurrency: "XYZ" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.accounts.list({ workspaceId: "not-an-id" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const { id: workspaceId } =
+      await alice.workspaces.create(workspaceDefaults);
+    const other = await alice.workspaces.create({
+      ...workspaceDefaults,
+      name: "Other",
+    });
+    await alice.workspaces.invite({
+      workspaceId,
+      email: "bob@example.com",
+      role: "viewer",
+    });
+    const invitationId = (await alice.workspaces.get({ workspaceId }))
+      .invitations[0]!.id;
+    await expect(
+      alice.workspaces.revokeInvitation({
+        workspaceId: other.id,
+        invitationId,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      alice.workspaces.transferOwnership({ workspaceId, userId: "charlie" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+test("concurrent invitation acceptance succeeds once and does not duplicate membership", async () => {
+  const { id: workspaceId } = await alice.workspaces.create(workspaceDefaults);
+  const invitation = await alice.workspaces.invite({
+    workspaceId,
+    email: "bob@example.com",
+    role: "viewer",
+  });
+  const token = workspaceToken(invitation.url);
+  const outcomes = await Promise.allSettled([
+    bob.workspaces.acceptInvitation({ token }),
+    bob.workspaces.acceptInvitation({ token }),
+  ]);
+  expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(outcomes.filter((r) => r.status === "rejected")).toHaveLength(1);
+  expect(
+    (await alice.workspaces.get({ workspaceId })).members.filter(
+      (m) => m.userId === "bob",
+    ),
+  ).toHaveLength(1);
+});

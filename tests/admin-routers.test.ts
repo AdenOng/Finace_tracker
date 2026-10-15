@@ -82,19 +82,23 @@ test("internal HTTP errors expose neither private messages nor development stack
 });
 
 beforeAll(async () => {
-  for (const file of [
-    "0000_shallow_blizzard.sql",
-    "0001_admin_bootstrap.sql",
-  ]) {
+  const journal = (await Bun.file(
+    new URL("../drizzle/meta/_journal.json", import.meta.url),
+  ).json()) as { entries: { tag: string }[] };
+  for (const { tag } of journal.entries) {
     await engine.exec(
-      await Bun.file(new URL(`../drizzle/${file}`, import.meta.url)).text(),
+      await Bun.file(new URL(`../drizzle/${tag}.sql`, import.meta.url)).text(),
     );
   }
-  await db.insert(schema.user).values({
-    id: "private-owner",
-    name: "Example User",
-    email: "user@example.com",
-  });
+  await db.insert(schema.user).values([
+    {
+      id: "private-owner",
+      name: "Example User",
+      email: "user@example.com",
+    },
+    // The signed-in admin; audit entries reference it.
+    { id: "admin", name: "Example Admin", email: "admin@example.com" },
+  ]);
 }, 30_000);
 beforeEach(async () => {
   await engine.exec("TRUNCATE TABLE llm_provider, category CASCADE");

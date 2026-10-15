@@ -13,7 +13,11 @@ dependencies. They are excluded from the Finfolio image and application checks.
 - `src/server/api/`: tRPC context, authentication/authorization middleware, and domain routers.
   Use `adminProcedure` for platform catalog operations and `protectedProcedure` for financial
   data. The Settings enrollment flow deliberately permits signed-in users awaiting 2FA.
-- `src/server/auth/`: Better Auth configuration, invitation handling and initial-admin setup.
+- `src/server/auth/`: Better Auth configuration, invitation handling, admin-issued password
+  reset links and initial-admin setup.
+- `src/server/lib/audit.ts`: `recordAudit` writes admin and account-recovery actions to
+  `audit_log`. Details hold identifiers and counts only, never secrets or financial data. Admin
+  views of extraction jobs show metadata only, never documents or extracted results.
 - `src/server/db/`: domain schema, migrations and insert-only seeding. Financial values use
   NUMERIC and retain their original currencies. Per-user queries use the access scope from
   `src/server/lib/access.ts`; the platform catalog is shared and managed by admins.
@@ -23,6 +27,21 @@ dependencies. They are excluded from the Finfolio image and application checks.
   structured-output validation. Extraction never writes to financial tables. PDF resources
   are released after preparation.
 - `src/server/modules/catalog/`: reusable category-tree rules.
+- `src/server/modules/workspaces/`: audience membership permissions and invitation consumption.
+  Shared finance reads use explicit account grants, while financial writes remain personal.
+  See [workspace design](workspaces.md) for permissions, lifecycle, and future fund extensions.
+- `src/server/modules/accounts/`: ownership checks; finance rows are only written to accounts
+  the signed-in user owns (`writableBy`), even if a wider scope can read them.
+- `src/server/modules/portfolio/`: latest-snapshot loading, position valuation (quote →
+  statement value → quantity × price) and FX conversion. Valuation is pure and decimal-based.
+- `src/server/modules/spending/`: reusable merchant matching and financial-write guards. Spending
+  mutations and reconciliation commits lock owned accounts in id order inside a database
+  transaction. Selected rows are then re-read and checked for ownership before any mutation.
+  Reconciled statement periods protect financial fields and block new entries into their
+  inclusive dates and currency, while permitting category and note changes. Reopening removes
+  the period and clears transaction links via the foreign key without clearing bank verification.
+  Statement arithmetic uses a Decimal clone with 40 significant digits. Reviewed reconciliation
+  and merchant-rule operations use revision hashes to reject stale data.
 - `src/server/lib/`: server encryption and access helpers. The pure secret codec accepts an
   explicit key, while the server-only wrapper reads validated configuration. The AES-GCM
   `v1` envelope remains compatible with existing records encrypted with a valid configured key.
@@ -58,7 +77,10 @@ bun audit
 Tests use an in-memory PostgreSQL engine (PGlite), the real SQL migrations and tRPC routers,
 and throwaway configuration. They do not connect to the local production database or contact
 an AI provider. Coverage includes provider ownership, role/2FA access, encryption and
-tampering, safe error responses, upload limits, category hierarchy and decimal display.
+tampering, safe error responses, upload limits, category hierarchy, decimal display, and
+cross-user isolation, snapshots, net worth and spending summaries for the finance routers,
+merchant-rule precedence and manual overrides, atomic bulk edits, and reconciliation locks,
+overlapping periods, stale reviews, exact balances and reopening.
 
 The dependency overrides keep transitive esbuild and PostCSS versions above the versions
 flagged by the package audit. Review and remove overrides when upstream constraints allow
