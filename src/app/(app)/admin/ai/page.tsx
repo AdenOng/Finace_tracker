@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdminSession } from "~/server/auth";
 
 import { AiProvidersAdmin } from "~/components/admin/ai-providers-admin";
 import { ExtractionPlayground } from "~/components/admin/extraction-playground";
@@ -8,6 +9,7 @@ import { api, HydrateClient } from "~/trpc/server";
 export const metadata: Metadata = { title: "AI providers" };
 
 export default async function AdminAiPage() {
+  await requireAdminSession();
   void api.admin.ai.list.prefetch();
   return (
     <HydrateClient>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -23,6 +24,7 @@ function secretFromUri(uri: string) {
 
 export function TwoFactorCard({ enabled }: { enabled: boolean }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>({ name: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -63,6 +65,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
     await run(async () => {
       const { error } = await authClient.twoFactor.verifyTotp({ code });
       if (error) return setError(error.message ?? "That code did not match");
+      queryClient.clear();
       setStep({ name: "codes", backupCodes: step.backupCodes });
     });
   }
@@ -102,8 +105,8 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
           </Button>
           <Button
             onClick={() => {
-              setStep({ name: "idle" });
-              router.refresh();
+              // Drop prefetched redirects/errors from before enrollment as well as client queries.
+              window.location.assign("/settings");
             }}
           >
             I&apos;ve saved them

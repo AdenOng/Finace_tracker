@@ -11,7 +11,7 @@ import { Table, Td, Tr } from "~/components/ui/table";
 import { accountTypeLabels, assetClassLabels } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { formatDate, formatMoney } from "~/lib/format";
-import { isAdmin, requireSession } from "~/server/auth";
+import { isAdmin, requireEnrolledSession } from "~/server/auth";
 import { db } from "~/server/db";
 import { llmProvider } from "~/server/db/schema";
 import { api, HydrateClient } from "~/trpc/server";
@@ -45,7 +45,7 @@ function ChecklistItem({
 }
 
 export default async function OverviewPage() {
-  const session = await requireSession();
+  const session = await requireEnrolledSession();
   const [settings, worth] = await Promise.all([
     api.settings.get(),
     api.portfolio.netWorth(),

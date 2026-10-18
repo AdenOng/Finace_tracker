@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireEnrolledSession } from "~/server/auth";
 import { z } from "zod";
 
 import { SpendingView } from "~/components/spending/spending-view";
@@ -13,6 +14,7 @@ export default async function SpendingPage({
 }: {
   searchParams: Promise<{ account?: string }>;
 }) {
+  await requireEnrolledSession();
   const { account } = await searchParams;
   void api.accounts.list.prefetch();
   void api.catalog.categories.prefetch();

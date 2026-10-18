@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireEnrolledSession } from "~/server/auth";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 
@@ -12,6 +13,7 @@ export default async function AccountPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireEnrolledSession();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
   // Fetched here, not just prefetched, so a missing or foreign account is a 404 page.

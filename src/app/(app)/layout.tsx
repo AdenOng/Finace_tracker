@@ -24,6 +24,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <AppShell
       user={{ name: session.user.name, email: session.user.email }}
       isAdmin={isAdmin(session.user)}
+      enrolling={needsTwoFactorEnrollment(session.user)}
     >
       {children}
     </AppShell>

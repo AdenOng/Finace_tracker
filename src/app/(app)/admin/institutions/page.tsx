@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdminSession } from "~/server/auth";
 
 import { InstitutionsAdmin } from "~/components/admin/institutions-admin";
 import { PageHeader } from "~/components/ui/panel";
@@ -7,6 +8,7 @@ import { api, HydrateClient } from "~/trpc/server";
 export const metadata: Metadata = { title: "Brokers & banks" };
 
 export default async function AdminInstitutionsPage() {
+  await requireAdminSession();
   void api.admin.institutions.list.prefetch();
   return (
     <HydrateClient>

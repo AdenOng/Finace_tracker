@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireEnrolledSession } from "~/server/auth";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { WorkspaceDetail } from "~/components/workspaces/workspace-detail";
@@ -11,6 +12,7 @@ export default async function WorkspacePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireEnrolledSession();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
   const workspace = await api.workspaces

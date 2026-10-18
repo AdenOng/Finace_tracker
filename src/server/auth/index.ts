@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 
 import { auth } from "./config";
+import { needsTwoFactorEnrollment } from "./enrollment";
 
 export { auth, APP_NAME, type Session } from "./config";
 export { needsTwoFactorEnrollment } from "./enrollment";
@@ -26,7 +27,16 @@ export async function requireSession() {
 }
 
 export async function requireAdminSession() {
-  const session = await requireSession();
+  const session = await requireEnrolledSession();
   if (!isAdmin(session.user)) redirect("/");
+  return session;
+}
+
+/** Call before page queries: layouts and pages can render concurrently. */
+export async function requireEnrolledSession() {
+  const session = await requireSession();
+  if (needsTwoFactorEnrollment(session.user)) {
+    redirect("/settings?enroll=1");
+  }
   return session;
 }

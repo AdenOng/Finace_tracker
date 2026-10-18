@@ -98,10 +98,12 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
 export function AppShell({
   user,
   isAdmin,
+  enrolling = false,
   children,
 }: {
   user: { name: string; email: string };
   isAdmin: boolean;
+  enrolling?: boolean;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -119,18 +121,20 @@ export function AppShell({
     <div className="min-h-dvh lg:grid lg:grid-cols-[15.5rem_1fr]">
       <aside className="bg-forest flex flex-col text-white lg:sticky lg:top-0 lg:h-dvh">
         <div className="flex h-16 items-center px-5">
-          <Link href="/" className="text-white">
+          <Link href={enrolling ? "/settings" : "/"} className="text-white">
             <Wordmark inverse />
           </Link>
         </div>
 
         <nav className="flex gap-1 overflow-x-auto pb-2 lg:block lg:flex-1 lg:overflow-y-auto lg:pb-0">
           <div className="flex lg:block">
-            {mainNav.map((item) => (
-              <NavLink key={item.href} item={item} pathname={pathname} />
-            ))}
+            {mainNav
+              .filter((item) => !enrolling || item.href === "/settings")
+              .map((item) => (
+                <NavLink key={item.href} item={item} pathname={pathname} />
+              ))}
           </div>
-          {isAdmin ? (
+          {isAdmin && !enrolling ? (
             <div className="flex lg:mt-8 lg:block">
               <p className="text-mint hidden px-5 pb-2 text-[12px] font-semibold lg:block">
                 Admin console

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireEnrolledSession } from "~/server/auth";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { AccountDetail } from "~/components/accounts/account-detail";
@@ -10,6 +11,7 @@ export default async function SharedAccountPage({
 }: {
   params: Promise<{ id: string; accountId: string }>;
 }) {
+  await requireEnrolledSession();
   const { id: workspaceId, accountId: id } = await params;
   if (
     !z.uuid().safeParse(id).success ||
