@@ -19,8 +19,6 @@ import { useReducedMotion } from "./use-motion";
 const OPENING_WORTH = SAMPLE_YEAR[0]!.worth - SAMPLE_YEAR[0]!.change;
 /** How long each page stays open while the book plays itself. */
 const PAGE_MS = 3400;
-/** After someone turns a page themselves, the book waits this long before playing again. */
-const IDLE_MS = 12000;
 /** Vertical strips the turning leaf is cut into; more strips make a smoother curl. */
 const STRIPS = 10;
 /** Peak curl across the whole leaf, in degrees, reached halfway through a turn. */
@@ -277,7 +275,6 @@ export function Book({
     ms: number;
     ease: (u: number) => number;
   } | null>(null);
-  const lastTouch = useRef(-Infinity);
   const drag = useRef<{
     id: number;
     x0: number;
@@ -394,6 +391,7 @@ export function Book({
       if (turnRef.current?.mode === "peek") {
         // Carry on from the lifted corner.
         turnRef.current = { ...turnRef.current, mode: "auto" };
+        setTurn(turnRef.current);
         if (to === turnRef.current.max) {
           animateTo(180, 1000, easeInOut, () => finish(180));
           return;
@@ -430,19 +428,15 @@ export function Book({
 
   // Play through the year; December rests a little longer, then the book closes back to January.
   useEffect(() => {
-    if (!playing || turn) return;
+    // A lifted hover corner must not suspend playback indefinitely.
+    if (!playing || (turn && turn.mode !== "peek")) return;
     const base = page === 11 ? PAGE_MS * 2 : PAGE_MS;
-    const idleLeft = IDLE_MS - (performance.now() - lastTouch.current);
     const timer = window.setTimeout(
       () => turnTo(page === 11 ? 0 : page + 1),
-      Math.max(base, idleLeft),
+      base,
     );
     return () => window.clearTimeout(timer);
   }, [playing, turn, page, turnTo]);
-
-  const touched = () => {
-    lastTouch.current = performance.now();
-  };
 
   /** Page geometry: where the spine is and how wide one page is. */
   function geometry() {
@@ -465,7 +459,6 @@ export function Book({
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if (reduced || (turnRef.current && turnRef.current.mode !== "peek")) return;
-    touched();
     drag.current = {
       id: event.pointerId,
       x0: event.clientX,
@@ -533,7 +526,6 @@ export function Book({
     const d = drag.current;
     drag.current = null;
     if (!d) return;
-    touched();
     if (!d.started) {
       // A click: the right page turns forward, the left page turns back.
       const g = geometry();
@@ -560,7 +552,6 @@ export function Book({
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
     event.preventDefault();
-    touched();
     turnTo(clamp(page + (event.key === "ArrowRight" ? 1 : -1), 0, 11));
   }
 
@@ -635,7 +626,6 @@ export function Book({
         <button
           type="button"
           onClick={() => {
-            touched();
             turnTo(Math.max(0, page - 1));
           }}
           disabled={page === 0}
@@ -650,7 +640,6 @@ export function Book({
               <button
                 type="button"
                 onClick={() => {
-                  touched();
                   turnTo(i);
                 }}
                 aria-label={m}
@@ -678,7 +667,6 @@ export function Book({
         <button
           type="button"
           onClick={() => {
-            touched();
             turnTo(Math.min(11, page + 1));
           }}
           disabled={page === 11}
@@ -690,7 +678,6 @@ export function Book({
         <button
           type="button"
           onClick={() => {
-            lastTouch.current = -Infinity;
             setPlaying((p) => !p);
           }}
           aria-label={playing ? "Pause" : "Play"}
