@@ -93,7 +93,7 @@ export function AiProvidersAdmin() {
                   <p className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-bold">{p.name}</span>
                     <Tag tone="outline">{kindMeta[p.kind].label}</Tag>
-                    {p.isDefault ? <Tag tone="forest">Default</Tag> : null}
+                    {p.isDefault ? <Tag tone="brand">Default</Tag> : null}
                     {!p.isEnabled ? <Tag tone="warn">Disabled</Tag> : null}
                     {p.supportsVision ? <Tag>Reads images</Tag> : null}
                   </p>
@@ -202,7 +202,7 @@ function ModelPicker({
         providerId ? (
           <button
             type="button"
-            className="text-forest font-semibold underline underline-offset-4"
+            className="text-brand font-semibold underline underline-offset-4"
             onClick={() => setLoad(true)}
           >
             {models.isFetching

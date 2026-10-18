@@ -117,7 +117,7 @@ export function WorkspaceDetail({
                 title="Shared account value"
                 description={`Latest recorded balances, shown in ${worth.data.currency}.`}
               >
-                <p className="figures font-wide text-5xl font-extrabold">
+                <p className="figures font-display text-5xl font-semibold">
                   {formatMoney(worth.data.total ?? "0", worth.data.currency)}
                 </p>
                 {worth.data.asOf ? (

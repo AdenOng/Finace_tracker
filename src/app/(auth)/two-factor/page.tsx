@@ -69,7 +69,7 @@ export default function TwoFactorPage() {
       <button
         type="button"
         onClick={() => setMode(mode === "totp" ? "backup" : "totp")}
-        className="text-forest mt-6 text-sm font-semibold underline underline-offset-4"
+        className="text-brand mt-6 text-sm font-semibold underline underline-offset-4"
       >
         {mode === "totp"
           ? "Use a backup code instead"

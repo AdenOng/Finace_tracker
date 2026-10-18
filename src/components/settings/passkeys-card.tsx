@@ -44,7 +44,7 @@ export function PasskeysCard() {
               key={pk.id}
               className="border-line flex items-center gap-3 border-b py-3"
             >
-              <KeyRound className="text-forest size-4" />
+              <KeyRound className="text-brand size-4" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">
                   {pk.name ?? "Passkey"}

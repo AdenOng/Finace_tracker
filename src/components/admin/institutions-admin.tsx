@@ -201,7 +201,7 @@ export function InstitutionsAdmin() {
                 <Td>
                   <div className="flex flex-wrap gap-1">
                     {r.ingestMethods.map((m) => (
-                      <Tag key={m} tone={m === "api" ? "forest" : "neutral"}>
+                      <Tag key={m} tone={m === "api" ? "brand" : "neutral"}>
                         {methodLabels[m]}
                       </Tag>
                     ))}

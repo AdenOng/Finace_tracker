@@ -88,11 +88,11 @@ export function ExtractionPlayground() {
             const dropped = e.dataTransfer.files[0];
             if (dropped) setFile(dropped);
           }}
-          className="border-ink-3 hover:border-forest hover:bg-wash flex min-h-44 flex-col items-center justify-center gap-3 border-2 border-dashed px-6 text-center transition-colors"
+          className="border-ink-3 hover:border-brand hover:bg-wash flex min-h-44 flex-col items-center justify-center gap-3 border-2 border-dashed px-6 text-center transition-colors"
         >
           {file ? (
             <>
-              <FileText className="text-forest size-8" />
+              <FileText className="text-brand size-8" />
               <span className="text-sm font-semibold break-all">
                 {file.name}
               </span>
@@ -337,7 +337,7 @@ export function ExtractionPlayground() {
             <summary className="hover:bg-wash cursor-pointer px-4 py-3 text-sm font-semibold">
               Raw JSON
             </summary>
-            <pre className="border-line bg-forest-3 text-mint-soft max-h-[32rem] overflow-auto border-t p-4 text-[12px] leading-relaxed">
+            <pre className="border-line bg-sunken text-ink-2 max-h-[32rem] overflow-auto border-t p-4 text-[12px] leading-relaxed">
               {JSON.stringify(out, null, 2)}
             </pre>
           </details>

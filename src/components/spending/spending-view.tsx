@@ -107,7 +107,7 @@ export function SpendingView({
           >
             <ChevronLeft className="size-4" />
           </Button>
-          <p className="font-wide min-w-44 text-center text-lg font-bold">
+          <p className="font-display min-w-44 text-center text-lg font-semibold">
             {formatMonth(month)}
           </p>
           <Button
@@ -182,7 +182,7 @@ export function SpendingView({
                       <dt className="text-ink-2 text-[13px] font-semibold">
                         Spent
                       </dt>
-                      <dd className="figures font-wide text-2xl font-extrabold">
+                      <dd className="figures font-display text-2xl font-semibold">
                         {formatMoney(t.spent.toFixed(), currency)}
                       </dd>
                     </div>
@@ -190,7 +190,7 @@ export function SpendingView({
                       <dt className="text-ink-2 text-[13px] font-semibold">
                         Received
                       </dt>
-                      <dd className="figures font-wide text-gain text-2xl font-extrabold">
+                      <dd className="figures font-display text-gain text-2xl font-semibold">
                         {formatMoney(t.received.toFixed(), currency)}
                       </dd>
                     </div>
@@ -330,7 +330,7 @@ export function SpendingView({
                   <Th>
                     <input
                       type="checkbox"
-                      className="accent-forest size-4"
+                      className="accent-brand size-4"
                       aria-label="Select all visible transactions"
                       disabled={selectionBusy}
                       checked={
@@ -361,13 +361,13 @@ export function SpendingView({
                     <Tr
                       key={t.id}
                       className={
-                        selected.has(t.id) ? "bg-mint-soft" : undefined
+                        selected.has(t.id) ? "bg-brand-soft" : undefined
                       }
                     >
                       <Td>
                         <input
                           type="checkbox"
-                          className="accent-forest size-4"
+                          className="accent-brand size-4"
                           aria-label={`Select ${t.description} on ${t.postedDate}`}
                           disabled={
                             selectionBusy ||

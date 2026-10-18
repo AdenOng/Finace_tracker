@@ -15,7 +15,7 @@ export function Table({
   className?: string;
 }) {
   return (
-    <div className={cn("border-ink overflow-x-auto border-t-2", className)}>
+    <div className={cn("-mx-1 overflow-x-auto", className)}>
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   );
@@ -28,7 +28,7 @@ export function Th({
   return (
     <th
       className={cn(
-        "border-ink text-ink-2 border-b px-3 py-2.5 text-left text-[12px] font-semibold whitespace-nowrap",
+        "border-line-2 text-ink-3 border-b px-3 py-2.5 text-left font-mono text-[11px] font-medium tracking-[0.1em] whitespace-nowrap uppercase",
         className,
       )}
       {...props}
@@ -42,7 +42,7 @@ export function Td({
 }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
     <td
-      className={cn("border-line border-b px-3 py-3 align-middle", className)}
+      className={cn("border-line border-b px-3 py-3.5 align-middle", className)}
       {...props}
     />
   );
@@ -54,7 +54,10 @@ export function Tr({
 }: HTMLAttributes<HTMLTableRowElement>) {
   return (
     <tr
-      className={cn("hover:bg-wash/60 transition-colors", className)}
+      className={cn(
+        "hover:bg-wash/70 transition-colors [&:last-child>td]:border-b-0",
+        className,
+      )}
       {...props}
     />
   );

@@ -4,14 +4,14 @@ import { cn } from "~/lib/cn";
 
 const variants = {
   primary:
-    "bg-forest text-white border border-forest hover:bg-forest-2 hover:border-forest-2 active:bg-forest-3",
+    "bg-brand text-on-brand border border-brand shadow-[inset_0_-2px_0_rgb(0_0_0/0.18)] hover:bg-brand-2 hover:border-brand-2 active:bg-brand-3",
   secondary:
-    "bg-canvas text-ink border border-ink hover:bg-wash active:bg-mint-soft",
+    "bg-surface-2 text-ink border border-line-2 hover:bg-wash hover:border-ink-3 active:bg-brand-soft",
   ghost: "bg-transparent text-ink border border-transparent hover:bg-wash",
   danger:
-    "bg-canvas text-loss border border-loss hover:bg-loss-wash active:bg-loss active:text-white",
+    "bg-transparent text-loss border border-loss/50 hover:bg-loss-wash active:bg-loss active:text-white",
   inverse:
-    "bg-mint text-forest-3 border border-mint hover:bg-mint-soft hover:border-mint-soft",
+    "bg-ink text-canvas border border-ink hover:bg-ink-2 hover:border-ink-2",
 } as const;
 
 const sizes = {
@@ -44,7 +44,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled ?? loading}
         className={cn(
-          "rounded-ctl relative inline-flex shrink-0 items-center justify-center font-semibold whitespace-nowrap transition-colors duration-100 select-none disabled:cursor-not-allowed disabled:opacity-45",
+          "rounded-ctl relative inline-flex shrink-0 items-center justify-center overflow-hidden font-semibold whitespace-nowrap transition-colors duration-100 select-none disabled:cursor-not-allowed disabled:opacity-45",
           variants[variant],
           sizes[size],
           className,
@@ -53,7 +53,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {loading ? (
           <span className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden">
-            <span className="animate-slide bg-mint block h-full w-1/3" />
+            <span className="animate-slide block h-full w-1/3 bg-current opacity-60" />
           </span>
         ) : null}
         {children}

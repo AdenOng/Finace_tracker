@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "~/lib/cn";
 
-/** Page title block: expanded headline over a heavy rule, optional actions on the right. */
+/** Page title block: serif headline, optional actions on the right. */
 export function PageHeader({
   title,
   description,
@@ -13,9 +13,9 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="border-line mb-8 flex flex-wrap items-end justify-between gap-4 border-b pb-5">
+    <header className="mb-10 flex flex-wrap items-end justify-between gap-4">
       <div className="max-w-2xl">
-        <h1 className="font-wide text-[28px] leading-tight font-bold sm:text-[34px]">
+        <h1 className="font-display text-[34px] leading-[1.05] font-semibold sm:text-[44px]">
           {title}
         </h1>
         {description ? (
@@ -29,7 +29,7 @@ export function PageHeader({
   );
 }
 
-/** Content section with a ruled heading. No card chrome — the rule does the separating. */
+/** Content section on a raised card surface. */
 export function Section({
   title,
   description,
@@ -44,10 +44,10 @@ export function Section({
   className?: string;
 }) {
   return (
-    <section className={cn("ruled", className)}>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <section className={cn("card p-5 sm:p-6", className)}>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold">{title}</h2>
+          <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>
           {description ? (
             <p className="text-ink-2 mt-0.5 text-sm">{description}</p>
           ) : null}
@@ -71,15 +71,19 @@ export function Notice({
   className?: string;
 }) {
   const tones = {
-    info: "border-forest bg-wash text-ink",
-    error: "border-loss bg-loss-wash text-ink",
-    warn: "border-warn bg-warn-wash text-ink",
-    success: "border-gain bg-wash text-ink",
+    info: "border-line-2 bg-wash text-ink",
+    error: "border-loss/40 bg-loss-wash text-ink",
+    warn: "border-warn/40 bg-warn-wash text-ink",
+    success: "border-gain/40 bg-gain/10 text-ink",
   };
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
-      className={cn("border-l-4 px-4 py-3 text-sm", tones[tone], className)}
+      className={cn(
+        "rounded-ctl border px-4 py-3 text-sm",
+        tones[tone],
+        className,
+      )}
     >
       {children}
     </div>
@@ -92,21 +96,21 @@ export function Tag({
   className,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "forest" | "mint" | "loss" | "warn" | "outline";
+  tone?: "neutral" | "brand" | "soft" | "loss" | "warn" | "outline";
   className?: string;
 }) {
   const tones = {
     neutral: "bg-wash text-ink-2",
-    forest: "bg-forest text-white",
-    mint: "bg-mint-soft text-forest-3",
+    brand: "bg-brand text-on-brand",
+    soft: "bg-brand-soft text-brand-2",
     loss: "bg-loss-wash text-loss",
     warn: "bg-warn-wash text-warn",
-    outline: "border border-line text-ink-2",
+    outline: "border border-line-2 text-ink-2",
   };
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center px-1.5 text-[11px] font-semibold tracking-wide",
+        "inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold tracking-wide",
         tones[tone],
         className,
       )}
@@ -126,8 +130,8 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="border-ink-3 border border-dashed px-6 py-10">
-      <p className="font-wide text-lg font-bold">{title}</p>
+    <div className="border-line-2 rounded-card border border-dashed px-6 py-10">
+      <p className="font-display text-2xl font-semibold">{title}</p>
       {children ? (
         <div className="text-ink-2 mt-1 max-w-lg text-sm">{children}</div>
       ) : null}

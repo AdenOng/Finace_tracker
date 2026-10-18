@@ -31,7 +31,7 @@ function Figure({
   return (
     <div>
       <dt className="text-ink-2 text-[13px] font-semibold">{label}</dt>
-      <dd className="figures font-wide text-2xl font-extrabold">{value}</dd>
+      <dd className="figures font-display text-2xl font-semibold">{value}</dd>
       {note ? <dd className="text-ink-3 text-[13px]">{note}</dd> : null}
     </div>
   );
@@ -89,7 +89,7 @@ export function AdminOverview() {
             note={
               <Link
                 href="/admin/users"
-                className="text-forest font-semibold underline underline-offset-4"
+                className="text-brand font-semibold underline underline-offset-4"
               >
                 Manage users
               </Link>

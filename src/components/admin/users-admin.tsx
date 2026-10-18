@@ -157,7 +157,7 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                   <Td className="font-semibold">
                     {u.name}
                     {self ? (
-                      <Tag tone="mint" className="ml-2">
+                      <Tag tone="soft" className="ml-2">
                         You
                       </Tag>
                     ) : null}
@@ -170,7 +170,7 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                   <Td>{u.email}</Td>
                   <Td>
                     {u.twoFactorEnabled ? (
-                      <Tag tone="forest">On</Tag>
+                      <Tag tone="brand">On</Tag>
                     ) : (
                       <Tag tone="warn">Off</Tag>
                     )}
@@ -228,7 +228,7 @@ function CopyLink({ url, className }: { url: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div
-      className={`border-forest bg-wash flex flex-wrap items-center gap-3 border-2 p-4 ${className ?? ""}`}
+      className={`border-brand bg-wash flex flex-wrap items-center gap-3 border-2 p-4 ${className ?? ""}`}
     >
       <code className="min-w-0 flex-1 text-[13px] break-all">{url}</code>
       <Button

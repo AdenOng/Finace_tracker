@@ -386,7 +386,7 @@ function ReconciliationDrawer({
                       <Td>
                         <input
                           type="checkbox"
-                          className="accent-forest size-4"
+                          className="accent-brand size-4"
                           aria-label={`Verify ${row.description} on ${row.postedDate}`}
                           checked={verified.has(row.id)}
                           disabled={data.overlaps || finish.isPending}

@@ -138,7 +138,7 @@ export function AccountDetail({
               <Amounts
                 totals={holdings.totals}
                 empty="Nothing held"
-                className="font-wide text-4xl font-extrabold"
+                className="font-display text-4xl font-semibold"
               />
               {holdings.unpriced > 0 ? (
                 <p className="text-warn text-sm">

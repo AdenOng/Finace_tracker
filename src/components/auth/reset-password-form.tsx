@@ -19,7 +19,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
         <Notice tone="success">Your password has been changed.</Notice>
         <Link
           href="/sign-in"
-          className="text-forest font-semibold underline underline-offset-4"
+          className="text-brand font-semibold underline underline-offset-4"
         >
           Sign in
         </Link>

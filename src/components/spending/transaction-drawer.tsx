@@ -155,7 +155,7 @@ export function TransactionDrawer({
               className={cn(
                 "h-10 text-sm font-semibold transition-colors",
                 direction === value
-                  ? "bg-forest text-white"
+                  ? "bg-brand text-on-brand"
                   : "text-ink-2 hover:bg-wash",
               )}
             >

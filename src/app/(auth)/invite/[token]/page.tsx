@@ -24,7 +24,7 @@ export default async function InvitePage({
         for a new invitation, or{" "}
         <Link
           href="/sign-in"
-          className="text-forest font-semibold underline underline-offset-4"
+          className="text-brand font-semibold underline underline-offset-4"
         >
           sign in
         </Link>{" "}
