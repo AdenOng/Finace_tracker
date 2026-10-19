@@ -3,7 +3,6 @@ import { requireEnrolledSession } from "~/server/auth";
 import { z } from "zod";
 
 import { SpendingView } from "~/components/spending/spending-view";
-import { PageHeader } from "~/components/ui/panel";
 import { currentMonth } from "~/lib/dates";
 import { api, HydrateClient } from "~/trpc/server";
 
@@ -21,10 +20,6 @@ export default async function SpendingPage({
   void api.catalog.currencies.prefetch();
   return (
     <HydrateClient>
-      <PageHeader
-        title="Spending"
-        description="Money in and out of your bank, card and cash accounts, month by month."
-      />
       <SpendingView
         initialMonth={currentMonth()}
         initialAccountId={z.uuid().safeParse(account).success ? account! : null}

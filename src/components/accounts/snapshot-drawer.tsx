@@ -30,6 +30,7 @@ type PositionRow = {
   quantity: string;
   price: string;
   averageCost: string;
+  value: string;
 };
 type CashRow = { key: number; currency: string; amount: string };
 
@@ -49,16 +50,20 @@ export function SnapshotDrawer({
   open,
   onClose,
   onSaved,
+  entry,
+  createOnly = false,
 }: {
   account: Account;
   open: boolean;
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
+  entry?: RouterOutputs["portfolio"]["snapshot"];
+  createOnly?: boolean;
 }) {
   const investments = holdsSecurities(account.type);
-  const latest = account.holdings;
+  const latest = entry ?? account.holdings;
 
-  const [asOf, setAsOf] = useState(todayIso);
+  const [asOf, setAsOf] = useState(() => entry?.asOf ?? todayIso());
   const [positions, setPositions] = useState<PositionRow[]>(() =>
     (latest?.positions ?? []).map((p) => ({
       key: key(),
@@ -70,6 +75,7 @@ export function SnapshotDrawer({
       quantity: plain(p.quantity),
       price: plain(p.statementPrice),
       averageCost: plain(p.averageCost),
+      value: plain(p.statementValue),
     })),
   );
   const [cash, setCash] = useState<CashRow[]>(() =>
@@ -82,36 +88,63 @@ export function SnapshotDrawer({
       : [{ key: key(), currency: account.currency, amount: "" }],
   );
   const record = api.portfolio.recordSnapshot.useMutation();
+  const add = api.portfolio.addSnapshot.useMutation();
+  const update = api.portfolio.updateSnapshot.useMutation();
+  const mutation = entry ? update : createOnly ? add : record;
+  const hasEntries =
+    positions.some((p) => p.symbol.trim()) || cash.some((c) => c.amount.trim());
 
   const setPosition = (k: number, patch: Partial<PositionRow>) =>
     setPositions((rows) =>
-      rows.map((r) => (r.key === k ? { ...r, ...patch } : r)),
+      rows.map((r) =>
+        r.key === k
+          ? {
+              ...r,
+              ...(patch.price !== undefined || patch.quantity !== undefined
+                ? { value: "" }
+                : {}),
+              ...patch,
+            }
+          : r,
+      ),
     );
   const setCashRow = (k: number, patch: Partial<CashRow>) =>
     setCash((rows) => rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = await record.mutateAsync({
+    const input = {
       accountId: account.id,
       asOf,
       positions: positions
         .filter((p) => p.symbol.trim())
-        .map(({ key: _, price, averageCost, ...p }) => ({
+        .map(({ key: _, price, averageCost, value, ...p }) => ({
           ...p,
           price: price.trim() || null,
           averageCost: averageCost.trim() || null,
+          value: value.trim() || null,
         })),
       cash: cash
         .filter((c) => c.amount.trim())
         .map(({ currency, amount }) => ({ currency, amount })),
-    });
+    };
+    const result = entry
+      ? await update.mutateAsync({
+          snapshotId: entry.id,
+          version: entry.version,
+          entry: input,
+        })
+      : createOnly
+        ? await add.mutateAsync(input)
+        : await record.mutateAsync(input);
     await onSaved(
-      result.replaced
-        ? "Replaced the entry for that date."
-        : investments
-          ? "Holdings recorded."
-          : "Balance recorded.",
+      entry
+        ? "Entry updated."
+        : result.replaced
+          ? "Replaced the entry for that date."
+          : investments
+            ? "Holdings recorded."
+            : "Balance recorded.",
     );
   }
 
@@ -120,7 +153,15 @@ export function SnapshotDrawer({
       open={open}
       onClose={onClose}
       className={investments ? "max-w-2xl" : undefined}
-      title={investments ? "Update holdings" : "Update balance"}
+      title={
+        entry
+          ? "Edit entry"
+          : createOnly
+            ? "Add entry"
+            : investments
+              ? "Update holdings"
+              : "Update balance"
+      }
       description={
         investments
           ? "What the account held on a date. Prices are used until live quotes are available."
@@ -133,7 +174,12 @@ export function SnapshotDrawer({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form="snapshot-form" loading={record.isPending}>
+          <Button
+            type="submit"
+            form="snapshot-form"
+            loading={mutation.isPending}
+            disabled={!hasEntries || mutation.isPending}
+          >
             Save
           </Button>
         </>
@@ -144,13 +190,29 @@ export function SnapshotDrawer({
         onSubmit={(e) => void onSubmit(e).catch(() => undefined)}
         className="space-y-8"
       >
-        {record.error ? (
-          <Notice tone="error">{errorMessage(record.error)}</Notice>
+        {mutation.error ? (
+          <Notice tone="error">{errorMessage(mutation.error)}</Notice>
+        ) : null}
+        {entry?.documentId ? (
+          <Notice>
+            Editing these holdings keeps the original statement image or file
+            and any imported trades. Changes apply to this saved entry.
+          </Notice>
+        ) : null}
+        {!hasEntries ? (
+          <Notice>
+            Add a holding or cash balance before saving. To record an empty
+            account, enter 0 under {investments ? "Cash" : "Balance"}.
+          </Notice>
         ) : null}
         <Field
           label="As of"
           htmlFor="snapshot-date"
-          hint="Saving the same date again replaces that entry."
+          hint={
+            entry || createOnly
+              ? "The newest dated entry determines the account value. An existing entry will not be overwritten."
+              : "Saving the same date again replaces that entry."
+          }
         >
           <Input
             id="snapshot-date"
@@ -293,6 +355,22 @@ export function SnapshotDrawer({
                       className="figures"
                     />
                   </Field>
+                  <Field
+                    label="Market value"
+                    htmlFor={`p-value-${p.key}`}
+                    hint="Optional total; otherwise quantity × price."
+                    className="col-span-2"
+                  >
+                    <Input
+                      id={`p-value-${p.key}`}
+                      inputMode="decimal"
+                      value={p.value}
+                      onChange={(e) =>
+                        setPosition(p.key, { value: e.target.value })
+                      }
+                      className="figures"
+                    />
+                  </Field>
                 </div>
               </div>
             ))}
@@ -313,6 +391,7 @@ export function SnapshotDrawer({
                     quantity: "",
                     price: "",
                     averageCost: "",
+                    value: "",
                   },
                 ])
               }

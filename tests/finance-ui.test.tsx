@@ -4,8 +4,14 @@ import { getQueryKey } from "@trpc/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 
+import { ConsolidatedPortfolio } from "../src/components/portfolio/consolidated-portfolio";
+import { consolidateHoldings } from "../src/server/modules/portfolio/consolidated";
+import type { Holdings } from "../src/server/modules/portfolio/holdings";
+import { ImportReview } from "../src/components/imports/import-review";
 import { TransactionDrawer } from "../src/components/spending/transaction-drawer";
 import { SpendingView } from "../src/components/spending/spending-view";
+import { AccountRow } from "../src/components/overview/account-row";
+import { PortfolioSettings } from "../src/components/overview/portfolio-settings";
 import { createQueryClient } from "../src/trpc/query-client";
 import { api, type RouterOutputs } from "../src/trpc/react";
 
@@ -28,6 +34,68 @@ afterEach(() => {
 });
 
 const accountId = "11111111-1111-4111-8111-111111111111";
+const brokerTotal: RouterOutputs["portfolio"]["netWorth"]["accounts"][number] =
+  {
+    id: accountId,
+    ownerId: "alice",
+    ownerName: "Alice",
+    name: "Broker",
+    type: "brokerage",
+    last4: null,
+    institutionName: "Interactive Brokers",
+    institutionKey: "ibkr",
+    asOf: "2026-10-19",
+    unpriced: 0,
+    totals: [
+      { currency: "USD", amount: "1100" },
+      { currency: "SGD", amount: "12.63" },
+    ],
+    total: "1387.63",
+    unconverted: [],
+  };
+
+test("broker rows show one converted holdings-and-cash total instead of currency balances", () => {
+  const html = renderToStaticMarkup(
+    <AccountRow account={brokerTotal} currency="SGD" />,
+  );
+  expect(html).toContain("S$1,387.63");
+  expect(html).not.toContain("US$1,100");
+  expect(html).not.toContain("S$12.63");
+  expect(html).not.toContain("Partial");
+  const incomplete = renderToStaticMarkup(
+    <AccountRow
+      account={{
+        ...brokerTotal,
+        total: "12.63",
+        unconverted: [{ currency: "USD", amount: "1100" }],
+      }}
+      currency="SGD"
+    />,
+  );
+  expect(incomplete).toContain("Partial");
+  expect(incomplete).not.toContain("US$1,100");
+  const unrecorded = renderToStaticMarkup(
+    <AccountRow
+      account={{ ...brokerTotal, asOf: null, total: null, totals: [] }}
+      currency="SGD"
+    />,
+  );
+  expect(unrecorded).toContain("Not recorded");
+});
+
+test("portfolio settings expose accessible SVG gear buttons in both card headers", () => {
+  const html = renderToStaticMarkup(
+    <PortfolioSettings currency="SGD" id="test-currency" />,
+  );
+  expect(html).toContain('aria-label="Net worth display settings"');
+  expect(html).toContain('aria-haspopup="dialog"');
+  expect(html).toContain("<svg");
+  expect(html).toContain("SGD");
+  const investment = renderToStaticMarkup(
+    <PortfolioSettings currency="SGD" id="investment-currency" iconOnly />,
+  );
+  expect(investment).toContain('aria-label="Investment display settings"');
+});
 const categoryId = "22222222-2222-4222-8222-222222222222";
 const transaction: RouterOutputs["spending"]["list"][number] = {
   id: "33333333-3333-4333-8333-333333333333",
@@ -257,4 +325,195 @@ test("shared account detail hides cached financial data after permission errors"
   expect(html).toContain("Account not found");
   expect(html).not.toContain("S$100.00");
   expect(html).not.toContain("Shared bank");
+});
+
+test("completed imports expose removal only for saved rows and keep removed evidence distinct from excluded rows", () => {
+  const id = "88888888-8888-4888-8888-888888888888";
+  const job: RouterOutputs["imports"]["get"] = {
+    id,
+    status: "completed",
+    error: null,
+    model: null,
+    createdAt: new Date(),
+    startedAt: null,
+    finishedAt: null,
+    documentId: "99999999-9999-4999-8999-999999999999",
+    fileName: "example.png",
+    mimeType: "image/png",
+    periodStart: null,
+    periodEnd: null,
+    accountId,
+    accountName: "Broker",
+    accountArchivedAt: null,
+    accountType: "brokerage",
+    accountCurrency: "SGD",
+    institutionName: null,
+    institutionKey: null,
+    latestHoldingsAsOf: "2026-09-30",
+    importedHoldingsAsOf: "2026-09-30",
+    importedHoldingsAdjusted: false,
+    stale: false,
+    summary: null,
+    rows: [
+      {
+        id: "a",
+        kind: "cash_balance",
+        data: { currency: "SGD", amount: "10" },
+        matchStatus: "new",
+        decision: "accept",
+        committedRecordId: "snapshot",
+        removed: false,
+      },
+      {
+        id: "b",
+        kind: "cash_balance",
+        data: { currency: "USD", amount: "20" },
+        matchStatus: "new",
+        decision: "skip",
+        committedRecordId: "snapshot",
+        removed: true,
+      },
+      {
+        id: "c",
+        kind: "cash_balance",
+        data: { currency: "HKD", amount: "30" },
+        matchStatus: "duplicate",
+        decision: "skip",
+        committedRecordId: null,
+        removed: false,
+      },
+    ],
+  };
+  const html = render(<ImportReview id={id} />, (client) =>
+    client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), job),
+  );
+  expect(html).toContain('aria-label="Remove SGD cash"');
+  expect(html).not.toContain('aria-label="Remove USD cash"');
+  expect(html).not.toContain('aria-label="Remove HKD cash"');
+  expect(html).toContain("Removed");
+  expect(html).toContain("Excluded");
+  expect(html).toContain("US$20.00");
+  expect(html).not.toContain('type="checkbox"');
+  const pending = render(<ImportReview id={id} />, (client) =>
+    client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), {
+      ...job,
+      status: "needs_review",
+      rows: [job.rows[0]],
+    }),
+  );
+  expect(pending).toContain('type="checkbox"');
+  expect(pending).not.toContain('aria-label="Remove SGD cash"');
+  const archived = render(<ImportReview id={id} />, (client) =>
+    client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), {
+      ...job,
+      accountArchivedAt: new Date(),
+    }),
+  );
+  expect(archived).toContain("Restore original account");
+  expect(archived).toContain(
+    "Adding this broker again creates a separate account",
+  );
+  expect(archived).toContain("Restore the original account to manage this row");
+  const orphaned = render(<ImportReview id={id} />, (client) =>
+    client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), {
+      ...job,
+      accountId: null,
+      accountName: null,
+      accountType: null,
+    }),
+  );
+  expect(orphaned).toContain("The original account was deleted");
+  expect(orphaned).not.toContain("Restore original account");
+});
+
+test("consolidated portfolio renders combined quantities, expandable broker dates, search, cash and missing-data labels", () => {
+  const accounts = [
+    {
+      id: accountId,
+      name: "Broker A",
+      institutionName: null,
+      institutionKey: null,
+    },
+    {
+      id: "88888888-8888-4888-8888-888888888888",
+      name: "Broker B",
+      institutionName: null,
+      institutionKey: null,
+    },
+  ];
+  const entries = new Map<string, Holdings>(
+    accounts.map((a, i) => [
+      a.id,
+      {
+        snapshotId: "snapshot",
+        asOf: i ? "2026-09-30" : "2026-10-19",
+        source: i ? "statement" : "manual",
+        positions: [
+          {
+            id: a.id,
+            securityId: "same-stock",
+            symbol: "SHARED",
+            exchange: "XNAS",
+            name: "Example company",
+            assetClass: "stock",
+            currency: "SGD",
+            quantity: i ? "0.2" : "0.1",
+            averageCost: null,
+            statementPrice: "100",
+            statementValue: null,
+            quotedAt: null,
+            value: { currency: "SGD", amount: i ? "20" : "10" },
+          },
+        ],
+        cash: [{ currency: "SGD", amount: "5" }],
+        totals: [{ currency: "SGD", amount: i ? "25" : "15" }],
+        unpriced: 0,
+      },
+    ]),
+  );
+  const portfolio = {
+    ...consolidateHoldings(accounts, entries, "SGD", new Map()),
+    fxAsOf: null,
+    archivedCount: 1,
+  };
+  const setup = (client: ReturnType<typeof createQueryClient>) =>
+    client.setQueryData(
+      getQueryKey(api.portfolio.consolidated, undefined, "query"),
+      portfolio,
+    );
+  const html = render(<ConsolidatedPortfolio />, setup);
+  expect(html).toContain("Consolidated portfolio");
+  expect(html).toContain("S$40.00");
+  expect(html).toContain("0.3");
+  expect(html).toContain("units · ");
+  expect(html).toContain("Broker A");
+  expect(html).toContain("Broker B");
+  expect(html).toContain("30 Sept 2026");
+  expect(html).toContain("19 Oct 2026");
+  expect(html).toContain("Imported");
+  expect(html).toContain("Manual");
+  expect(html).toContain('aria-label="Filter by broker"');
+  expect(html).toContain("Search holdings");
+  expect(html).toContain("<summary");
+  expect(html).toContain("Broker cash");
+  expect(html).toContain("archived account");
+  expect(html).not.toContain(">Partial<");
+  const incomplete = render(<ConsolidatedPortfolio />, (client) =>
+    client.setQueryData(
+      getQueryKey(api.portfolio.consolidated, undefined, "query"),
+      {
+        ...portfolio,
+        incomplete: true,
+        unpriced: 1,
+        unrecorded: 1,
+        unconverted: [{ currency: "USD", amount: "100" }],
+        positions: portfolio.positions.map((p) => ({ ...p, weight: null })),
+      },
+    ),
+  );
+  expect(incomplete).toContain("Partial");
+  expect(incomplete).toContain("no price");
+  expect(incomplete).toContain("no recorded holdings");
+  expect(incomplete).toContain("Waiting for exchange rates");
+  expect(incomplete).not.toContain("% of portfolio");
 });

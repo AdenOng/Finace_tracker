@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import { and, desc, eq, exists, inArray, or, sql } from "drizzle-orm";
 
 import type { Database } from "~/server/db";
 import {
@@ -9,7 +10,12 @@ import {
   security,
   securityQuote,
 } from "~/server/db/schema";
-import { readableAccount, type AccessScope } from "~/server/lib/access";
+import {
+  readableAccount,
+  writableBy,
+  type AccessScope,
+} from "~/server/lib/access";
+import { exchangeRates } from "./exchange-rates";
 import {
   type Amount,
   ratesFromRows,
@@ -43,6 +49,77 @@ export type Holdings = {
   unpriced: number;
 };
 
+/** Legacy blank saves contain no information; an explicit zero cash row is a valid entry. */
+export function hasSnapshotEntries(db: Pick<Database, "select">) {
+  return or(
+    exists(
+      db
+        .select({ id: position.id })
+        .from(position)
+        .where(eq(position.snapshotId, accountSnapshot.id)),
+    ),
+    exists(
+      db
+        .select({ id: cashBalance.id })
+        .from(cashBalance)
+        .where(eq(cashBalance.snapshotId, accountSnapshot.id)),
+    ),
+  );
+}
+
+/** Load one owned entry for editing without substituting today's quotes for recorded values. */
+export async function snapshotDetails(
+  db: Database,
+  scope: AccessScope,
+  accountId: string,
+  snapshotId: string,
+) {
+  const [snapshot] = await db
+    .select({
+      id: accountSnapshot.id,
+      accountId: accountSnapshot.accountId,
+      asOf: accountSnapshot.asOf,
+      source: accountSnapshot.source,
+      documentId: accountSnapshot.documentId,
+      version: sql<string>`${accountSnapshot.updatedAt}::text`,
+    })
+    .from(accountSnapshot)
+    .where(
+      and(
+        eq(accountSnapshot.id, snapshotId),
+        eq(accountSnapshot.accountId, accountId),
+        writableBy(scope, accountSnapshot.ownerId),
+      ),
+    )
+    .limit(1);
+  if (!snapshot)
+    throw new TRPCError({ code: "NOT_FOUND", message: "Entry not found" });
+  const [positions, cash] = await Promise.all([
+    db
+      .select({
+        symbol: security.symbol,
+        exchange: security.exchange,
+        name: security.name,
+        assetClass: security.assetClass,
+        currency: security.currency,
+        quantity: position.quantity,
+        averageCost: position.averageCost,
+        statementPrice: position.statementPrice,
+        statementValue: position.statementValue,
+      })
+      .from(position)
+      .innerJoin(security, eq(security.id, position.securityId))
+      .where(eq(position.snapshotId, snapshot.id))
+      .orderBy(security.symbol, security.exchange),
+    db
+      .select({ currency: cashBalance.currency, amount: cashBalance.amount })
+      .from(cashBalance)
+      .where(eq(cashBalance.snapshotId, snapshot.id))
+      .orderBy(cashBalance.currency),
+  ]);
+  return { ...snapshot, positions, cash };
+}
+
 /**
  * Loads the most recent snapshot (positions + cash) of each given account and values it.
  * Accounts without a snapshot are absent from the returned map.
@@ -70,12 +147,14 @@ export async function latestHoldings(
           accountSnapshot.accountId,
         ),
         inArray(accountSnapshot.accountId, accountIds),
+        hasSnapshotEntries(db),
       ),
     )
     .orderBy(
       accountSnapshot.accountId,
       desc(accountSnapshot.asOf),
       desc(accountSnapshot.createdAt),
+      desc(accountSnapshot.id),
     );
 
   const snapshotIds = snapshots.map((s) => s.id);
@@ -157,7 +236,15 @@ export async function ratesInto(
   currencies: Iterable<string>,
 ) {
   const others = [...new Set(currencies)].filter((c) => c !== target);
-  if (others.length === 0) return new Map<string, string>();
+  if (others.length === 0) {
+    return { rates: new Map<string, string>(), asOf: null };
+  }
+  const fresh = (await exchangeRates.latest(target)).filter((r) =>
+    others.includes(r.quote),
+  );
+  if (fresh.length > 0) {
+    await db.insert(fxRate).values(fresh).onConflictDoNothing();
+  }
   const rows = await db
     .selectDistinctOn([fxRate.base, fxRate.quote], {
       date: fxRate.date,
@@ -173,5 +260,15 @@ export async function ratesInto(
       ),
     )
     .orderBy(fxRate.base, fxRate.quote, desc(fxRate.date));
-  return ratesFromRows(rows, target);
+  const latestDates = new Map<string, string>();
+  for (const row of rows) {
+    const currency = row.base === target ? row.quote : row.base;
+    if (row.date > (latestDates.get(currency) ?? "")) {
+      latestDates.set(currency, row.date);
+    }
+  }
+  return {
+    rates: ratesFromRows(rows, target),
+    asOf: [...latestDates.values()].sort().at(0) ?? null,
+  };
 }

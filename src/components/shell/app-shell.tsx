@@ -10,6 +10,7 @@ import {
   Building2,
   FileUp,
   LayoutGrid,
+  Layers,
   LogOut,
   type LucideIcon,
   Settings,
@@ -39,6 +40,7 @@ type NavItem = {
 const mainNav: NavItem[] = [
   { href: "/", label: "Overview", icon: LayoutGrid, exact: true, tab: true },
   { href: "/accounts", label: "Accounts", icon: Wallet, tab: true },
+  { href: "/portfolio", label: "Portfolio", icon: Layers },
   { href: "/spending", label: "Spending", icon: ArrowLeftRight, tab: true },
   { href: "/imports", label: "Imports", icon: FileUp, tab: true },
   { href: "/workspaces", label: "Workspaces", icon: Users },

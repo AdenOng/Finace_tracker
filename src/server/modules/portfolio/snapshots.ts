@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -38,28 +38,35 @@ export const positionInput = z.object({
   quantity: quantityInput,
   averageCost: priceInput.nullable(),
   price: priceInput.nullable(),
+  value: moneyInput.nullable().optional(),
 });
 
-export const snapshotInput = z.object({
-  accountId: z.uuid(),
-  asOf: isoDateInput,
-  positions: z
-    .array(positionInput)
-    .max(500)
-    .refine(
-      (rows) =>
-        new Set(rows.map((r) => `${r.symbol}\u0000${r.exchange}`)).size ===
-        rows.length,
-      "Each holding can only be listed once",
-    ),
-  cash: z
-    .array(z.object({ currency: currencyInput, amount: moneyInput }))
-    .max(20)
-    .refine(
-      (rows) => new Set(rows.map((r) => r.currency)).size === rows.length,
-      "Each currency can only be listed once",
-    ),
-});
+export const snapshotInput = z
+  .object({
+    accountId: z.uuid(),
+    asOf: isoDateInput,
+    positions: z
+      .array(positionInput)
+      .max(500)
+      .refine(
+        (rows) =>
+          new Set(rows.map((r) => `${r.symbol}\u0000${r.exchange}`)).size ===
+          rows.length,
+        "Each holding can only be listed once",
+      ),
+    cash: z
+      .array(z.object({ currency: currencyInput, amount: moneyInput }))
+      .max(20)
+      .refine(
+        (rows) => new Set(rows.map((r) => r.currency)).size === rows.length,
+        "Each currency can only be listed once",
+      ),
+  })
+  .refine((input) => input.positions.length > 0 || input.cash.length > 0, {
+    message:
+      "Add a holding or cash balance. To record an empty account, enter a cash balance of 0.",
+    path: ["cash"],
+  });
 
 export type SnapshotInput = z.infer<typeof snapshotInput>;
 
@@ -73,7 +80,12 @@ export async function writeSnapshot(
   scope: AccessScope,
   account: { id: string; type: AccountType },
   input: SnapshotInput,
-  options: { source: "manual" | "statement"; documentId?: string | null },
+  options: {
+    source: "manual" | "statement" | "api";
+    documentId?: string | null;
+    editId?: string;
+    createOnly?: boolean;
+  },
 ) {
   if (input.positions.length > 0 && !holdsSecurities(account.type)) {
     throw new TRPCError({
@@ -139,9 +151,16 @@ export async function writeSnapshot(
         eq(accountSnapshot.accountId, account.id),
         eq(accountSnapshot.asOf, input.asOf),
         eq(accountSnapshot.source, options.source),
+        options.editId ? ne(accountSnapshot.id, options.editId) : undefined,
       ),
     );
   if (replaced.length > 0) {
+    if (options.editId || options.createOnly)
+      throw new TRPCError({
+        code: "CONFLICT",
+        message:
+          "Another entry from this source already uses that date. Choose another date or edit that entry.",
+      });
     await tx.delete(accountSnapshot).where(
       inArray(
         accountSnapshot.id,
@@ -150,17 +169,36 @@ export async function writeSnapshot(
     );
   }
 
-  const [snapshot] = await tx
-    .insert(accountSnapshot)
-    .values({
-      ownerId: scope.userId,
-      accountId: account.id,
-      asOf: input.asOf,
-      source: options.source,
-      documentId: options.documentId ?? null,
-    })
-    .returning({ id: accountSnapshot.id });
+  const [snapshot] = options.editId
+    ? await tx
+        .update(accountSnapshot)
+        .set({
+          asOf: input.asOf,
+          updatedAt: sql`greatest(clock_timestamp(), ${accountSnapshot.updatedAt} + interval '1 microsecond')`,
+        })
+        .where(
+          and(
+            eq(accountSnapshot.id, options.editId),
+            eq(accountSnapshot.accountId, account.id),
+            eq(accountSnapshot.ownerId, scope.userId),
+          ),
+        )
+        .returning({ id: accountSnapshot.id })
+    : await tx
+        .insert(accountSnapshot)
+        .values({
+          ownerId: scope.userId,
+          accountId: account.id,
+          asOf: input.asOf,
+          source: options.source,
+          documentId: options.documentId ?? null,
+        })
+        .returning({ id: accountSnapshot.id });
   const snapshotId = snapshot!.id;
+  if (options.editId) {
+    await tx.delete(position).where(eq(position.snapshotId, snapshotId));
+    await tx.delete(cashBalance).where(eq(cashBalance.snapshotId, snapshotId));
+  }
 
   if (input.positions.length > 0) {
     await tx.insert(position).values(
@@ -171,7 +209,8 @@ export async function writeSnapshot(
         averageCost: p.averageCost,
         costCurrency: p.averageCost ? p.currency : null,
         statementPrice: p.price,
-        statementValue: p.price ? multiply(p.quantity, p.price) : null,
+        statementValue:
+          p.value ?? (p.price ? multiply(p.quantity, p.price) : null),
       })),
     );
   }

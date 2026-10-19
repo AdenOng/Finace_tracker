@@ -70,7 +70,13 @@ export function AccountsView({
   );
   const [flash, setFlash] = useState<string | null>(null);
   const restore = api.accounts.restore.useMutation({
-    onSuccess: () => utils.accounts.list.invalidate(),
+    onSuccess: async () => {
+      await Promise.all([
+        utils.accounts.list.invalidate(),
+        utils.portfolio.invalidate(),
+      ]);
+      router.refresh();
+    },
   });
 
   const open = rows.filter((r) => !r.archivedAt);
@@ -114,14 +120,24 @@ export function AccountsView({
               description={g.description}
               actions={
                 filter === "open" ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setAdding(g.group)}
-                  >
-                    <Plus className="size-4" />
-                    {g.add}
-                  </Button>
+                  <>
+                    {g.group === "investments" ? (
+                      <Link
+                        href="/portfolio"
+                        className="inline-flex min-h-10 items-center px-2 text-sm font-semibold underline underline-offset-4"
+                      >
+                        Consolidated view
+                      </Link>
+                    ) : null}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setAdding(g.group)}
+                    >
+                      <Plus className="size-4" />
+                      {g.add}
+                    </Button>
+                  </>
                 ) : undefined
               }
             >
@@ -158,7 +174,10 @@ export function AccountsView({
         onClose={() => setAdding(null)}
         onSaved={async (message, _outcome, createdId) => {
           setAdding(null);
-          await utils.accounts.list.invalidate();
+          await Promise.all([
+            utils.accounts.list.invalidate(),
+            utils.portfolio.invalidate(),
+          ]);
           if (createdId) {
             router.push(`/accounts/${createdId}?record=1`);
             return;

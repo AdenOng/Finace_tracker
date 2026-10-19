@@ -44,7 +44,7 @@ export function Section({
   className?: string;
 }) {
   return (
-    <section className={cn("card p-5 sm:p-6", className)}>
+    <section className={cn("card min-w-0 p-5 sm:p-6", className)}>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>
@@ -53,7 +53,9 @@ export function Section({
           ) : null}
         </div>
         {actions ? (
-          <div className="flex items-center gap-2">{actions}</div>
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
+            {actions}
+          </div>
         ) : null}
       </div>
       {children}

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AccountDrawer } from "~/components/accounts/account-drawer";
+import { EntryHistory } from "~/components/accounts/entry-history";
 import { AccountReconciliation } from "~/components/accounts/account-reconciliation";
 import { AccountTransactions } from "~/components/accounts/account-transactions";
 import { InstitutionMark } from "~/components/accounts/institution-mark";
@@ -55,11 +56,14 @@ export function AccountDetail({
   );
   const [editing, setEditing] = useState(false);
   const [updating, setUpdating] = useState(startRecording);
+  const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const invalidate = () =>
     Promise.all([
       utils.accounts.get.invalidate({ id }),
       utils.accounts.list.invalidate(),
+      utils.portfolio.invalidate(),
+      utils.imports.invalidate(),
     ]);
   const restore = api.accounts.restore.useMutation({ onSuccess: invalidate });
 
@@ -129,7 +133,13 @@ export function AccountDetail({
                 <FileUp className="size-4" />
                 Import statement
               </Link>
-              <Button onClick={() => setUpdating(true)}>
+              <Button
+                onClick={() =>
+                  holdings
+                    ? setEditingEntry(holdings.snapshotId)
+                    : setUpdating(true)
+                }
+              >
                 <RefreshCw className="size-4" />
                 {investments ? "Update holdings" : "Update balance"}
               </Button>
@@ -281,6 +291,19 @@ export function AccountDetail({
             <Amounts totals={holdings.cash} className="text-lg" />
           </Section>
         ) : null}
+        {!readOnly ? (
+          <EntryHistory
+            account={account}
+            editId={editingEntry}
+            onEdit={setEditingEntry}
+            onAdd={() => setUpdating(true)}
+            onChanged={async (message) => {
+              setFlash(message);
+              await invalidate();
+              router.refresh();
+            }}
+          />
+        ) : null}
 
         {!investments ? (
           <AccountTransactions
@@ -315,18 +338,21 @@ export function AccountDetail({
             }
             setFlash(message);
             await invalidate();
+            router.refresh();
           }}
         />
       ) : null}
       {!readOnly && updating ? (
         <SnapshotDrawer
           account={account}
+          createOnly
           open
           onClose={() => setUpdating(false)}
           onSaved={async (message) => {
             setUpdating(false);
             setFlash(message);
             await invalidate();
+            router.refresh();
           }}
         />
       ) : null}

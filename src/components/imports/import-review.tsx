@@ -10,9 +10,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
+import { ImportLineRemoval } from "~/components/imports/line-removal";
 import { ImportStatus, isReading } from "~/components/imports/import-status";
 import { ReadGlyph } from "~/components/landing/glyphs";
 import { Button } from "~/components/ui/button";
@@ -33,6 +34,12 @@ import { api, type RouterOutputs } from "~/trpc/react";
 type Job = RouterOutputs["imports"]["get"];
 type Row = Job["rows"][number];
 type RowOf<K extends Row["kind"]> = Extract<Row, { kind: K }>;
+
+const RowControls = createContext<{
+  completed: boolean;
+  canRemove: boolean;
+  onRemove: (row: Row) => void;
+}>({ completed: false, canRemove: false, onRemove: () => undefined });
 
 const DOCUMENT_LABELS: Record<string, string> = {
   bank_statement: "Bank statement",
@@ -86,6 +93,7 @@ export function ImportReview({ id }: { id: string }) {
   const [asOfChoice, setAsOf] = useState<string | null>(null);
   const asOf = asOfChoice ?? job.summary?.periodEnd ?? today;
   const [flash, setFlash] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<Row | null>(null);
 
   const update = api.imports.updateRows.useMutation({
     onMutate: ({ ids, decision, patch }) => {
@@ -126,7 +134,9 @@ export function ImportReview({ id }: { id: string }) {
         utils.imports.invalidate(),
         utils.accounts.invalidate(),
         utils.spending.invalidate(),
+        utils.portfolio.invalidate(),
       ]);
+      router.refresh();
     },
   });
   const retry = api.imports.retry.useMutation({
@@ -138,6 +148,19 @@ export function ImportReview({ id }: { id: string }) {
       router.push("/imports");
     },
   });
+  const restore = api.accounts.restore.useMutation({
+    onSuccess: async () => {
+      setFlash(
+        "Original account restored. Its imports and saved records remain attached.",
+      );
+      await Promise.all([
+        utils.accounts.invalidate(),
+        utils.imports.invalidate(),
+        utils.portfolio.invalidate(),
+      ]);
+      router.refresh();
+    },
+  });
 
   const reading = isReading(job.status, job.stale);
   const failed = job.status === "failed" || job.stale;
@@ -146,11 +169,30 @@ export function ImportReview({ id }: { id: string }) {
   const of = <K extends Row["kind"]>(kind: K) =>
     rows.filter((r): r is RowOf<K> => r.kind === kind);
   const accepted = rows.filter((r) => r.decision === "accept");
+  const holdingsDate =
+    job.status === "completed" ? job.importedHoldingsAsOf : asOf;
+  const hasHoldings =
+    job.status === "completed"
+      ? !!job.importedHoldingsAsOf
+      : accepted.some(
+          (r) => r.kind === "position" || r.kind === "cash_balance",
+        );
+  const isHistorical =
+    hasHoldings &&
+    holdingsDate &&
+    job.latestHoldingsAsOf &&
+    holdingsDate < job.latestHoldingsAsOf;
   const setDecision = (ids: string[], decision: "accept" | "skip") =>
     ids.length > 0 && update.mutate({ jobId: id, ids, decision });
 
   return (
-    <>
+    <RowControls.Provider
+      value={{
+        completed: job.status === "completed",
+        canRemove: !!job.accountId && !job.accountArchivedAt,
+        onRemove: setRemoving,
+      }}
+    >
       <Link
         href="/imports"
         className="text-ink-2 hover:text-ink mb-4 inline-flex items-center gap-1.5 text-sm font-semibold"
@@ -188,6 +230,55 @@ export function ImportReview({ id }: { id: string }) {
         </div>
         <ImportStatus status={job.status} stale={job.stale} />
       </header>
+
+      {job.accountArchivedAt && job.accountId ? (
+        <Notice tone="warn" className="mb-4">
+          <p>
+            This import belongs to the archived account{" "}
+            <strong>{job.accountName}</strong>. Its saved records are still
+            there. Adding this broker again creates a separate account; it does
+            not move older imports.
+          </p>
+          <p className="mt-2">
+            Restore the original account to manage these rows and include its
+            holdings in your totals again.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={restore.isPending}
+              onClick={() => {
+                if (job.accountId) restore.mutate({ id: job.accountId });
+              }}
+            >
+              Restore original account
+            </Button>
+            <Link
+              className="font-semibold underline underline-offset-4"
+              href={`/accounts/${job.accountId}`}
+            >
+              View original account
+            </Link>
+          </div>
+          {restore.error ? (
+            <p className="text-loss mt-2">{errorMessage(restore.error)}</p>
+          ) : null}
+        </Notice>
+      ) : !job.accountId ? (
+        <Notice tone="warn" className="mb-4">
+          The original account was deleted. This upload is kept for reference.
+          Adding the broker again creates a separate account and does not
+          transfer this import or restore deleted records.
+        </Notice>
+      ) : null}
+
+      {job.status === "completed" && job.accountId && !job.accountArchivedAt ? (
+        <p className="text-ink-2 mb-4 text-sm">
+          Use the trash button beside a saved row to review its removal. The
+          original upload and extracted rows stay available.
+        </p>
+      ) : null}
 
       {flash ? (
         <Notice tone="success" className="mb-4">
@@ -254,6 +345,54 @@ export function ImportReview({ id }: { id: string }) {
       ) : (
         <div className="space-y-4 pb-24">
           <Summary job={job} />
+          {job.status === "completed" && job.importedHoldingsAdjusted ? (
+            <Notice>
+              The holdings from this import have been adjusted in the account.
+              The rows below show the original extraction.{" "}
+              {job.accountId ? (
+                <Link
+                  className="font-semibold underline underline-offset-4"
+                  href={`/accounts/${job.accountId}`}
+                >
+                  View adjusted holdings
+                </Link>
+              ) : null}
+            </Notice>
+          ) : null}
+          {job.status === "completed" &&
+          !job.importedHoldingsAsOf &&
+          rows.some(
+            (r) =>
+              (r.kind === "position" || r.kind === "cash_balance") &&
+              r.committedRecordId,
+          ) ? (
+            <Notice tone="warn">
+              The holdings or balance entry from this import has been removed or
+              replaced. The upload and any imported trades remain saved.
+            </Notice>
+          ) : null}
+          {isHistorical ? (
+            <Notice tone="warn">
+              {job.status === "completed"
+                ? "Saved"
+                : "This statement will be saved"}{" "}
+              for {formatDate(holdingsDate)}. Your account has a newer{" "}
+              {group === "banking" ? "balance" : "holdings entry"} dated{" "}
+              {formatDate(job.latestHoldingsAsOf!)}. The newer entry remains the
+              current account value.
+              {job.accountId ? (
+                <>
+                  {" "}
+                  <Link
+                    className="font-semibold underline underline-offset-4"
+                    href={`/accounts/${job.accountId}`}
+                  >
+                    View account
+                  </Link>
+                </>
+              ) : null}
+            </Notice>
+          ) : null}
 
           {group === "banking" ? (
             <>
@@ -323,7 +462,13 @@ export function ImportReview({ id }: { id: string }) {
               <Button
                 onClick={() => commit.mutate({ jobId: id, asOf })}
                 loading={commit.isPending}
-                disabled={accepted.length === 0 || !asOf || update.isPending}
+                disabled={
+                  accepted.length === 0 ||
+                  !asOf ||
+                  update.isPending ||
+                  !job.accountId ||
+                  !!job.accountArchivedAt
+                }
               >
                 <Check className="size-4" />
                 Save {accepted.length} to {job.accountName}
@@ -337,7 +482,26 @@ export function ImportReview({ id }: { id: string }) {
           ) : null}
         </div>
       )}
-    </>
+      <ImportLineRemoval
+        jobId={id}
+        rowId={removing?.id ?? null}
+        accountId={job.accountId}
+        onClose={() => setRemoving(null)}
+        onRemoved={async () => {
+          setRemoving(null);
+          setFlash(
+            "Row removed from the account. The original extraction is retained below.",
+          );
+          await Promise.all([
+            utils.imports.invalidate(),
+            utils.accounts.invalidate(),
+            utils.spending.invalidate(),
+            utils.portfolio.invalidate(),
+          ]);
+          router.refresh();
+        }}
+      />
+    </RowControls.Provider>
   );
 }
 
@@ -428,6 +592,41 @@ function Summary({ job }: { job: Job }) {
         ) : null}
       </div>
     </section>
+  );
+}
+
+function RowControl({
+  row,
+  ...props
+}: {
+  row: Row;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) {
+  const controls = useContext(RowControls);
+  if (!controls.completed)
+    return (
+      <Toggle {...props} disabled={props.disabled || !controls.canRemove} />
+    );
+  if (row.removed) return <Tag>Removed</Tag>;
+  if (!row.committedRecordId) return <Tag>Excluded</Tag>;
+  return (
+    <button
+      type="button"
+      aria-label={`Remove ${props.label.replace(/^Save /, "")}`}
+      title={
+        controls.canRemove
+          ? "Review removal"
+          : "Restore the original account to manage this row"
+      }
+      disabled={!controls.canRemove}
+      onClick={() => controls.onRemove(row)}
+      className="text-loss hover:bg-wash rounded-ctl grid size-10 shrink-0 place-items-center disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <Trash2 className="size-4" />
+    </button>
   );
 }
 
@@ -530,7 +729,7 @@ function TransactionsSection({
     <Section
       title={`Transactions · ${rows.length}`}
       description={
-        rows.length > 0
+        !disabled && rows.length > 0
           ? `Selected: ${money(sum(1), currency)} in, ${money(sum(-1), currency)} out. Uncheck anything you don't want saved.`
           : undefined
       }
@@ -554,7 +753,8 @@ function TransactionsSection({
                 )}
               >
                 <span className="pt-0.5 sm:pt-0">
-                  <Toggle
+                  <RowControl
+                    row={r}
                     checked={!skipped}
                     disabled={disabled}
                     label={`Save ${r.data.description}`}
@@ -664,8 +864,9 @@ function BalanceSection({
       description="Saved as the account's balance, so your net worth matches the statement."
     >
       {rows.map((r) => (
-        <label key={r.id} className="flex items-center gap-3 text-sm">
-          <Toggle
+        <div key={r.id} className="flex items-center gap-3 py-2 text-sm">
+          <RowControl
+            row={r}
             checked={r.decision === "accept"}
             disabled={disabled}
             label="Save the closing balance"
@@ -678,7 +879,7 @@ function BalanceSection({
             </span>{" "}
             as the balance on {asOf ? formatDate(asOf) : "the statement date"}
           </span>
-        </label>
+        </div>
       ))}
     </Section>
   );
@@ -716,7 +917,8 @@ function HoldingsSection({
                 r.decision !== "accept" && "opacity-50",
               )}
             >
-              <Toggle
+              <RowControl
+                row={r}
                 checked={r.decision === "accept"}
                 disabled={disabled}
                 label={`Save ${r.data.symbol}`}
@@ -761,7 +963,8 @@ function HoldingsSection({
                 r.decision !== "accept" && "opacity-50",
               )}
             >
-              <Toggle
+              <RowControl
+                row={r}
                 checked={r.decision === "accept"}
                 disabled={disabled}
                 label={`Save ${r.data.currency} cash`}
@@ -808,7 +1011,8 @@ function ActivitySection({
               r.decision !== "accept" && "opacity-50",
             )}
           >
-            <Toggle
+            <RowControl
+              row={r}
               checked={r.decision === "accept"}
               disabled={disabled}
               label={`Save ${r.data.type} ${r.data.symbol ?? ""}`}

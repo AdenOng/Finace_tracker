@@ -5,6 +5,7 @@ import {
   describe,
   expect,
   mock,
+  spyOn,
   test,
 } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
@@ -18,6 +19,7 @@ import { api, TRPCReactProvider } from "../src/trpc/react";
 
 import type { Database } from "../src/server/db";
 import * as schema from "../src/server/db/schema";
+import { exchangeRates } from "../src/server/modules/portfolio/exchange-rates";
 import {
   convertAmounts,
   ratesFromRows,
@@ -26,6 +28,7 @@ import {
 } from "../src/server/modules/portfolio/valuation";
 
 const engine = new PGlite();
+const ratesRequest = spyOn(exchangeRates, "latest").mockResolvedValue([]);
 const db = drizzle(engine, { schema });
 await mock.module("server-only", () => ({}));
 await mock.module("~/server/db", () => ({ db }));
@@ -122,11 +125,14 @@ beforeAll(async () => {
   groceriesId = groceries!.id;
 }, 30_000);
 beforeEach(async () => {
+  ratesRequest.mockReset();
+  ratesRequest.mockResolvedValue([]);
   await engine.exec(
     "TRUNCATE TABLE workspace, audit_log, financial_account, security, fx_rate, user_settings, merchant_rule CASCADE",
   );
 });
 afterAll(async () => {
+  ratesRequest.mockRestore();
   await engine.close();
 });
 
@@ -151,7 +157,7 @@ describe("account access", () => {
       accountId: withSnapshot.id,
       asOf: "2026-10-01",
       positions: [],
-      cash: [],
+      cash: [{ currency: "SGD", amount: "0" }],
     });
     const withSpending = await alice.accounts.create(bank);
     await spendingEntry(withSpending.id);
@@ -242,6 +248,314 @@ describe("account access", () => {
 });
 
 describe("portfolio", () => {
+  test("entry history supports editing and deleting current entries with conflict and owner protection", async () => {
+    const account = await alice.accounts.create(broker);
+    const entry = {
+      accountId: account.id,
+      asOf: "2026-09-30",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    };
+    const older = await alice.portfolio.addSnapshot(entry);
+    const newer = await alice.portfolio.addSnapshot({
+      ...entry,
+      asOf: "2026-10-19",
+      cash: [{ currency: "SGD", amount: "200" }],
+    });
+    await expect(
+      alice.portfolio.addSnapshot({
+        ...entry,
+        cash: [{ currency: "SGD", amount: "999" }],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const history = await alice.portfolio.history({ accountId: account.id });
+    expect(history.currentId).toBe(newer.id);
+    expect(history.entries.map((r) => [r.id, r.cashCount, r.source])).toEqual([
+      [newer.id, 1, "manual"],
+      [older.id, 1, "manual"],
+    ]);
+    const detail = await alice.portfolio.snapshot({
+      accountId: account.id,
+      snapshotId: newer.id,
+    });
+    const bobAccount = await bob.accounts.create(broker);
+    await expect(
+      bob.portfolio.snapshot({
+        accountId: bobAccount.id,
+        snapshotId: newer.id,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      bob.portfolio.removeSnapshot({
+        accountId: bobAccount.id,
+        snapshotId: newer.id,
+        version: detail.version,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const update = {
+      snapshotId: newer.id,
+      version: detail.version,
+      entry: {
+        ...entry,
+        asOf: "2026-10-19",
+        cash: [{ currency: "SGD", amount: "250" }],
+      },
+    };
+    for (const op of [
+      () => bob.portfolio.history({ accountId: account.id }),
+      () =>
+        bob.portfolio.snapshot({ accountId: account.id, snapshotId: newer.id }),
+      () => bob.portfolio.updateSnapshot(update),
+      () =>
+        bob.portfolio.removeSnapshot({
+          accountId: account.id,
+          snapshotId: newer.id,
+          version: detail.version,
+        }),
+    ])
+      await expect(op()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await alice.portfolio.updateSnapshot(update);
+    expect((await alice.accounts.get(account)).holdings?.totals).toEqual([
+      { currency: "SGD", amount: "250" },
+    ]);
+    await expect(alice.portfolio.updateSnapshot(update)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await expect(
+      alice.portfolio.removeSnapshot({
+        accountId: account.id,
+        snapshotId: newer.id,
+        version: detail.version,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const changed = await alice.portfolio.snapshot({
+      accountId: account.id,
+      snapshotId: newer.id,
+    });
+    expect(changed.id).toBe(detail.id);
+    expect(changed.version).not.toBe(detail.version);
+    expect(
+      (await alice.portfolio.history({ accountId: account.id })).entries[0]
+        ?.adjusted,
+    ).toBe(true);
+    await expect(
+      alice.portfolio.updateSnapshot({
+        ...update,
+        version: changed.version,
+        entry: { ...update.entry, asOf: "2026-09-30" },
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(
+      (await alice.portfolio.history({ accountId: account.id })).entries,
+    ).toHaveLength(2);
+    await alice.portfolio.removeSnapshot({
+      accountId: account.id,
+      snapshotId: newer.id,
+      version: changed.version,
+    });
+    expect((await alice.accounts.get(account)).holdings?.asOf).toBe(
+      "2026-09-30",
+    );
+    expect((await alice.portfolio.netWorth()).total).toBe("100");
+    const remaining = await alice.portfolio.snapshot({
+      accountId: account.id,
+      snapshotId: older.id,
+    });
+    await alice.portfolio.removeSnapshot({
+      accountId: account.id,
+      snapshotId: older.id,
+      version: remaining.version,
+    });
+    expect((await alice.accounts.get(account)).holdings).toBeNull();
+    expect(await db.select().from(schema.cashBalance)).toHaveLength(0);
+  });
+
+  test("history pagination is complete and archived entries can be viewed but not edited", async () => {
+    const account = await alice.accounts.create(broker);
+    for (let day = 1; day <= 25; day++)
+      await alice.portfolio.addSnapshot({
+        accountId: account.id,
+        asOf: `2026-09-${String(day).padStart(2, "0")}`,
+        positions: [],
+        cash: [{ currency: "SGD", amount: String(day) }],
+      });
+    const page = await alice.portfolio.history({ accountId: account.id });
+    expect(page.entries).toHaveLength(20);
+    const next = await alice.portfolio.history({
+      accountId: account.id,
+      cursor: page.nextCursor!,
+    });
+    expect(next.entries).toHaveLength(5);
+    expect(next.nextCursor).toBeNull();
+    expect(
+      new Set([...page.entries, ...next.entries].map((r) => r.id)).size,
+    ).toBe(25);
+    const selected = page.entries[0]!;
+    await alice.accounts.remove(account);
+    expect(
+      (await alice.portfolio.history({ accountId: account.id })).entries,
+    ).toHaveLength(20);
+    expect(
+      (
+        await alice.portfolio.snapshot({
+          accountId: account.id,
+          snapshotId: selected.id,
+        })
+      ).id,
+    ).toBe(selected.id);
+    await expect(
+      alice.portfolio.removeSnapshot({
+        accountId: account.id,
+        snapshotId: selected.id,
+        version: selected.version,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  test("concurrent edits of the same reviewed entry succeed only once", async () => {
+    const account = await alice.accounts.create(broker);
+    const input = {
+      accountId: account.id,
+      asOf: "2026-09-30",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    };
+    const added = await alice.portfolio.addSnapshot(input);
+    const detail = await alice.portfolio.snapshot({
+      accountId: account.id,
+      snapshotId: added.id,
+    });
+    const outcomes = await Promise.allSettled(
+      ["200", "300"].map((amount) =>
+        alice.portfolio.updateSnapshot({
+          snapshotId: added.id,
+          version: detail.version,
+          entry: { ...input, cash: [{ currency: "SGD", amount }] },
+        }),
+      ),
+    );
+    expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const failed = outcomes.find((r) => r.status === "rejected");
+    expect(failed?.status === "rejected" ? failed.reason : null).toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+
+  test("editing holdings preserves explicit recorded values, quantities, cost basis and dates", async () => {
+    const account = await alice.accounts.create(broker);
+    const pos = {
+      symbol: "EDIT",
+      exchange: "",
+      name: "Editable",
+      assetClass: "stock" as const,
+      currency: "SGD",
+      quantity: "10",
+      averageCost: "4",
+      price: null,
+      value: "100.12",
+    };
+    const created = await alice.portfolio.addSnapshot({
+      accountId: account.id,
+      asOf: "2026-09-30",
+      positions: [pos],
+      cash: [],
+    });
+    let detail = await alice.portfolio.snapshot({
+      accountId: account.id,
+      snapshotId: created.id,
+    });
+    expect(detail.positions[0]?.statementValue).toBe("100.1200");
+    await alice.portfolio.updateSnapshot({
+      snapshotId: detail.id,
+      version: detail.version,
+      entry: {
+        accountId: account.id,
+        asOf: "2026-10-01",
+        positions: [
+          { ...pos, quantity: "20", averageCost: "5", price: "7", value: null },
+        ],
+        cash: [{ currency: "SGD", amount: "25" }],
+      },
+    });
+    detail = await alice.portfolio.snapshot({
+      accountId: account.id,
+      snapshotId: created.id,
+    });
+    expect(detail).toMatchObject({
+      asOf: "2026-10-01",
+      positions: [
+        {
+          quantity: "20.0000000000",
+          averageCost: "5.00000000",
+          statementValue: "140.0000",
+        },
+      ],
+    });
+    expect((await alice.portfolio.netWorth()).total).toBe("165");
+  });
+  test("legacy blank entries cannot hide older holdings; explicit zero balances remain current", async () => {
+    const account = await alice.accounts.create(broker);
+    await alice.portfolio.recordSnapshot({
+      accountId: account.id,
+      asOf: "2026-09-30",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    });
+    await db.insert(schema.accountSnapshot).values({
+      ownerId: "alice",
+      accountId: account.id,
+      asOf: "2026-10-19",
+      source: "manual",
+    });
+    expect((await alice.accounts.get(account)).holdings?.asOf).toBe(
+      "2026-09-30",
+    );
+    expect((await alice.portfolio.netWorth()).total).toBe("100");
+    await alice.portfolio.recordSnapshot({
+      accountId: account.id,
+      asOf: "2026-10-19",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "0" }],
+    });
+    expect((await alice.accounts.get(account)).holdings?.asOf).toBe(
+      "2026-10-19",
+    );
+    expect((await alice.portfolio.netWorth()).total).toBe("0");
+  });
+  test("rejects blank entries without replacing holdings and permits an explicit zero balance", async () => {
+    const account = await alice.accounts.create(broker);
+    await alice.portfolio.recordSnapshot({
+      accountId: account.id,
+      asOf: "2026-09-30",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    });
+    for (const asOf of ["2026-09-30", "2026-10-19"]) {
+      await expect(
+        alice.portfolio.recordSnapshot({
+          accountId: account.id,
+          asOf,
+          positions: [],
+          cash: [],
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect((await alice.accounts.get(account)).holdings).toMatchObject({
+      asOf: "2026-09-30",
+      cash: [{ currency: "SGD", amount: "100.0000" }],
+    });
+    expect(await db.select().from(schema.accountSnapshot)).toHaveLength(1);
+    await alice.portfolio.recordSnapshot({
+      accountId: account.id,
+      asOf: "2026-10-19",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "0" }],
+    });
+    expect((await alice.accounts.get(account)).holdings).toMatchObject({
+      asOf: "2026-10-19",
+      totals: [{ currency: "SGD", amount: "0" }],
+    });
+  });
   test("reports unpriced holdings on each account and rejects archived snapshot writes", async () => {
     const account = await alice.accounts.create(broker);
     const entry = {
@@ -348,6 +662,10 @@ describe("portfolio", () => {
       ["cash", "62.5"],
     ]);
     expect(after.banking.total).toBe("1500.25");
+    expect(after.accounts.find((a) => a.id === brokerage.id)?.total).toBe(
+      "2568.75",
+    );
+    expect(after.fxAsOf).toBe("2026-10-01");
 
     const detail = await alice.accounts.get(brokerage);
     expect(detail.holdings?.positions.map((p) => p.symbol)).toEqual([
@@ -358,6 +676,59 @@ describe("portfolio", () => {
       total: null,
       accounts: [],
     });
+  });
+
+  test("fetches and persists FX for the full broker value and changes every total with display currency", async () => {
+    const brokerage = await alice.accounts.create(broker);
+    await alice.portfolio.recordSnapshot({
+      accountId: brokerage.id,
+      asOf: "2026-10-19",
+      positions: [
+        {
+          symbol: "TOTAL",
+          exchange: "",
+          name: "",
+          assetClass: "stock",
+          currency: "USD",
+          quantity: "10",
+          averageCost: null,
+          price: "100",
+        },
+      ],
+      cash: [
+        { currency: "USD", amount: "100" },
+        { currency: "SGD", amount: "12.63" },
+      ],
+    });
+    ratesRequest.mockResolvedValue([
+      {
+        date: "2026-10-19",
+        base: "SGD",
+        quote: "USD",
+        rate: "0.8",
+        source: "frankfurter",
+      },
+    ]);
+    const sgd = await alice.portfolio.netWorth();
+    expect(sgd.total).toBe("1387.63");
+    expect(sgd.accounts[0]?.total).toBe(sgd.total);
+    expect(sgd.unconverted).toEqual([]);
+    expect(sgd.allocation.map((a) => [a.assetClass, a.total])).toEqual([
+      ["stock", "1250"],
+      ["cash", "137.63"],
+    ]);
+    expect(await db.select().from(schema.fxRate)).toHaveLength(1);
+
+    // An outage still uses the rate persisted by the prior request.
+    ratesRequest.mockResolvedValue([]);
+    expect((await alice.portfolio.netWorth()).total).toBe(sgd.total);
+    await db
+      .insert(schema.userSettings)
+      .values({ userId: "alice", displayCurrency: "USD" });
+    const usd = await alice.portfolio.netWorth();
+    expect(usd.total).toBe("1110.104");
+    expect(usd.accounts[0]?.total).toBe(usd.total);
+    expect(usd.unconverted).toEqual([]);
   });
 
   test("re-entering a date replaces the manual snapshot", async () => {
@@ -1341,7 +1712,7 @@ describe("workspace visibility", () => {
           accountId: shared.id,
           asOf: "2026-10-02",
           positions: [],
-          cash: [],
+          cash: [{ currency: "SGD", amount: "0" }],
         }),
       () =>
         bob.spending.create({
@@ -1821,4 +2192,226 @@ test("concurrent invitation acceptance succeeds once and does not duplicate memb
       (m) => m.userId === "bob",
     ),
   ).toHaveLength(1);
+});
+
+const consolidatedStock = {
+  symbol: "SHARED",
+  exchange: "XNAS",
+  name: "Example company",
+  assetClass: "stock" as const,
+  currency: "USD",
+  quantity: "0.1",
+  averageCost: null,
+  price: "100",
+  value: null,
+};
+
+describe("consolidated portfolio", () => {
+  test("combines exact fractional quantities across active owned brokers, retains exchange identity and uses only current entries", async () => {
+    const a = await alice.accounts.create({ ...broker, name: "Broker A" });
+    const b = await alice.accounts.create({ ...broker, name: "Broker B" });
+    const c = await alice.accounts.create({ ...broker, name: "Local broker" });
+    const archived = await alice.accounts.create({
+      ...broker,
+      name: "Archived broker",
+    });
+    const hidden = await bob.accounts.create({
+      ...broker,
+      name: "Private broker",
+    });
+    const banking = await alice.accounts.create(bank);
+    await alice.portfolio.recordSnapshot({
+      accountId: a.id,
+      asOf: "2026-08-31",
+      positions: [{ ...consolidatedStock, quantity: "999" }],
+      cash: [],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: a.id,
+      asOf: "2026-10-19",
+      positions: [consolidatedStock],
+      cash: [{ currency: "USD", amount: "10" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: b.id,
+      asOf: "2026-09-30",
+      positions: [{ ...consolidatedStock, quantity: "0.2" }],
+      cash: [{ currency: "SGD", amount: "5" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: c.id,
+      asOf: "2026-10-01",
+      positions: [
+        {
+          ...consolidatedStock,
+          exchange: "XSES",
+          currency: "SGD",
+          quantity: "5",
+          price: "2",
+        },
+      ],
+      cash: [],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: archived.id,
+      asOf: "2026-10-19",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "99" }],
+    });
+    await alice.accounts.remove(archived);
+    await bob.portfolio.recordSnapshot({
+      accountId: hidden.id,
+      asOf: "2026-10-19",
+      positions: [consolidatedStock],
+      cash: [],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: banking.id,
+      asOf: "2026-10-19",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "999" }],
+    });
+    ratesRequest.mockResolvedValue([
+      {
+        date: "2026-10-19",
+        base: "SGD",
+        quote: "USD",
+        rate: "0.8",
+        source: "frankfurter",
+      },
+    ]);
+    const all = await alice.portfolio.consolidated();
+    expect(all).toMatchObject({
+      total: "65",
+      currency: "SGD",
+      selectedBrokerCount: 3,
+      archivedCount: 1,
+      unpriced: 0,
+      unrecorded: 0,
+      incomplete: false,
+      oldestEntry: "2026-09-30",
+      newestEntry: "2026-10-19",
+      securities: { total: "47.5" },
+      cash: { total: "17.5" },
+    });
+    expect(all.positions).toHaveLength(2);
+    expect(all.positions.find((p) => p.exchange === "XNAS")).toMatchObject({
+      symbol: "SHARED",
+      quantity: "0.3",
+      total: "37.5",
+      weight: "57.7",
+    });
+    expect(all.positions.find((p) => p.exchange === "XSES")).toMatchObject({
+      symbol: "SHARED",
+      quantity: "5",
+      total: "10",
+    });
+    expect(
+      all.positions
+        .find((p) => p.exchange === "XNAS")!
+        .brokers.map((lot) => [lot.accountId, lot.quantity, lot.asOf]),
+    ).toEqual([
+      [a.id, "0.1000000000", "2026-10-19"],
+      [b.id, "0.2000000000", "2026-09-30"],
+    ]);
+    expect(all.brokers.map((x) => x.id)).not.toContain(hidden.id);
+    expect(all.brokers.map((x) => x.id)).not.toContain(banking.id);
+    expect(all.brokers.map((x) => x.id)).not.toContain(archived.id);
+    expect(
+      all.cashBalances.map((x) => [x.currency, x.amount, x.total]),
+    ).toEqual([
+      ["SGD", "5", "5"],
+      ["USD", "10", "12.5"],
+    ]);
+    const single = await alice.portfolio.consolidated({ accountId: a.id });
+    expect(single).toMatchObject({
+      total: "25",
+      selectedBrokerCount: 1,
+      positions: [{ quantity: "0.1" }],
+    });
+    expect(single.brokers).toHaveLength(3);
+    for (const other of [hidden.id, archived.id, banking.id])
+      await expect(
+        alice.portfolio.consolidated({ accountId: other }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await db
+      .insert(schema.userSettings)
+      .values({ userId: "alice", displayCurrency: "USD" });
+    const usd = await alice.portfolio.consolidated();
+    expect(usd).toMatchObject({
+      currency: "USD",
+      total: "52",
+      securities: { total: "38" },
+      cash: { total: "14" },
+    });
+  });
+
+  test("shows missing prices, exchange rates and entries without inventing allocation or zero values", async () => {
+    const a = await alice.accounts.create(broker);
+    const b = await alice.accounts.create({
+      ...broker,
+      name: "Foreign broker",
+    });
+    await alice.accounts.create({ ...broker, name: "Not recorded yet" });
+    await alice.portfolio.recordSnapshot({
+      accountId: a.id,
+      asOf: "2026-10-19",
+      positions: [
+        {
+          ...consolidatedStock,
+          symbol: "UNPRICED",
+          currency: "SGD",
+          price: null,
+        },
+      ],
+      cash: [{ currency: "SGD", amount: "0" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: b.id,
+      asOf: "2026-10-19",
+      positions: [consolidatedStock],
+      cash: [],
+    });
+    const all = await alice.portfolio.consolidated();
+    expect(all).toMatchObject({
+      total: "0",
+      incomplete: true,
+      unpriced: 1,
+      unrecorded: 1,
+      unconverted: [{ currency: "USD", amount: "10" }],
+    });
+    expect(all.positions.every((p) => p.weight === null)).toBe(true);
+    expect(all.positions.find((p) => p.symbol === "UNPRICED")).toMatchObject({
+      total: null,
+      unpriced: 1,
+    });
+    expect(all.positions.find((p) => p.symbol === "SHARED")).toMatchObject({
+      total: null,
+      unconverted: [{ currency: "USD", amount: "10" }],
+    });
+    const cashOnly = await alice.accounts.create({
+      ...broker,
+      name: "Cash only",
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: cashOnly.id,
+      asOf: "2026-10-19",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "25" }],
+    });
+    expect(
+      await alice.portfolio.consolidated({ accountId: cashOnly.id }),
+    ).toMatchObject({
+      total: "25",
+      securities: { total: "0" },
+      cash: { total: "25" },
+      positions: [],
+    });
+    expect(await charlie.portfolio.consolidated()).toMatchObject({
+      total: null,
+      brokers: [],
+      positions: [],
+      cashBalances: [],
+    });
+  });
 });

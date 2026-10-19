@@ -37,7 +37,8 @@ using the same database and encrypted provider credentials. The Compose project 
 | Merchant rules: per-user text matching, automatic categorization and previewed application | Done |
 | Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion | Done |
 | Import pipeline: upload → background job → review & dedupe → commit | Done |
-| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), live prices, FX, net-worth history | Later |
+| Daily FX conversion, combined net worth and investment account totals | Done |
+| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), live prices, net-worth history | Later |
 
 The full database schema for the later phases already exists (`src/server/db/schema`).
 
@@ -70,6 +71,62 @@ Compose installs opencode `OPENCODE_VERSION` (default 1.19.3, matching `@opencod
 Bump both together.
 
 ## Checking statements and organizing spending
+
+### Consolidated portfolio
+
+Open **Portfolio** from the menu, **Overview → Investments → Portfolio**, or
+**Accounts → Investments → Consolidated view**. The page combines the latest holdings and
+cash entry from each active investment account, with one total in your display currency.
+Matching securities are grouped by instrument (symbol and exchange); expand a holding to see
+each broker's quantity, entry date, source and value. Different exchanges remain separate.
+
+Search by symbol or company name, or filter to one broker. Cash has its own currency and broker
+breakdown. The settings gear changes the display currency across portfolio totals. Missing
+prices, exchange rates and account entries are labelled; incomplete portfolios have no allocation
+percentages. Bank/card accounts and archived investment accounts are excluded. Restore an
+archived broker under **Accounts → Archived** to include its holdings again.
+
+### Adding and correcting holdings
+
+Open **Accounts → an account**. **Update holdings** (or **Update balance**) edits its current
+entry, including imported holdings. You can add or remove holdings and adjust quantities,
+prices, average cost, market value and cash. Changing a quantity or price clears the previously
+entered market value so it can be recalculated; enter an explicit market value to override that
+calculation. Prices and monetary values retain their recorded decimal precision.
+
+Use **Entry history → Add entry** for another date, or **Import statement** to upload an image
+or PDF and review its extracted holdings before saving. Each history row shows its date,
+Manual/Imported source and whether it currently determines the account value. **Edit** changes
+that exact entry; date conflicts never overwrite another entry. Imported entries retain their
+upload link and are marked **Adjusted** after editing; the import review still shows the original
+extraction and points to the adjusted account data.
+
+The delete button opens a review. Deleting an entry removes only its holdings and cash; uploaded
+files and spending/trade records remain. If it was current, the latest remaining valid dated
+entry becomes current. Editing and deletion reject changes based on stale data. Entry management
+is available to the account owner in Personal view; archived accounts must be restored to edit.
+
+### Removing individual imported rows
+
+Open **Imports → a completed import**, then use the trash button beside a saved holding, cash
+balance, transaction or trade. The review shows the saved row and explains its effect before
+**Remove row** confirms deletion. The upload and original extraction stay available, and the row
+is marked **Removed**. Before saving an import, uncheck rows to exclude them instead.
+
+Removing a holding or cash row updates only that dated entry. Removing its last row also removes
+the empty entry, so the latest remaining entry becomes current. Removing a spending transaction
+or trade does not change the saved holdings or balances. Reconciled spending transactions are
+protected; changed holdings must be managed through **Entry history → Edit**. Ownership, archived
+accounts and stale reviews are checked again at deletion. There is no automatic undo; add any
+replacement manually.
+
+If you remove an account with financial history, it is archived and retains its imports. Adding
+the same broker again creates a separate account; it does not move that history. Open an old
+import and choose **Restore original account**, or restore it under **Accounts → Archived**, to
+manage its rows again. A genuinely deleted account's uploads remain reference-only. Restoration
+never merges another account or moves its records.
+
+### Checking spending
 
 - **Reconciliation:** open a bank, card, cash or wallet account and choose **Reconcile statement**.
   Enter the inclusive statement dates, currency, opening balance before the first day and closing
@@ -182,9 +239,19 @@ src/
   and out (`spending` router). Balances and holdings are point-in-time snapshots per account
   (`portfolio` router); net worth is the latest snapshot of every open account. Re-entering a date
   replaces that day's manual snapshot.
-- **No silent currency mixing.** Amounts are converted with the latest stored FX rate; anything
-  without a rate is shown separately rather than dropped or guessed. Until the FX feed lands,
-  `fx_rate` is empty, so only amounts already in the display currency are totalled.
+- **Blank entries do not replace holdings.** A manual holdings or balance entry must contain at
+  least one holding or cash balance. To explicitly record an empty account, enter a cash balance
+  of `0`. Older blank entries are ignored when selecting current holdings. Imported statements
+  retain their statement dates; the review explains when a newer account entry will remain
+  current, both before and after saving.
+- **Currency conversion for complete totals.** The overview converts holdings and cash into the
+  display currency with daily reference rates from [Frankfurter](https://frankfurter.dev/).
+  Rates refresh on demand, are cached for an hour, and persist in `fx_rate` for use during an
+  outage. Only the display currency is sent to the provider; no balances or account details leave
+  the app. Each broker shows one combined total. The gear in the Net worth or Investments card
+  opens the display-currency setting, which updates all portfolio totals together. The overview
+  shows the rate date. Missing rates or prices explicitly mark totals as partial and hide an
+  incomplete investment allocation. No API key or additional configuration is required.
 
 ## Scripts
 

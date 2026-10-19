@@ -64,6 +64,10 @@ export function convertAmounts(
   let total: Decimal | null = null;
   const unconverted: Amount[] = [];
   for (const { amount, currency } of sumByCurrency(amounts)) {
+    if (new Decimal(amount).isZero()) {
+      total ??= new Decimal(0);
+      continue;
+    }
     const rate = currency === target ? "1" : rates.get(currency);
     if (rate === undefined) {
       unconverted.push({ amount, currency });
@@ -86,7 +90,7 @@ export function ratesFromRows(
     const direct = row.quote === target;
     if (!direct && row.base !== target) continue;
     const rate = new Decimal(row.rate);
-    if (rate.isZero()) continue;
+    if (!rate.isFinite() || rate.lessThanOrEqualTo(0)) continue;
     const currency = direct ? row.base : row.quote;
     const current = best.get(currency);
     if (!current || row.date > current.date) {

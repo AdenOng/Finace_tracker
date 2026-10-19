@@ -5,24 +5,19 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
-import { InstitutionMark } from "~/components/accounts/institution-mark";
-import { Amounts } from "~/components/finance/amounts";
 import { Allocation } from "~/components/overview/allocation";
-import { CurrencySelect } from "~/components/settings/currency-select";
-import { accountTypeLabels, holdsSecurities } from "~/lib/accounts";
+import { AccountRow } from "~/components/overview/account-row";
+import { PortfolioSettings } from "~/components/overview/portfolio-settings";
+import { holdsSecurities } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { currentMonth, shiftMonth } from "~/lib/dates";
 import { formatDate, formatMoney, formatMonth } from "~/lib/format";
 import { isAdmin, requireEnrolledSession } from "~/server/auth";
 import { db } from "~/server/db";
 import { llmProvider } from "~/server/db/schema";
-import type { RouterOutputs } from "~/trpc/react";
 import { api, HydrateClient } from "~/trpc/server";
 
 export const metadata: Metadata = { title: "Overview" };
-
-type Worth = RouterOutputs["portfolio"]["netWorth"];
-type WorthAccount = Worth["accounts"][number];
 
 /** Hero figure: symbol and minor units set back so the whole number leads. */
 function HeroFigure({ value, muted }: { value: string; muted: boolean }) {
@@ -48,91 +43,33 @@ function SheetHeader({
   title,
   href,
   linkLabel,
+  settings,
 }: {
   eyebrow: string;
   title: React.ReactNode;
   href: string;
   linkLabel: string;
+  settings?: React.ReactNode;
 }) {
   return (
-    <div className="border-ink/80 flex items-end justify-between gap-4 border-b-2 pb-3">
-      <div>
+    <div className="border-ink/80 border-b-2 pb-3">
+      <div className="flex items-center justify-between gap-3">
         <p className="eyebrow">{eyebrow}</p>
-        <p className="font-poster figures mt-1.5 text-[34px] leading-none font-extrabold">
-          {title}
-        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href={href}
+            className="text-ink-2 hover:text-ink inline-flex items-center gap-1 text-[13px] font-semibold"
+          >
+            {linkLabel}
+            <ArrowUpRight className="size-3.5" />
+          </Link>
+          {settings}
+        </div>
       </div>
-      <Link
-        href={href}
-        className="text-ink-2 hover:text-ink inline-flex items-center gap-1 pb-1 text-[13px] font-semibold"
-      >
-        {linkLabel}
-        <ArrowUpRight className="size-3.5" />
-      </Link>
+      <p className="font-poster figures mt-1.5 text-[clamp(26px,7vw,34px)] leading-none font-extrabold">
+        {title}
+      </p>
     </div>
-  );
-}
-
-function AccountRow({
-  account,
-  currency,
-}: {
-  account: WorthAccount;
-  currency: string;
-}) {
-  const owed = account.total && new Decimal(account.total).isNegative();
-  return (
-    <li>
-      <Link
-        href={`/accounts/${account.id}`}
-        className="group hover:bg-wash -mx-2 flex items-center gap-3.5 rounded-[8px] px-2 py-2.5 transition-colors"
-      >
-        <InstitutionMark
-          institutionKey={account.institutionKey}
-          name={account.institutionName ?? account.name}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14px] font-semibold group-hover:underline group-hover:underline-offset-4">
-            {account.name}
-            {account.last4 ? (
-              <span className="figures text-ink-3 ml-1.5 font-normal">
-                ··{account.last4}
-              </span>
-            ) : null}
-          </span>
-          <span className="text-ink-3 block truncate text-[12px]">
-            {[
-              account.institutionName,
-              accountTypeLabels[account.type],
-              account.asOf ? formatDate(account.asOf) : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        </span>
-        <span className="text-right">
-          {!account.asOf ? (
-            <span className="text-ink-3 text-[13px]">Not recorded</span>
-          ) : account.unpriced > 0 && account.totals.length === 0 ? (
-            <span className="text-warn text-[13px]">Awaiting prices</span>
-          ) : account.unconverted.length > 0 ? (
-            <Amounts totals={account.totals} className="text-warn" />
-          ) : (
-            <span
-              className={cn(
-                "figures font-mono text-[14px] font-semibold",
-                owed && "text-loss",
-              )}
-            >
-              {formatMoney(account.total ?? 0, currency)}
-            </span>
-          )}
-          {owed ? (
-            <span className="text-ink-3 block text-[11px]">owed</span>
-          ) : null}
-        </span>
-      </Link>
-    </li>
   );
 }
 
@@ -201,6 +138,9 @@ export default async function OverviewPage() {
   const investing = worth.accounts.filter((a) => holdsSecurities(a.type));
   const banking = worth.accounts.filter((a) => !holdsSecurities(a.type));
   const investTotal = sum(worth.allocation.map((a) => a.total));
+  const investmentIncomplete = investing.some(
+    (a) => a.unconverted.length > 0 || a.unpriced > 0,
+  );
   const positive = worth.allocation.filter(
     (a) => a.total && new Decimal(a.total).isPositive(),
   );
@@ -280,9 +220,14 @@ export default async function OverviewPage() {
             <Suspense
               fallback={<div className="bg-wash rounded-ctl h-8 w-20" />}
             >
-              <CurrencySelect id="overview-currency" compact />
+              <PortfolioSettings currency={currency} id="overview-currency" />
             </Suspense>
           </div>
+          {worth.unconverted.length > 0 || worth.unpriced > 0 ? (
+            <p className="text-warn mt-3 text-sm font-semibold">
+              Partial total
+            </p>
+          ) : null}
           <p className="font-poster figures mt-3 text-[clamp(52px,15vw,104px)] leading-[0.9] font-extrabold">
             <HeroFigure
               value={formatMoney(worth.total ?? 0, currency)}
@@ -298,6 +243,12 @@ export default async function OverviewPage() {
             ) : (
               <p>Latest balances, up to {formatDate(worth.asOf!)}.</p>
             )}
+            {worth.fxAsOf ? (
+              <p className="text-ink-3 text-[12px]">
+                Converted to {currency} · exchange rates as of{" "}
+                {formatDate(worth.fxAsOf)}.
+              </p>
+            ) : null}
             {worth.unconverted.length > 0 ? (
               <p className="text-warn">
                 Not included, no exchange rate to {currency} yet:{" "}
@@ -394,10 +345,23 @@ export default async function OverviewPage() {
           <SheetHeader
             eyebrow="Investments"
             title={formatMoney(investTotal.toFixed(2), currency)}
-            href="/accounts"
-            linkLabel="Holdings"
+            href="/portfolio"
+            linkLabel="Portfolio"
+            settings={
+              <PortfolioSettings
+                currency={currency}
+                id="investments-currency"
+                iconOnly
+              />
+            }
           />
-          {slices.length > 0 ? (
+          {investmentIncomplete ? (
+            <p className="text-warn mt-4 text-sm">
+              Partial investment total. Allocation will appear when every
+              holding has a price and exchange rate.
+            </p>
+          ) : null}
+          {!investmentIncomplete && slices.length > 0 ? (
             <div className="mt-6">
               <Allocation slices={slices} />
             </div>

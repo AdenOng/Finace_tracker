@@ -9,11 +9,15 @@ import { accountGroupOf, holdsSecurities } from "~/lib/accounts";
 import { isoDateInput } from "~/server/api/inputs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
+  accountSnapshot,
+  auditLog,
+  cashBalance,
   document,
   extractionJob,
   financialAccount,
   institution,
   investmentTransaction,
+  position,
   security,
   stagedRow,
   transaction,
@@ -32,9 +36,14 @@ import {
 import { runImportJob } from "~/server/modules/imports/runner";
 import { removeUpload } from "~/server/modules/imports/storage";
 import {
+  importLinePreview,
+  LINE_REMOVED,
+} from "~/server/modules/imports/line-items";
+import {
   snapshotInput,
   writeSnapshot,
 } from "~/server/modules/portfolio/snapshots";
+import { hasSnapshotEntries } from "~/server/modules/portfolio/holdings";
 import {
   checkCategory,
   lockAccounts,
@@ -62,6 +71,7 @@ const jobColumns = {
   accountName: financialAccount.name,
   accountType: financialAccount.type,
   accountCurrency: financialAccount.currency,
+  accountArchivedAt: financialAccount.archivedAt,
   institutionName: institution.name,
   institutionKey: institution.key,
 };
@@ -132,10 +142,66 @@ export const importsRouter = createTRPCRouter({
         .orderBy(asc(stagedRow.createdAt), asc(stagedRow.id));
 
       const { result, ...rest } = job;
+      const removals = rows.length
+        ? await ctx.db
+            .select({ rowId: auditLog.targetId })
+            .from(auditLog)
+            .where(
+              and(
+                eq(auditLog.action, LINE_REMOVED),
+                eq(auditLog.actorId, ctx.scope.userId),
+                inArray(
+                  auditLog.targetId,
+                  rows.map((r) => r.id),
+                ),
+              ),
+            )
+        : [];
+      const removedIds = new Set(removals.map((r) => r.rowId));
+      const snapshotScope = job.accountId
+        ? and(
+            eq(accountSnapshot.accountId, job.accountId),
+            writableBy(ctx.scope, accountSnapshot.ownerId),
+            hasSnapshotEntries(ctx.db),
+          )
+        : undefined;
+      const [latest, saved] = job.accountId
+        ? await Promise.all([
+            ctx.db
+              .select({ asOf: accountSnapshot.asOf })
+              .from(accountSnapshot)
+              .where(snapshotScope)
+              .orderBy(
+                desc(accountSnapshot.asOf),
+                desc(accountSnapshot.createdAt),
+              )
+              .limit(1),
+            ctx.db
+              .select({
+                asOf: accountSnapshot.asOf,
+                adjusted: sql<boolean>`${accountSnapshot.updatedAt} > ${accountSnapshot.createdAt}`,
+              })
+              .from(accountSnapshot)
+              .where(
+                and(
+                  snapshotScope,
+                  eq(accountSnapshot.documentId, job.documentId),
+                ),
+              )
+              .orderBy(
+                desc(accountSnapshot.asOf),
+                desc(accountSnapshot.createdAt),
+              )
+              .limit(1),
+          ])
+        : [[], []];
       const out = result as
         (StatementExtraction & { stagingNotes?: string[] }) | null;
       return {
         ...rest,
+        latestHoldingsAsOf: latest[0]?.asOf ?? null,
+        importedHoldingsAsOf: saved[0]?.asOf ?? null,
+        importedHoldingsAdjusted: saved[0]?.adjusted ?? false,
         stale: isStale(job),
         summary: out
           ? {
@@ -152,28 +218,148 @@ export const importsRouter = createTRPCRouter({
           : null,
         rows: rows.map((r) => ({
           ...r,
+          removed: removedIds.has(r.id),
           // Parsed again so the client gets the typed shape for its kind.
           data: stagedSchemas[r.kind].parse(r.data),
         })) as (
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
+              removed: boolean;
               kind: "transaction";
               data: StagedTransaction;
             })
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
+              removed: boolean;
               kind: "position";
               data: StagedPosition;
             })
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
+              removed: boolean;
               kind: "cash_balance";
               data: StagedCashBalance;
             })
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
+              removed: boolean;
               kind: "investment_transaction";
               data: StagedInvestmentTransaction;
             })
         )[],
       };
     }),
+
+  lineRemovalPreview: protectedProcedure
+    .input(z.object({ jobId: z.uuid(), rowId: z.uuid() }))
+    .query(({ ctx, input }) => importLinePreview(ctx.db, ctx.scope, input)),
+
+  /** Delete exactly one reviewed record, preserving the upload and extraction as evidence. */
+  removeLine: protectedProcedure
+    .input(
+      z.object({
+        jobId: z.uuid(),
+        rowId: z.uuid(),
+        version: z.string().length(64),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      ctx.db.transaction(async (tx) => {
+        // Same lock order as commit: job, account, then its financial records.
+        const [job] = await tx
+          .select({ id: extractionJob.id, accountId: document.accountId })
+          .from(extractionJob)
+          .innerJoin(document, eq(document.id, extractionJob.documentId))
+          .where(
+            and(
+              eq(extractionJob.id, input.jobId),
+              writableBy(ctx.scope, extractionJob.ownerId),
+            ),
+          )
+          .for("update", { of: extractionJob });
+        if (!job) throw new TRPCError({ code: "NOT_FOUND" });
+        if (!job.accountId)
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "The original account was deleted. Adding the broker again creates a separate account; this import is not automatically transferred.",
+          });
+        await lockAccounts(tx, ctx.scope, [job.accountId]);
+        const line = await importLinePreview(tx, ctx.scope, input);
+        if (line.version !== input.version)
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "This row changed after you opened the review. Close and review it again.",
+          });
+        if (line.kind === "transaction")
+          await tx
+            .delete(transaction)
+            .where(
+              and(
+                eq(transaction.id, line.targetId),
+                writableBy(ctx.scope, transaction.ownerId),
+              ),
+            );
+        else if (line.kind === "investment_transaction")
+          await tx
+            .delete(investmentTransaction)
+            .where(
+              and(
+                eq(investmentTransaction.id, line.targetId),
+                writableBy(ctx.scope, investmentTransaction.ownerId),
+              ),
+            );
+        else {
+          if (line.kind === "position")
+            await tx.delete(position).where(eq(position.id, line.targetId));
+          else
+            await tx
+              .delete(cashBalance)
+              .where(eq(cashBalance.id, line.targetId));
+          if (line.lastInSnapshot)
+            await tx
+              .delete(accountSnapshot)
+              .where(
+                and(
+                  eq(accountSnapshot.id, line.snapshotId!),
+                  writableBy(ctx.scope, accountSnapshot.ownerId),
+                ),
+              );
+          else
+            await tx
+              .update(accountSnapshot)
+              .set({
+                updatedAt: sql`greatest(clock_timestamp(), ${accountSnapshot.updatedAt} + interval '1 microsecond')`,
+              })
+              .where(
+                and(
+                  eq(accountSnapshot.id, line.snapshotId!),
+                  writableBy(ctx.scope, accountSnapshot.ownerId),
+                ),
+              );
+        }
+        await tx
+          .update(stagedRow)
+          .set({ decision: "skip" })
+          .where(
+            and(
+              eq(stagedRow.id, input.rowId),
+              eq(stagedRow.jobId, input.jobId),
+              writableBy(ctx.scope, stagedRow.ownerId),
+            ),
+          );
+        await tx.insert(auditLog).values({
+          actorId: ctx.scope.userId,
+          action: LINE_REMOVED,
+          targetType: "staged_row",
+          targetId: input.rowId,
+          details: {
+            jobId: input.jobId,
+            accountId: line.accountId,
+            kind: line.kind,
+            recordId: line.targetId,
+          },
+        });
+        return { removed: true };
+      }),
+    ),
 
   /** Accept or skip rows, and correct a transaction's category or description. */
   updateRows: protectedProcedure
@@ -384,6 +570,7 @@ export const importsRouter = createTRPCRouter({
               quantity: data.quantity,
               averageCost: data.averageCost,
               price: data.price,
+              value: data.value,
             })),
             cash: cash.map(({ data }) => data),
           });
