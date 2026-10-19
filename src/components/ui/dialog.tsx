@@ -43,7 +43,7 @@ export function Drawer({
         if (event.target === ref.current) onClose();
       }}
       className={cn(
-        "border-line-2 bg-surface text-ink open:animate-drawer fixed inset-y-0 right-0 left-auto m-0 h-dvh max-h-dvh w-full max-w-lg border-l p-0 shadow-[-24px_0_80px_rgb(0_0_0/0.6)]",
+        "paper border-line-2 text-ink open:animate-drawer fixed inset-y-0 right-0 left-auto m-0 h-dvh max-h-dvh w-full max-w-lg border-l p-0 shadow-[-24px_0_80px_rgb(0_0_0/0.6)]",
         className,
       )}
     >
@@ -67,7 +67,7 @@ export function Drawer({
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-6">{children}</div>
           {footer ? (
-            <div className="border-line bg-surface flex justify-end gap-2 border-t px-6 py-4">
+            <div className="border-line flex justify-end gap-2 border-t px-6 py-4">
               {footer}
             </div>
           ) : null}

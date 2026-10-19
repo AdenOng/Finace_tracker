@@ -55,7 +55,9 @@ export function createOpencodeAdapter(config: LlmProviderConfig): LlmAdapter {
             sessionID,
             model: { providerID, modelID },
             system: request.system,
-            tools: { "*": false },
+            // opencode returns json_schema output through its own StructuredOutput tool, so that
+            // one stays on while every other tool is off.
+            tools: { "*": false, StructuredOutput: true },
             format: {
               type: "json_schema",
               schema: z.toJSONSchema(request.schema, { target: "draft-7" }),

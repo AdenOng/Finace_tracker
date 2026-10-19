@@ -342,10 +342,12 @@ describe("portfolio", () => {
     // 1500.25 + 2055 / 0.8
     expect(after.total).toBe("4069");
     expect(after.unconverted).toEqual([]);
+    // Bank balances are reported apart from the investment allocation.
     expect(after.allocation.map((a) => [a.assetClass, a.total])).toEqual([
       ["stock", "2506.25"],
-      ["cash", "1562.75"],
+      ["cash", "62.5"],
     ]);
+    expect(after.banking.total).toBe("1500.25");
 
     const detail = await alice.accounts.get(brokerage);
     expect(detail.holdings?.positions.map((p) => p.symbol)).toEqual([

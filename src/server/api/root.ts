@@ -9,6 +9,7 @@ import { spendingRouter } from "./routers/spending";
 import { merchantRulesRouter } from "./routers/merchant-rules";
 import { passwordResetRouter } from "./routers/password-reset";
 import { reconciliationRouter } from "./routers/reconciliation";
+import { importsRouter } from "./routers/imports";
 
 export const appRouter = createTRPCRouter({
   workspaces: workspacesRouter,
@@ -19,6 +20,7 @@ export const appRouter = createTRPCRouter({
   spending: spendingRouter,
   merchantRules: merchantRulesRouter,
   reconciliation: reconciliationRouter,
+  imports: importsRouter,
   admin: adminRouter,
   passwordReset: passwordResetRouter,
 });

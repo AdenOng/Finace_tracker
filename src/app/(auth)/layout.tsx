@@ -17,7 +17,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         </Link>
       </header>
       <main className="flex flex-1 items-center justify-center px-5 py-10">
-        <div className="card animate-pop relative w-full max-w-[26rem] overflow-hidden p-7 shadow-[0_40px_120px_-40px_rgb(0_0_0/0.9)] sm:p-9">
+        <div className="slab animate-pop relative w-full max-w-[26rem] overflow-hidden p-7 shadow-[0_40px_120px_-40px_rgb(0_0_0/0.9)] sm:p-9">
           <div aria-hidden className="ink-strip absolute inset-x-0 top-0 h-1" />
           {children}
         </div>

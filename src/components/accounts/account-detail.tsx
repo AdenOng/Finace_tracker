@@ -1,12 +1,15 @@
 "use client";
 
-import { ArrowLeft, Pencil, RefreshCw } from "lucide-react";
+import { ArrowLeft, FileUp, Pencil, RefreshCw } from "lucide-react";
+import Decimal from "decimal.js";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AccountDrawer } from "~/components/accounts/account-drawer";
 import { AccountReconciliation } from "~/components/accounts/account-reconciliation";
+import { AccountTransactions } from "~/components/accounts/account-transactions";
+import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { SnapshotDrawer } from "~/components/accounts/snapshot-drawer";
 import { Amounts } from "~/components/finance/amounts";
 import { Button } from "~/components/ui/button";
@@ -19,6 +22,7 @@ import {
 } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
 import {
+  accountGroups,
   accountTypeLabels,
   assetClassLabels,
   holdsSecurities,
@@ -30,10 +34,13 @@ export function AccountDetail({
   id,
   initialAccount,
   workspaceId,
+  startRecording = false,
 }: {
   workspaceId?: string;
   id: string;
   initialAccount: RouterOutputs["accounts"]["get"];
+  /** Open the holdings or balance form straight away, as after adding the account. */
+  startRecording?: boolean;
 }) {
   const router = useRouter();
   const utils = api.useUtils();
@@ -47,7 +54,7 @@ export function AccountDetail({
     },
   );
   const [editing, setEditing] = useState(false);
-  const [updating, setUpdating] = useState(false);
+  const [updating, setUpdating] = useState(startRecording);
   const [flash, setFlash] = useState<string | null>(null);
   const invalidate = () =>
     Promise.all([
@@ -59,6 +66,14 @@ export function AccountDetail({
   const holdings = account.holdings;
   const investments = holdsSecurities(account.type);
   const readOnly = !!workspaceId;
+  // Weight of each holding, when every value is in one currency and can be added up.
+  const valued = holdings?.positions.filter((p) => p.value) ?? [];
+  const oneCurrency =
+    valued.length > 0 &&
+    valued.every((p) => p.value!.currency === valued[0]!.value!.currency);
+  const positionsTotal = oneCurrency
+    ? valued.reduce((sum, p) => sum.plus(p.value!.amount), new Decimal(0))
+    : null;
   if (accountQuery.error)
     return <Notice tone="error">{accountQuery.error.message}</Notice>;
 
@@ -71,6 +86,16 @@ export function AccountDetail({
         <ArrowLeft className="size-4" />
         Accounts
       </Link>
+      <div className="mb-4 flex items-center gap-3">
+        <InstitutionMark
+          institutionKey={account.institutionKey}
+          name={account.institutionName ?? account.name}
+          className="size-12"
+        />
+        <Tag tone="outline">
+          {accountGroups[investments ? "investments" : "banking"].label}
+        </Tag>
+      </div>
       <PageHeader
         title={account.name}
         description={[
@@ -97,6 +122,13 @@ export function AccountDetail({
                 <Pencil className="size-4" />
                 Edit
               </Button>
+              <Link
+                href={`/imports?account=${account.id}`}
+                className="rounded-ctl border-line-2 bg-surface-2 hover:bg-wash inline-flex h-10 items-center gap-2 border px-4 text-sm font-semibold transition-colors"
+              >
+                <FileUp className="size-4" />
+                Import statement
+              </Link>
               <Button onClick={() => setUpdating(true)}>
                 <RefreshCw className="size-4" />
                 {investments ? "Update holdings" : "Update balance"}
@@ -124,7 +156,7 @@ export function AccountDetail({
         </Notice>
       ) : null}
 
-      <div className="space-y-14">
+      <div className="space-y-4">
         <Section
           title={investments ? "Value" : "Balance"}
           description={
@@ -138,7 +170,7 @@ export function AccountDetail({
               <Amounts
                 totals={holdings.totals}
                 empty="Nothing held"
-                className="font-display text-4xl font-semibold"
+                className="font-poster text-[44px] leading-none font-extrabold"
               />
               {holdings.unpriced > 0 ? (
                 <p className="text-warn text-sm">
@@ -180,6 +212,9 @@ export function AccountDetail({
                     <Th className="text-right">Price</Th>
                     <Th className="text-right">Average cost</Th>
                     <Th className="text-right">Value</Th>
+                    {positionsTotal ? (
+                      <Th className="w-32 text-right">Weight</Th>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -221,6 +256,18 @@ export function AccountDetail({
                           <Tag tone="warn">No price</Tag>
                         )}
                       </Td>
+                      {positionsTotal ? (
+                        <Td className="text-right">
+                          {p.value && !positionsTotal.isZero() ? (
+                            <Weight
+                              share={new Decimal(p.value.amount)
+                                .div(positionsTotal)
+                                .times(100)
+                                .toNumber()}
+                            />
+                          ) : null}
+                        </Td>
+                      ) : null}
                     </Tr>
                   ))}
                 </tbody>
@@ -236,21 +283,15 @@ export function AccountDetail({
         ) : null}
 
         {!investments ? (
-          <Section
-            title="Transactions"
-            description="Spending and income recorded against this account."
-          >
-            <Link
-              href={
-                workspaceId
-                  ? `/workspaces/${workspaceId}`
-                  : `/spending?account=${account.id}`
-              }
-              className="font-semibold underline underline-offset-4"
-            >
-              View transactions
-            </Link>
-          </Section>
+          <AccountTransactions
+            accountId={account.id}
+            readOnly={readOnly || !!account.archivedAt}
+            allHref={
+              workspaceId
+                ? `/workspaces/${workspaceId}`
+                : `/spending?account=${account.id}`
+            }
+          />
         ) : null}
         {!investments && !readOnly ? (
           <AccountReconciliation
@@ -290,5 +331,21 @@ export function AccountDetail({
         />
       ) : null}
     </>
+  );
+}
+
+function Weight({ share }: { share: number }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="bg-wash h-1.5 w-14 overflow-hidden rounded-full">
+        <span
+          className="bg-ink/80 block h-full rounded-full"
+          style={{ width: `${share}%` }}
+        />
+      </span>
+      <span className="figures w-11 font-mono text-[12px]">
+        {share.toFixed(1)}%
+      </span>
+    </span>
   );
 }

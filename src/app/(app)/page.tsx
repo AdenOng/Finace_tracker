@@ -5,34 +5,24 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { Amounts } from "~/components/finance/amounts";
-import { DonutChart } from "~/components/charts/donut-chart";
+import { Allocation } from "~/components/overview/allocation";
 import { CurrencySelect } from "~/components/settings/currency-select";
-import { EmptyState, Section } from "~/components/ui/panel";
-import { accountTypeLabels, assetClassLabels } from "~/lib/accounts";
+import { accountTypeLabels, holdsSecurities } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
-import { formatDate, formatMoney } from "~/lib/format";
+import { currentMonth, shiftMonth } from "~/lib/dates";
+import { formatDate, formatMoney, formatMonth } from "~/lib/format";
 import { isAdmin, requireEnrolledSession } from "~/server/auth";
 import { db } from "~/server/db";
 import { llmProvider } from "~/server/db/schema";
+import type { RouterOutputs } from "~/trpc/react";
 import { api, HydrateClient } from "~/trpc/server";
 
 export const metadata: Metadata = { title: "Overview" };
 
-/**
- * Fixed colour per asset class (validated for colour-blind separation on the dark surface), so
- * a class keeps its colour whatever else is in the portfolio. Options and other share neutral.
- */
-const allocationColors: Record<string, string> = {
-  stock: "#1fa863",
-  etf: "#3987e5",
-  fund: "#c98500",
-  bond: "#d55181",
-  crypto: "#9085e9",
-  cash: "#d95926",
-  option: "#7d8f85",
-  other: "#7d8f85",
-};
+type Worth = RouterOutputs["portfolio"]["netWorth"];
+type WorthAccount = Worth["accounts"][number];
 
 /** Hero figure: symbol and minor units set back so the whole number leads. */
 function HeroFigure({ value, muted }: { value: string; muted: boolean }) {
@@ -41,13 +31,108 @@ function HeroFigure({ value, muted }: { value: string; muted: boolean }) {
   const [, sign, symbol, whole, fraction] = match;
   return (
     <>
-      <span className="text-ink-3 mr-2 align-[0.42em] text-[0.42em]">
+      <span className="text-ink-3 mr-2 align-[0.5em] text-[0.36em]">
         {sign}
         {symbol}
       </span>
       <span className={muted ? "text-ink-3" : undefined}>{whole}</span>
-      {fraction ? <span className="text-ink-3">{fraction}</span> : null}
+      {fraction ? (
+        <span className="text-ink-3 text-[0.5em]">{fraction}</span>
+      ) : null}
     </>
+  );
+}
+
+function SheetHeader({
+  eyebrow,
+  title,
+  href,
+  linkLabel,
+}: {
+  eyebrow: string;
+  title: React.ReactNode;
+  href: string;
+  linkLabel: string;
+}) {
+  return (
+    <div className="border-ink/80 flex items-end justify-between gap-4 border-b-2 pb-3">
+      <div>
+        <p className="eyebrow">{eyebrow}</p>
+        <p className="font-poster figures mt-1.5 text-[34px] leading-none font-extrabold">
+          {title}
+        </p>
+      </div>
+      <Link
+        href={href}
+        className="text-ink-2 hover:text-ink inline-flex items-center gap-1 pb-1 text-[13px] font-semibold"
+      >
+        {linkLabel}
+        <ArrowUpRight className="size-3.5" />
+      </Link>
+    </div>
+  );
+}
+
+function AccountRow({
+  account,
+  currency,
+}: {
+  account: WorthAccount;
+  currency: string;
+}) {
+  const owed = account.total && new Decimal(account.total).isNegative();
+  return (
+    <li>
+      <Link
+        href={`/accounts/${account.id}`}
+        className="group hover:bg-wash -mx-2 flex items-center gap-3.5 rounded-[8px] px-2 py-2.5 transition-colors"
+      >
+        <InstitutionMark
+          institutionKey={account.institutionKey}
+          name={account.institutionName ?? account.name}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14px] font-semibold group-hover:underline group-hover:underline-offset-4">
+            {account.name}
+            {account.last4 ? (
+              <span className="figures text-ink-3 ml-1.5 font-normal">
+                ··{account.last4}
+              </span>
+            ) : null}
+          </span>
+          <span className="text-ink-3 block truncate text-[12px]">
+            {[
+              account.institutionName,
+              accountTypeLabels[account.type],
+              account.asOf ? formatDate(account.asOf) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        </span>
+        <span className="text-right">
+          {!account.asOf ? (
+            <span className="text-ink-3 text-[13px]">Not recorded</span>
+          ) : account.unpriced > 0 && account.totals.length === 0 ? (
+            <span className="text-warn text-[13px]">Awaiting prices</span>
+          ) : account.unconverted.length > 0 ? (
+            <Amounts totals={account.totals} className="text-warn" />
+          ) : (
+            <span
+              className={cn(
+                "figures font-mono text-[14px] font-semibold",
+                owed && "text-loss",
+              )}
+            >
+              {formatMoney(account.total ?? 0, currency)}
+            </span>
+          )}
+          {owed ? (
+            <span className="text-ink-3 block text-[11px]">owed</span>
+          ) : null}
+        </span>
+      </Link>
+    </li>
   );
 }
 
@@ -58,11 +143,13 @@ function ChecklistItem({
   done: boolean;
   children: React.ReactNode;
 }) {
+  // Only what is left to do is listed; the count shows the progress.
+  if (done) return null;
   return (
-    <li className="flex items-start gap-3 py-2.5 text-sm">
+    <li className="flex items-center gap-2.5 text-[13px]">
       <span
         className={cn(
-          "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full",
+          "grid size-5 shrink-0 place-items-center rounded-full",
           done
             ? "bg-brand text-on-brand"
             : "border-line-2 text-ink-3 border border-dashed",
@@ -74,22 +161,27 @@ function ChecklistItem({
           <Minus className="size-3" />
         )}
       </span>
-      <span
-        className={
-          done ? "text-ink-3 decoration-ink-3/40 line-through" : "text-ink"
-        }
-      >
+      <span className={done ? "text-ink-3 line-through" : undefined}>
         {children}
       </span>
     </li>
   );
 }
 
+const link =
+  "font-semibold underline decoration-current/30 underline-offset-4 hover:decoration-current";
+
+const sum = (values: (string | null)[]) =>
+  values.reduce((total, v) => (v ? total.plus(v) : total), new Decimal(0));
+
 export default async function OverviewPage() {
   const session = await requireEnrolledSession();
-  const [settings, worth] = await Promise.all([
-    api.settings.get(),
+  const month = currentMonth();
+  const [worth, categories, thisMonth, lastMonth] = await Promise.all([
     api.portfolio.netWorth(),
+    api.catalog.categories(),
+    api.spending.summary({ month }),
+    api.spending.summary({ month: shiftMonth(month, -1) }),
   ]);
   void api.catalog.currencies.prefetch();
   void api.settings.get.prefetch();
@@ -102,322 +194,337 @@ export default async function OverviewPage() {
       )) > 0
     : true;
   const firstName = session.user.name.split(" ")[0];
+  const currency = worth.currency;
   const recorded = worth.accounts.some((a) => a.asOf);
 
+  // Investments: valued from holdings, split by asset class.
+  const investing = worth.accounts.filter((a) => holdsSecurities(a.type));
+  const banking = worth.accounts.filter((a) => !holdsSecurities(a.type));
+  const investTotal = sum(worth.allocation.map((a) => a.total));
   const positive = worth.allocation.filter(
     (a) => a.total && new Decimal(a.total).isPositive(),
   );
-  const allocationSum = positive.reduce(
-    (sum, a) => sum.plus(a.total!),
-    new Decimal(0),
+  const positiveSum = sum(positive.map((a) => a.total));
+  const slices = positive.map((a) => ({
+    assetClass: a.assetClass,
+    share: positiveSum.isZero()
+      ? 0
+      : new Decimal(a.total!).div(positiveSum).times(100).toNumber(),
+    display: formatMoney(a.total!, currency),
+  }));
+
+  // Bank and cards: cash held less what the cards owe.
+  const bankTotal = new Decimal(worth.banking.total ?? 0);
+  const owed = sum(
+    banking.map((a) =>
+      a.total && new Decimal(a.total).isNegative() ? a.total : null,
+    ),
+  ).abs();
+
+  // This month's spending in the display currency, rolled up to top-level categories.
+  const parentOf = new Map(categories.map((c) => [c.id, c.parentId ?? c.id]));
+  const nameOf = new Map(categories.map((c) => [c.id, c.name]));
+  const inCurrency = thisMonth.filter((r) => r.currency === currency);
+  const otherCurrencies = [
+    ...new Set(
+      thisMonth.filter((r) => r.currency !== currency).map((r) => r.currency),
+    ),
+  ];
+  const moneyIn = sum(inCurrency.map((r) => r.received));
+  const moneyOut = sum(inCurrency.map((r) => r.spent));
+  const lastOut = sum(
+    lastMonth.filter((r) => r.currency === currency).map((r) => r.spent),
   );
-  const shares = positive
-    .map((a) => ({
-      ...a,
-      color: allocationColors[a.assetClass] ?? allocationColors.other!,
-      share: allocationSum.isZero()
-        ? 0
-        : new Decimal(a.total!).div(allocationSum).times(100).toNumber(),
+  const byCategory = new Map<string, Decimal>();
+  for (const r of inCurrency) {
+    if (new Decimal(r.spent).isZero()) continue;
+    const root = r.categoryId
+      ? (parentOf.get(r.categoryId) ?? r.categoryId)
+      : "none";
+    byCategory.set(
+      root,
+      (byCategory.get(root) ?? new Decimal(0)).plus(r.spent),
+    );
+  }
+  const ranked = [...byCategory]
+    .map(([id, spent]) => ({
+      id,
+      name: id === "none" ? "Not categorised" : (nameOf.get(id) ?? "Other"),
+      spent,
     }))
-    .sort((a, b) => b.share - a.share);
+    .sort((a, b) => b.spent.comparedTo(a.spent));
+  const shown = ranked.slice(0, 6);
+  const rest = sum(ranked.slice(6).map((r) => r.spent.toFixed(4)));
+  const largest = shown[0]?.spent ?? new Decimal(1);
 
   const checklist = [
-    !!session.user.twoFactorEnabled,
-    ...(admin ? [hasDefaultProvider] : []),
-    worth.accounts.length > 0,
-    recorded,
+    { done: !!session.user.twoFactorEnabled, key: "2fa" },
+    ...(admin ? [{ done: hasDefaultProvider, key: "ai" }] : []),
+    { done: investing.length > 0, key: "invest" },
+    { done: banking.length > 0, key: "bank" },
   ];
-  const doneCount = checklist.filter(Boolean).length;
+  const doneCount = checklist.filter((c) => c.done).length;
+  const share = (part: Decimal) =>
+    worth.total && !new Decimal(worth.total).isZero()
+      ? `${part.div(worth.total).times(100).toFixed(0)}%`
+      : "—";
 
   return (
     <HydrateClient>
-      <section className="card relative overflow-hidden p-6 sm:p-10">
-        <div
-          aria-hidden
-          className="grid-lines pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_60%_80%_at_100%_0%,black,transparent)] opacity-50"
-        />
-        <div className="relative grid gap-8 md:grid-cols-[1fr_auto] md:items-start">
-          <div>
-            <p className="eyebrow flex items-center gap-2">
-              <span className="bg-brand animate-pulse-dot size-1.5 rounded-full" />
-              Net worth · {firstName}
-            </p>
-            <p className="figures font-display mt-5 text-[56px] leading-none font-medium tracking-tight sm:text-[88px]">
-              <HeroFigure
-                value={formatMoney(worth.total ?? 0, settings.displayCurrency)}
-                muted={!recorded}
-              />
-            </p>
-            <div className="text-ink-2 mt-5 max-w-lg space-y-1 text-sm">
-              {!recorded ? (
-                <p>
-                  Nothing to total yet. Add your accounts and record their
-                  balances and holdings; amounts are converted to your display
-                  currency.
-                </p>
-              ) : (
-                <p>Latest balances, up to {formatDate(worth.asOf!)}.</p>
-              )}
-              {worth.unconverted.length > 0 ? (
-                <p className="text-warn">
-                  Not included, no exchange rate to {worth.currency} yet:{" "}
-                  {worth.unconverted
-                    .map((a) => formatMoney(a.amount, a.currency))
-                    .join(", ")}
-                  .
-                </p>
-              ) : null}
-              {worth.unpriced > 0 ? (
-                <p className="text-warn">
-                  {worth.unpriced} holding{worth.unpriced === 1 ? "" : "s"}{" "}
-                  without a price {worth.unpriced === 1 ? "is" : "are"} not
-                  counted.
-                </p>
-              ) : null}
-            </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="overview-currency" className="eyebrow">
-              Show amounts in
-            </label>
+      {/* Net worth */}
+      <section className="card relative overflow-hidden">
+        <div className="ink-strip h-1.5" />
+        <div className="p-5 sm:p-10">
+          <div className="flex items-center justify-between gap-4">
+            <p className="eyebrow">Net worth · {firstName}</p>
             <Suspense
-              fallback={<div className="bg-wash rounded-ctl h-10 w-44" />}
+              fallback={<div className="bg-wash rounded-ctl h-8 w-20" />}
             >
-              <CurrencySelect id="overview-currency" />
+              <CurrencySelect id="overview-currency" compact />
             </Suspense>
+          </div>
+          <p className="font-poster figures mt-3 text-[clamp(52px,15vw,104px)] leading-[0.9] font-extrabold">
+            <HeroFigure
+              value={formatMoney(worth.total ?? 0, currency)}
+              muted={!recorded}
+            />
+          </p>
+          <div className="text-ink-2 mt-4 space-y-1 text-sm">
+            {!recorded ? (
+              <p>
+                Nothing to total yet. Add an account below and record what it
+                holds.
+              </p>
+            ) : (
+              <p>Latest balances, up to {formatDate(worth.asOf!)}.</p>
+            )}
+            {worth.unconverted.length > 0 ? (
+              <p className="text-warn">
+                Not included, no exchange rate to {currency} yet:{" "}
+                {worth.unconverted
+                  .map((a) => formatMoney(a.amount, a.currency))
+                  .join(", ")}
+                .
+              </p>
+            ) : null}
+            {worth.unpriced > 0 ? (
+              <p className="text-warn">
+                {worth.unpriced} holding{worth.unpriced === 1 ? "" : "s"}{" "}
+                without a price {worth.unpriced === 1 ? "is" : "are"} not
+                counted.
+              </p>
+            ) : null}
           </div>
         </div>
 
-        {shares.length > 0 ? (
-          <div className="relative mt-10">
-            <div className="bg-sunken flex h-3 gap-0.5 overflow-hidden rounded-full">
-              {shares.map((a) => (
-                <span
-                  key={a.assetClass}
-                  className="h-full first:rounded-l-full last:rounded-r-full"
-                  style={{ width: `${a.share}%`, background: a.color }}
-                  title={`${assetClassLabels[a.assetClass]} ${a.share.toFixed(1)}%`}
-                />
-              ))}
-            </div>
-            <ul className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
-              {shares.map((a) => (
-                <li key={a.assetClass} className="flex items-center gap-2">
-                  <span
-                    className="size-2 rounded-full"
-                    style={{ background: a.color }}
-                  />
-                  <span className="text-ink-2">
-                    {assetClassLabels[a.assetClass]}
-                  </span>
-                  <span className="figures text-ink-3 font-mono text-[12px]">
-                    {a.share.toFixed(1)}%
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        {/* What the number is made of */}
+        <div className="border-line grid grid-cols-2 border-t">
+          {[
+            {
+              href: "#investments",
+              label: "Investments",
+              value: investTotal,
+              note: `${investing.length} account${investing.length === 1 ? "" : "s"} · ${share(investTotal)}`,
+            },
+            {
+              href: "#banking",
+              label: "Bank & cards",
+              value: bankTotal,
+              note: owed.isZero()
+                ? `${banking.length} account${banking.length === 1 ? "" : "s"} · ${share(bankTotal)}`
+                : `After ${formatMoney(owed.toFixed(2), currency)} card debt`,
+            },
+          ].map((part, i) => (
+            <a
+              key={part.label}
+              href={part.href}
+              className={cn(
+                "hover:bg-wash group min-w-0 px-5 py-4 transition-colors sm:px-10 sm:py-5",
+                i === 1 && "border-line border-l",
+              )}
+            >
+              <p className="eyebrow">{part.label}</p>
+              <p className="font-poster figures mt-1 truncate text-[20px] leading-tight font-bold sm:text-[28px]">
+                {formatMoney(part.value.toFixed(2), currency)}
+              </p>
+              <p className="text-ink-3 text-[12px]">{part.note}</p>
+            </a>
+          ))}
+        </div>
       </section>
 
-      <dl className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {[
-          { label: "Accounts", value: String(worth.accounts.length) },
-          {
-            label: "With balances",
-            value: String(worth.accounts.filter((a) => a.asOf).length),
-          },
-          { label: "Asset classes", value: String(worth.allocation.length) },
-          {
-            label: "Last updated",
-            value: worth.asOf ? formatDate(worth.asOf) : "—",
-          },
-        ].map((stat) => (
-          <div key={stat.label} className="card px-5 py-4">
-            <dt className="eyebrow">{stat.label}</dt>
-            <dd className="font-display figures mt-2 text-[28px] leading-none">
-              {stat.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-        <Section
-          title="Accounts"
-          description="Brokerage, bank and card accounts you track."
-          actions={
-            worth.accounts.length > 0 ? (
-              <Link
-                href="/accounts"
-                className="text-ink-2 hover:text-brand inline-flex items-center gap-1 text-[13px] font-medium transition-colors"
-              >
-                Manage
-                <ArrowUpRight className="size-3.5" />
+      {doneCount < checklist.length ? (
+        <section className="card mt-4 flex flex-wrap items-center gap-x-8 gap-y-3 px-6 py-4 sm:px-10">
+          <p className="eyebrow">
+            Getting set up · {doneCount}/{checklist.length}
+          </p>
+          <ul className="flex flex-wrap gap-x-6 gap-y-2">
+            <ChecklistItem done={!!session.user.twoFactorEnabled}>
+              <Link href="/settings" className={link}>
+                Two-step sign-in
               </Link>
-            ) : undefined
-          }
-        >
-          {worth.accounts.length === 0 ? (
-            <EmptyState
-              title="No accounts yet"
-              action={
-                <Link
-                  href="/accounts"
-                  className="text-brand inline-flex items-center gap-1 font-medium"
-                >
-                  Add an account
-                  <ArrowUpRight className="size-4" />
+            </ChecklistItem>
+            {admin ? (
+              <ChecklistItem done={hasDefaultProvider}>
+                <Link href="/admin/ai" className={link}>
+                  Default AI provider
                 </Link>
-              }
-            >
-              Add your bank, card and brokerage accounts, then record their
-              balances. Statement imports and broker sync come in a later build
-              step.
-            </EmptyState>
+              </ChecklistItem>
+            ) : null}
+            <ChecklistItem done={investing.length > 0}>
+              <Link href="/accounts?add=investments" className={link}>
+                An investment account
+              </Link>
+            </ChecklistItem>
+            <ChecklistItem done={banking.length > 0}>
+              <Link href="/accounts?add=banking" className={link}>
+                A bank account or card
+              </Link>
+            </ChecklistItem>
+          </ul>
+        </section>
+      ) : null}
+
+      <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+        {/* Investments */}
+        <section
+          id="investments"
+          className="card min-w-0 scroll-mt-6 p-5 sm:p-8"
+        >
+          <SheetHeader
+            eyebrow="Investments"
+            title={formatMoney(investTotal.toFixed(2), currency)}
+            href="/accounts"
+            linkLabel="Holdings"
+          />
+          {slices.length > 0 ? (
+            <div className="mt-6">
+              <Allocation slices={slices} />
+            </div>
+          ) : null}
+          {investing.length === 0 ? (
+            <p className="text-ink-2 mt-6 text-sm">
+              Brokerage, retirement and crypto accounts are valued from what
+              they hold.{" "}
+              <Link href="/accounts?add=investments" className={link}>
+                Add one
+              </Link>
+              .
+            </p>
           ) : (
-            <ul className="-mx-2">
-              {worth.accounts.map((a) => (
-                <li key={a.id}>
-                  <Link
-                    href={`/accounts/${a.id}`}
-                    className="group rounded-ctl hover:bg-wash/70 flex items-center gap-4 px-2 py-3 transition-colors"
-                  >
-                    <span className="bg-surface-2 border-line-2 font-display text-ink-2 group-hover:text-brand grid size-10 shrink-0 place-items-center rounded-full border text-lg transition-colors">
-                      {a.name.trim().charAt(0).toUpperCase()}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">
-                        {a.name}
-                      </span>
-                      <span className="text-ink-3 block text-[13px]">
-                        {accountTypeLabels[a.type]}
-                        {a.asOf ? ` · ${formatDate(a.asOf)}` : ""}
-                      </span>
-                    </span>
-                    <span className="text-right">
-                      {!a.asOf ? (
-                        <span className="text-ink-3 text-[13px]">
-                          Not recorded
-                        </span>
-                      ) : a.unpriced > 0 && a.totals.length === 0 ? (
-                        <span className="text-warn text-[13px]">
-                          Awaiting prices
-                        </span>
-                      ) : a.unconverted.length > 0 ? (
-                        <Amounts totals={a.totals} className="text-warn" />
-                      ) : (
-                        <span className="figures font-display text-lg">
-                          {formatMoney(a.total ?? 0, worth.currency)}
-                        </span>
-                      )}
-                      {a.unpriced > 0 ? (
-                        <span className="text-warn block text-[12px]">
-                          {a.unpriced} holding{a.unpriced === 1 ? "" : "s"}{" "}
-                          without a price
-                        </span>
-                      ) : null}
-                    </span>
-                  </Link>
-                </li>
+            <ul className="mt-6">
+              {investing.map((a) => (
+                <AccountRow key={a.id} account={a} currency={currency} />
               ))}
             </ul>
           )}
-        </Section>
+        </section>
 
-        <div className="space-y-4">
-          {worth.allocation.length > 0 ? (
-            <Section
-              title="By asset class"
-              description={`In ${worth.currency}.`}
-            >
-              {shares.length > 0 ? (
-                <DonutChart
-                  segments={shares.map((a) => ({
-                    key: a.assetClass,
-                    label: assetClassLabels[a.assetClass],
-                    share: a.share,
-                    display: formatMoney(a.total!, worth.currency),
-                    color: a.color,
-                  }))}
-                  totalLabel="Total"
-                  totalDisplay={formatMoney(
-                    allocationSum.toFixed(2),
-                    worth.currency,
+        {/* Bank and cards */}
+        <section id="banking" className="card min-w-0 scroll-mt-6 p-5 sm:p-8">
+          <SheetHeader
+            eyebrow={`Spending · ${formatMonth(month)}`}
+            title={formatMoney(moneyOut.toFixed(2), currency)}
+            href="/spending"
+            linkLabel="Transactions"
+          />
+          <dl className="mt-5 grid grid-cols-3 gap-4">
+            {[
+              { label: "Money in", value: moneyIn, tone: "text-gain" },
+              { label: "Money out", value: moneyOut, tone: "text-loss" },
+              {
+                label: "Left over",
+                value: moneyIn.minus(moneyOut),
+                tone: undefined,
+              },
+            ].map((f) => (
+              <div key={f.label}>
+                <dt className="eyebrow">{f.label}</dt>
+                <dd
+                  className={cn(
+                    "figures mt-1 font-mono text-[15px] font-semibold",
+                    f.tone,
                   )}
-                />
-              ) : null}
-              {worth.allocation.some((a) => a.unconverted.length > 0) ? (
-                <div className="border-line mt-4 space-y-1 border-t pt-3 text-[13px]">
-                  <p className="text-ink-3">Not converted yet:</p>
-                  {worth.allocation
-                    .filter((a) => a.unconverted.length > 0)
-                    .map((a) => (
-                      <p
-                        key={a.assetClass}
-                        className="flex justify-between gap-3"
-                      >
-                        <span className="text-ink-2">
-                          {assetClassLabels[a.assetClass]}
-                        </span>
-                        <Amounts totals={a.unconverted} className="text-warn" />
-                      </p>
-                    ))}
-                </div>
-              ) : null}
-            </Section>
-          ) : null}
+                >
+                  {formatMoney(f.value.toFixed(2), currency)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          {lastOut.isZero() ? null : (
+            <p className="text-ink-3 mt-2 text-[12px]">
+              {formatMoney(moneyOut.minus(lastOut).abs().toFixed(2), currency)}{" "}
+              {moneyOut.lessThan(lastOut) ? "less" : "more"} than{" "}
+              {formatMonth(shiftMonth(month, -1))}. Transfers between your own
+              accounts aren&apos;t counted.
+            </p>
+          )}
 
-          <Section
-            title="Getting set up"
-            actions={
-              <span className="figures text-ink-3 font-mono text-[12px]">
-                {doneCount}/{checklist.length}
-              </span>
-            }
-          >
-            <span className="bg-sunken -mt-2 mb-3 block h-1 overflow-hidden rounded-full">
-              <span
-                className="bg-brand block h-full rounded-full transition-[width]"
-                style={{ width: `${(doneCount / checklist.length) * 100}%` }}
-              />
-            </span>
-            <ul>
-              <ChecklistItem done={!!session.user.twoFactorEnabled}>
-                Turn on two-step sign-in in{" "}
-                <Link
-                  href="/settings"
-                  className="text-brand font-medium hover:underline hover:underline-offset-4"
-                >
-                  Settings
-                </Link>
-              </ChecklistItem>
-              {admin ? (
-                <ChecklistItem done={hasDefaultProvider}>
-                  Default AI provider set —{" "}
-                  <Link
-                    href="/admin/ai"
-                    className="text-brand font-medium hover:underline hover:underline-offset-4"
+          {shown.length > 0 ? (
+            <div className="mt-6">
+              <p className="eyebrow">Where it went</p>
+              <ul className="mt-2 space-y-1.5">
+                {[
+                  ...shown,
+                  ...(rest.isZero()
+                    ? []
+                    : [{ id: "rest", name: "Everything else", spent: rest }]),
+                ].map((c) => (
+                  <li
+                    key={c.id}
+                    className="grid grid-cols-[8rem_1fr_auto] items-center gap-3 text-[13px]"
                   >
-                    run a test
-                  </Link>{" "}
-                  before importing
-                </ChecklistItem>
+                    <span className="truncate">{c.name}</span>
+                    <span className="bg-wash h-2.5 overflow-hidden rounded-r-[4px]">
+                      <span
+                        className="bg-ink/80 block h-full rounded-r-[4px]"
+                        style={{
+                          width: `${c.spent.div(largest).times(100).toFixed(1)}%`,
+                        }}
+                        title={`${c.name} · ${formatMoney(c.spent.toFixed(2), currency)}`}
+                      />
+                    </span>
+                    <span className="figures w-24 text-right font-mono text-[12px]">
+                      {formatMoney(c.spent.toFixed(2), currency)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {otherCurrencies.length > 0 ? (
+                <p className="text-ink-3 mt-2 text-[12px]">
+                  Spending in {otherCurrencies.join(", ")} isn&apos;t included.
+                </p>
               ) : null}
-              <ChecklistItem done={worth.accounts.length > 0}>
-                <Link
-                  href="/accounts"
-                  className="text-brand font-medium hover:underline hover:underline-offset-4"
-                >
-                  Add your first account
-                </Link>
-              </ChecklistItem>
-              <ChecklistItem done={recorded}>
-                Record a balance or holdings
-              </ChecklistItem>
+            </div>
+          ) : (
+            <p className="text-ink-2 mt-6 text-sm">
+              No spending recorded for {formatMonth(month)} yet.
+            </p>
+          )}
+
+          <div className="border-ink/80 mt-8 flex items-baseline justify-between border-b-2 pb-2">
+            <p className="eyebrow">Bank & cards</p>
+            <p className="figures font-mono text-[13px] font-semibold">
+              {formatMoney(bankTotal.toFixed(2), currency)}
+            </p>
+          </div>
+          {banking.length === 0 ? (
+            <p className="text-ink-2 mt-4 text-sm">
+              Savings, current and credit card accounts carry a balance and your
+              transactions.{" "}
+              <Link href="/accounts?add=banking" className={link}>
+                Add one
+              </Link>
+              .
+            </p>
+          ) : (
+            <ul className="mt-2">
+              {banking.map((a) => (
+                <AccountRow key={a.id} account={a} currency={currency} />
+              ))}
             </ul>
-          </Section>
-        </div>
+          )}
+        </section>
       </div>
     </HydrateClient>
   );

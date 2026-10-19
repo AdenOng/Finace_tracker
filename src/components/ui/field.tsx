@@ -9,7 +9,7 @@ import {
 import { cn } from "~/lib/cn";
 
 const control =
-  "w-full rounded-ctl border border-line-2 bg-sunken px-3 text-sm text-ink placeholder:text-ink-3 transition-[color,border-color,box-shadow] hover:border-ink-3 focus:border-brand focus:shadow-[0_0_0_4px_rgb(239_230_210/0.1)] focus:outline-none disabled:bg-wash disabled:text-ink-3 aria-invalid:border-loss";
+  "w-full rounded-ctl border border-line-2 bg-sunken px-3 text-sm text-ink placeholder:text-ink-3 transition-[color,border-color,box-shadow] hover:border-ink-3 focus:border-brand focus:shadow-[0_0_0_4px_var(--color-brand-soft)] focus:outline-none disabled:bg-wash disabled:text-ink-3 aria-invalid:border-loss";
 
 export const Input = forwardRef<
   HTMLInputElement,
@@ -42,7 +42,7 @@ export const Select = forwardRef<
       ref={ref}
       className={cn(
         control,
-        "bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22><path d=%22M1 1.5l5 5 5-5%22 fill=%22none%22 stroke=%22%23b3ab9e%22 stroke-width=%221.6%22/></svg>')] h-10 appearance-none bg-[length:12px_8px] bg-[position:right_12px_center] bg-no-repeat pr-9",
+        "select-chevron h-10 appearance-none pr-9",
         className,
       )}
       {...props}

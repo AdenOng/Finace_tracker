@@ -51,3 +51,32 @@ export const assetClassLabels: Record<AssetClass | "cash", string> = {
   other: "Other",
   cash: "Cash",
 };
+
+/**
+ * Accounts fall on one side of the app or the other: investments are valued from their holdings,
+ * bank and card accounts from a balance plus their spending transactions.
+ */
+export const accountGroups = {
+  investments: {
+    label: "Investments",
+    types: ["brokerage", "retirement", "crypto_wallet"],
+    institutionKinds: ["broker", "crypto_exchange", "depository"],
+  },
+  banking: {
+    label: "Bank & cards",
+    types: ["savings", "checking", "credit_card", "cash", "other"],
+    institutionKinds: ["bank", "card_issuer"],
+  },
+} as const satisfies Record<
+  string,
+  {
+    label: string;
+    types: readonly AccountType[];
+    institutionKinds: readonly string[];
+  }
+>;
+export type AccountGroup = keyof typeof accountGroups;
+
+export function accountGroupOf(type: AccountType): AccountGroup {
+  return holdsSecurities(type) ? "investments" : "banking";
+}

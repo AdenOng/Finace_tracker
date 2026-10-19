@@ -36,10 +36,38 @@ using the same database and encrypted provider credentials. The Compose project 
 | Reconciliation: statement-period review, exact balance checks, protected entries and reopening | Done |
 | Merchant rules: per-user text matching, automatic categorization and previewed application | Done |
 | Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion | Done |
-| Import pipeline: upload → background job → review & dedupe → commit | Next |
+| Import pipeline: upload → background job → review & dedupe → commit | Done |
 | Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), live prices, FX, net-worth history | Later |
 
 The full database schema for the later phases already exists (`src/server/db/schema`).
+
+## Importing statements
+
+Open **Imports** (or **Import statement** on an account), pick the account and drop a PDF
+statement or a screenshot (PNG, JPEG or WebP, up to 20 MB). The file is stored under
+`UPLOAD_DIR` and read in the background by the default AI provider. With opencode this is
+`opencode-go/glm-5.3-flash`, which reads both text PDFs and images. Nothing is written to your
+accounts until you review it:
+
+- **Bank and card accounts:** every line becomes a transaction with a suggested category
+  (merchant rules apply to uncategorised lines). The review checks that the opening balance
+  plus the lines equals the closing balance, and the closing balance can be saved as the
+  account balance on the statement date.
+- **Investment accounts:** holdings and cash are saved together as what the account held on
+  the statement date. Buys, sells, dividends and fees are listed separately.
+- Lines that match something already recorded start unticked; same-day, same-amount lines are
+  flagged. Committing is all-or-nothing, and the same statement line is never saved twice.
+- The same file cannot be uploaded twice. **Discard** removes the upload and anything staged
+  from it; records already saved stay.
+
+For local development, run opencode yourself with the same password as `.env`:
+
+```bash
+OPENCODE_SERVER_PASSWORD=<from .env> opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+Compose installs opencode `OPENCODE_VERSION` (default 1.19.3, matching `@opencode-ai/sdk`).
+Bump both together.
 
 ## Checking statements and organizing spending
 
@@ -121,9 +149,11 @@ src/
       llm/                 Provider-agnostic interface + adapters (opencode, ai-sdk)
       extraction/          Zod output schema, prompt builder, PDF/image preparation
       accounts/            Ownership checks shared by the finance routers
-      portfolio/           Holdings loading, valuation and FX conversion (decimal arithmetic)
+      portfolio/           Holdings loading, valuation, FX conversion and snapshot writes
+      imports/             Upload storage, background extraction runner, staging and dedupe
     api/routers/           tRPC routers: accounts, portfolio (holdings, net worth),
-                           spending (transactions), catalog, settings, admin/*
+                           spending (transactions), imports (review and commit),
+                           catalog, settings, admin/*
   components/ui/           Design-system primitives
   app/(auth) app/(app)     Route groups: sign-in flows vs the signed-in shell
 ```

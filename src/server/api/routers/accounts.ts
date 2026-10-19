@@ -49,6 +49,7 @@ const accountColumns = {
   notes: financialAccount.notes,
   institutionId: financialAccount.institutionId,
   institutionName: institution.name,
+  institutionKey: institution.key,
   archivedAt: financialAccount.archivedAt,
   createdAt: financialAccount.createdAt,
 };

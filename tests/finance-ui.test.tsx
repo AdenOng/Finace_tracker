@@ -139,6 +139,7 @@ const sharedAccount: RouterOutputs["accounts"]["get"] = {
   notes: null,
   institutionId: null,
   institutionName: null,
+  institutionKey: null,
   archivedAt: null,
   createdAt: new Date("2026-10-01"),
   holdings: {

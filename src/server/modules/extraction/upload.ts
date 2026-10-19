@@ -24,6 +24,7 @@ const optionalId = z
 const fieldsSchema = z.object({
   providerId: optionalId,
   institutionId: optionalId,
+  accountId: optionalId,
   model: z.string().trim().max(200).nullable().optional(),
 });
 
@@ -86,6 +87,7 @@ export async function parseExtractionUpload(request: Request) {
   const fields = fieldsSchema.safeParse({
     providerId: form.get("providerId"),
     institutionId: form.get("institutionId"),
+    accountId: form.get("accountId"),
     model: form.get("model"),
   });
   if (!fields.success) {

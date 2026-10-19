@@ -7,8 +7,13 @@ import { api, HydrateClient } from "~/trpc/server";
 
 export const metadata: Metadata = { title: "Accounts" };
 
-export default async function AccountsPage() {
+export default async function AccountsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ add?: string }>;
+}) {
   await requireEnrolledSession();
+  const { add } = await searchParams;
   void api.accounts.list.prefetch();
   void api.catalog.institutions.prefetch();
   void api.catalog.currencies.prefetch();
@@ -17,9 +22,11 @@ export default async function AccountsPage() {
     <HydrateClient>
       <PageHeader
         title="Accounts"
-        description="Bank, card, brokerage and wallet accounts. Each keeps its own currency; totals are converted on the overview."
+        description="Investments are valued from what they hold; bank and card accounts from their balance and transactions. Each keeps its own currency."
       />
-      <AccountsView />
+      <AccountsView
+        initialAdd={add === "investments" || add === "banking" ? add : null}
+      />
     </HydrateClient>
   );
 }

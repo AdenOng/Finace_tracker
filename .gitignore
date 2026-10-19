@@ -69,7 +69,7 @@ data/
 backups/
 uploads/
 statements/
-imports/
+/imports/
 exports/
 /config/preset.json
 .tmp/

@@ -26,7 +26,7 @@
     "@ai-sdk/openai-compatible": "^3.0.62",
     "@better-auth/passkey": "^1.7.7",
     "@napi-rs/canvas": "^1.0.10",
-    "@opencode-ai/sdk": "^1.18.34",
+    "@opencode-ai/sdk": "^1.19.3",
     "@t3-oss/env-nextjs": "^0.13.11",
     "@tanstack/react-query": "^5.69.0",
     "@trpc/client": "^11.0.0",
