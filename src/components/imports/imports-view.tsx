@@ -27,6 +27,8 @@ const WHAT_IT_READS: Record<AccountGroup, string> = {
     "Holdings, cash and trades from a brokerage statement or app screenshot.",
   banking:
     "Every transaction and the closing balance from a bank or card statement.",
+  cpf_srs:
+    "SRS holdings, cash and top-ups, or your CPF balance. Split CPF into its accounts by hand afterwards.",
 };
 
 export function ImportsView({

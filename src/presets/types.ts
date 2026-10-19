@@ -69,6 +69,13 @@ export const presetPackSchema = z.object({
   currencies: z.array(currencyPresetSchema),
   institutions: z.array(institutionPresetSchema),
   categories: z.array(categoryPresetSchema),
+  /** Country-specific parts of the app the pack turns on. */
+  features: z
+    .object({
+      /** Singapore's CPF and SRS retirement accounts. */
+      cpfSrs: z.boolean().default(false),
+    })
+    .default({ cpfSrs: false }),
 });
 
 export type PresetPack = z.input<typeof presetPackSchema>;

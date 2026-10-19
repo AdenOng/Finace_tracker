@@ -25,7 +25,11 @@ export default async function AccountsPage({
         description="Investments are valued from what they hold; bank and card accounts from their balance and transactions. Each keeps its own currency."
       />
       <AccountsView
-        initialAdd={add === "investments" || add === "banking" ? add : null}
+        initialAdd={
+          add === "investments" || add === "banking" || add === "cpf_srs"
+            ? add
+            : null
+        }
       />
     </HydrateClient>
   );

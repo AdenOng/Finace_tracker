@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, exists, inArray, or, sql } from "drizzle-orm";
 
+import type { CpfBucket } from "~/lib/accounts";
 import type { Database } from "~/server/db";
 import {
   accountSnapshot,
@@ -42,7 +43,8 @@ export type Holdings = {
     quotedAt: Date | null;
     value: Amount | null;
   }[];
-  cash: Amount[];
+  /** `bucket` is the CPF sub-account; null outside CPF. */
+  cash: (Amount & { bucket: CpfBucket | null })[];
   /** Valued positions plus cash, per currency. */
   totals: Amount[];
   /** Positions with neither a quote nor a statement price. */
@@ -112,10 +114,14 @@ export async function snapshotDetails(
       .where(eq(position.snapshotId, snapshot.id))
       .orderBy(security.symbol, security.exchange),
     db
-      .select({ currency: cashBalance.currency, amount: cashBalance.amount })
+      .select({
+        currency: cashBalance.currency,
+        amount: cashBalance.amount,
+        bucket: cashBalance.bucket,
+      })
       .from(cashBalance)
       .where(eq(cashBalance.snapshotId, snapshot.id))
-      .orderBy(cashBalance.currency),
+      .orderBy(cashBalance.bucket, cashBalance.currency),
   ]);
   return { ...snapshot, positions, cash };
 }
@@ -188,10 +194,11 @@ export async function latestHoldings(
             snapshotId: cashBalance.snapshotId,
             currency: cashBalance.currency,
             amount: cashBalance.amount,
+            bucket: cashBalance.bucket,
           })
           .from(cashBalance)
           .where(inArray(cashBalance.snapshotId, snapshotIds))
-          .orderBy(cashBalance.currency),
+          .orderBy(cashBalance.bucket, cashBalance.currency),
       ])
     : [[], []];
 
@@ -209,9 +216,9 @@ export async function latestHoldings(
                 : null,
           }),
         }));
-      const balances: Amount[] = cash
+      const balances = cash
         .filter((c) => c.snapshotId === snapshot.id)
-        .map(({ currency, amount }) => ({ currency, amount }));
+        .map(({ currency, amount, bucket }) => ({ currency, amount, bucket }));
       const valued = rows.flatMap((p) => (p.value ? [p.value] : []));
       return [
         snapshot.accountId,

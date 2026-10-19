@@ -20,7 +20,13 @@ import {
   resolveWorkspaceScope,
   writableBy,
 } from "~/server/lib/access";
-import { accountTypes } from "~/lib/accounts";
+import {
+  accountGroupOf,
+  accountTypes,
+  holdsSecurities,
+  type AccountType,
+} from "~/lib/accounts";
+import { preset } from "~/server/lib/preset";
 import { lockAccounts } from "~/server/modules/spending/guards";
 import { latestHoldings } from "~/server/modules/portfolio/holdings";
 
@@ -53,6 +59,16 @@ const accountColumns = {
   archivedAt: financialAccount.archivedAt,
   createdAt: financialAccount.createdAt,
 };
+
+/** New CPF and SRS accounts need a preset that tracks them; existing ones keep working. */
+async function checkTypeOffered(type: AccountType) {
+  if (accountGroupOf(type) === "cpf_srs" && !(await preset.features()).cpfSrs) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "CPF and SRS accounts are not available with this preset",
+    });
+  }
+}
 
 async function checkReferences(
   db: Pick<Database, "select" | "$count">,
@@ -176,6 +192,7 @@ export const accountsRouter = createTRPCRouter({
     .input(accountInput)
     .mutation(async ({ ctx, input }) => {
       await checkReferences(ctx.db, input);
+      await checkTypeOffered(input.type);
       const [row] = await ctx.db
         .insert(financialAccount)
         .values({ ...input, ownerId: ctx.scope.userId })
@@ -202,7 +219,14 @@ export const accountsRouter = createTRPCRouter({
           .where(where)
           .limit(1);
         if (!current) throw new TRPCError({ code: "NOT_FOUND" });
-        if (current.type !== values.type && (await hasAccountHistory(tx, id))) {
+        // Holdings carry over between securities types (e.g. retirement to SRS); nothing else does.
+        const keepsShape =
+          holdsSecurities(current.type) && holdsSecurities(values.type);
+        if (
+          current.type !== values.type &&
+          !keepsShape &&
+          (await hasAccountHistory(tx, id))
+        ) {
           throw new TRPCError({
             code: "CONFLICT",
             message:
@@ -210,6 +234,7 @@ export const accountsRouter = createTRPCRouter({
           });
         }
         await checkReferences(tx, values, current.institutionId);
+        if (current.type !== values.type) await checkTypeOffered(values.type);
         await tx.update(financialAccount).set(values).where(where);
       }),
     ),

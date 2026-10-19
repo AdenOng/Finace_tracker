@@ -1,7 +1,11 @@
 import Decimal from "decimal.js";
 import { and, eq, gte, isNull, lte } from "drizzle-orm";
 
-import { holdsSecurities, type AccountType } from "~/lib/accounts";
+import {
+  cpfBucketLabels,
+  holdsSecurities,
+  type AccountType,
+} from "~/lib/accounts";
 import {
   category,
   investmentTransaction,
@@ -43,7 +47,8 @@ function dateRange(dates: string[]) {
 
 /**
  * Turn a validated extraction into reviewable rows for one account. Bank and card accounts get
- * transactions (plus the closing balance); investment accounts get holdings, cash and activity.
+ * transactions (plus the closing balance, or CPF sub-account balances); investment accounts get
+ * holdings, cash and activity.
  * Each line is compared with what the account already has: an exact match is a duplicate and
  * starts skipped, a same-day same-amount line is flagged but kept. Returns notes about anything
  * that could not be staged.
@@ -78,6 +83,24 @@ export async function stageExtraction(
       ...match,
     });
   };
+  // Each currency (and CPF sub-account) can only be saved once per dated entry.
+  const seenCash = new Set<string>();
+  const addCash = (balances: StatementExtraction["cashBalances"]) => {
+    for (const c of balances) {
+      const bucket = account.type === "cpf" ? c.bucket : null;
+      const label = `${c.currency.toUpperCase()}${bucket ? ` ${cpfBucketLabels[bucket]}` : ""}`;
+      if (seenCash.has(label)) {
+        notes.push(`Left out a second ${label} balance.`);
+        continue;
+      }
+      seenCash.add(label);
+      add("cash_balance", {
+        currency: c.currency,
+        amount: decimalString(c.amount, 4),
+        bucket,
+      });
+    }
+  };
 
   if (holdsSecurities(account.type)) {
     for (const p of out.positions) {
@@ -99,12 +122,7 @@ export async function stageExtraction(
         value: optionalDecimal(p.marketValue, 4),
       });
     }
-    for (const c of out.cashBalances) {
-      add("cash_balance", {
-        currency: c.currency,
-        amount: decimalString(c.amount, 4),
-      });
-    }
+    addCash(out.cashBalances);
 
     const activity = out.investmentTransactions;
     const existing =
@@ -248,12 +266,23 @@ export async function stageExtraction(
     }
 
     // The statement's closing balance becomes the account balance on the last day it covers.
-    if (out.closingBalance !== null) {
-      add("cash_balance", {
-        currency: out.currency || account.currency,
-        amount: decimalString(out.closingBalance, 4),
-      });
-    }
+    // CPF balances are kept per sub-account when every one is labelled; a statement without a
+    // closing total falls back to the balances it lists.
+    const split =
+      account.type === "cpf" &&
+      out.cashBalances.length > 0 &&
+      out.cashBalances.every((c) => c.bucket);
+    addCash(
+      !split && out.closingBalance !== null
+        ? [
+            {
+              currency: out.currency || account.currency,
+              amount: out.closingBalance,
+              bucket: null,
+            },
+          ]
+        : out.cashBalances,
+    );
   }
 
   if (rows.length > 0) {

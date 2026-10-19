@@ -31,6 +31,8 @@ export const accountType = pgEnum("account_type", [
   "crypto_wallet",
   "cash",
   "other",
+  "cpf",
+  "srs",
 ]);
 
 export const financialAccount = pgTable(
@@ -138,6 +140,8 @@ export const position = pgTable(
   (t) => [index("position_snapshot_idx").on(t.snapshotId)],
 );
 
+export const cpfBucket = pgEnum("cpf_bucket", ["oa", "sa", "ma", "ra"]);
+
 export const cashBalance = pgTable(
   "cash_balance",
   {
@@ -147,6 +151,8 @@ export const cashBalance = pgTable(
       .references(() => accountSnapshot.id, { onDelete: "cascade" }),
     currency: varchar("currency", { length: 3 }).notNull(),
     amount: money("amount").notNull(),
+    /** CPF sub-account the balance sits in; null for every other account type. */
+    bucket: cpfBucket("bucket"),
   },
   (t) => [index("cash_balance_snapshot_idx").on(t.snapshotId)],
 );

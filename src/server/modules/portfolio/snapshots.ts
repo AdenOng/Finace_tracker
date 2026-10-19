@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   holdsSecurities,
   assetClasses,
+  cpfBuckets,
   type AccountType,
 } from "~/lib/accounts";
 import {
@@ -55,10 +56,19 @@ export const snapshotInput = z
         "Each holding can only be listed once",
       ),
     cash: z
-      .array(z.object({ currency: currencyInput, amount: moneyInput }))
+      .array(
+        z.object({
+          currency: currencyInput,
+          amount: moneyInput,
+          /** CPF sub-account; only CPF accounts use it. */
+          bucket: z.enum(cpfBuckets).nullable().optional(),
+        }),
+      )
       .max(20)
       .refine(
-        (rows) => new Set(rows.map((r) => r.currency)).size === rows.length,
+        (rows) =>
+          new Set(rows.map((r) => `${r.currency}\u0000${r.bucket ?? ""}`))
+            .size === rows.length,
         "Each currency can only be listed once",
       ),
   })
@@ -91,6 +101,12 @@ export async function writeSnapshot(
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "This type of account only holds cash balances",
+    });
+  }
+  if (account.type !== "cpf" && input.cash.some((c) => c.bucket)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Only CPF balances are split into sub-accounts",
     });
   }
 
@@ -217,7 +233,9 @@ export async function writeSnapshot(
   if (input.cash.length > 0) {
     await tx
       .insert(cashBalance)
-      .values(input.cash.map((c) => ({ snapshotId, ...c })));
+      .values(
+        input.cash.map((c) => ({ snapshotId, ...c, bucket: c.bucket ?? null })),
+      );
   }
   return { id: snapshotId, replaced: replaced.length > 0 };
 }

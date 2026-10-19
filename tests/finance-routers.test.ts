@@ -44,6 +44,8 @@ const { reconciliationRouter } =
   await import("../src/server/api/routers/reconciliation");
 const { workspacesRouter } =
   await import("../src/server/api/routers/workspaces");
+const { settingsRouter } = await import("../src/server/api/routers/settings");
+const { preset } = await import("../src/server/lib/preset");
 const { findPendingWorkspaceInvitation, acceptWorkspaceInvitation } =
   await import("../src/server/modules/workspaces/invitations");
 const { resolveAccessScope, resolveWorkspaceScope } =
@@ -807,6 +809,124 @@ describe("portfolio", () => {
         cash: [],
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  test("CPF and SRS are reported apart and can be left out of net worth", async () => {
+    const savings = await alice.accounts.create(bank);
+    const cpf = await alice.accounts.create({
+      ...bank,
+      name: "CPF",
+      type: "cpf",
+    });
+    const srs = await alice.accounts.create({
+      ...bank,
+      name: "SRS",
+      type: "srs",
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: savings.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "1000" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: cpf.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [
+        { currency: "SGD", amount: "300", bucket: "oa" },
+        { currency: "SGD", amount: "200", bucket: "sa" },
+        { currency: "SGD", amount: "100", bucket: "ma" },
+      ],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: srs.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "50" }],
+    });
+    // Sub-accounts belong to CPF only.
+    await expect(
+      alice.portfolio.recordSnapshot({
+        accountId: savings.id,
+        asOf: "2026-10-02",
+        positions: [],
+        cash: [{ currency: "SGD", amount: "1", bucket: "oa" }],
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await db.insert(schema.investmentTransaction).values({
+      ownerId: "alice",
+      accountId: srs.id,
+      type: "deposit",
+      tradeDate: `${new Date().getFullYear()}-01-15`,
+      amount: "50",
+      currency: "SGD",
+      fingerprint: "srs-top-up",
+    });
+    // Money moved in from another SRS account is not a new contribution.
+    await db.insert(schema.investmentTransaction).values({
+      ownerId: "alice",
+      accountId: srs.id,
+      type: "transfer_in",
+      tradeDate: `${new Date().getFullYear()}-02-15`,
+      amount: "1000",
+      currency: "SGD",
+      fingerprint: "srs-transfer",
+    });
+
+    const counted = await alice.portfolio.netWorth();
+    expect(counted).toMatchObject({
+      total: "1650",
+      countCpfSrs: true,
+      cpfSrs: { total: "650" },
+      banking: { total: "1000" },
+      srs: { toppedUp: "50.0000" },
+    });
+    expect(counted.allocation).toEqual([]);
+    expect(counted.cpf.map((b) => [b.bucket, b.total])).toEqual([
+      ["oa", "300"],
+      ["sa", "200"],
+      ["ma", "100"],
+    ]);
+
+    await settingsRouter
+      .createCaller(contextFor("alice"))
+      .setCountCpfSrs({ count: false });
+    expect(await alice.portfolio.netWorth()).toMatchObject({
+      total: "1000",
+      countCpfSrs: false,
+      cpfSrs: { total: "650" },
+    });
+
+    // A preset without CPF and SRS stops new ones but keeps counting the existing ones.
+    const features = spyOn(preset, "features").mockResolvedValue({
+      cpfSrs: false,
+    });
+    try {
+      expect(
+        await settingsRouter.createCaller(contextFor("alice")).get(),
+      ).toMatchObject({ cpfSrsEnabled: false });
+      expect(await alice.portfolio.netWorth()).toMatchObject({
+        total: "1650",
+        countCpfSrs: true,
+        cpfSrsEnabled: false,
+      });
+      await expect(
+        alice.accounts.create({ ...bank, name: "New SRS", type: "srs" }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      const empty = await alice.accounts.create(bank);
+      await expect(
+        alice.accounts.update({ ...bank, id: empty.id, type: "cpf" }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await alice.accounts.update({
+        ...bank,
+        id: cpf.id,
+        name: "My CPF",
+        type: "cpf",
+      });
+    } finally {
+      features.mockRestore();
+    }
   });
 });
 
@@ -1617,7 +1737,7 @@ describe("workspace visibility", () => {
     });
     expect(
       (await bob.accounts.get({ ...shared, workspaceId })).holdings?.cash,
-    ).toEqual([{ currency: "SGD", amount: "100.1234" }]);
+    ).toEqual([{ currency: "SGD", amount: "100.1234", bucket: null }]);
     expect((await bob.portfolio.netWorth({ workspaceId })).total).toBe(
       "100.1234",
     );

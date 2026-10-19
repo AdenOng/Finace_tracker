@@ -215,7 +215,7 @@ const sharedAccount: RouterOutputs["accounts"]["get"] = {
     asOf: "2026-10-01",
     source: "manual",
     positions: [],
-    cash: [{ currency: "SGD", amount: "100" }],
+    cash: [{ currency: "SGD", amount: "100", bucket: null }],
     totals: [{ currency: "SGD", amount: "100" }],
     unpriced: 0,
   },
@@ -358,7 +358,7 @@ test("completed imports expose removal only for saved rows and keep removed evid
       {
         id: "a",
         kind: "cash_balance",
-        data: { currency: "SGD", amount: "10" },
+        data: { currency: "SGD", amount: "10", bucket: null },
         matchStatus: "new",
         decision: "accept",
         committedRecordId: "snapshot",
@@ -367,7 +367,7 @@ test("completed imports expose removal only for saved rows and keep removed evid
       {
         id: "b",
         kind: "cash_balance",
-        data: { currency: "USD", amount: "20" },
+        data: { currency: "USD", amount: "20", bucket: null },
         matchStatus: "new",
         decision: "skip",
         committedRecordId: "snapshot",
@@ -376,7 +376,7 @@ test("completed imports expose removal only for saved rows and keep removed evid
       {
         id: "c",
         kind: "cash_balance",
-        data: { currency: "HKD", amount: "30" },
+        data: { currency: "HKD", amount: "30", bucket: null },
         matchStatus: "duplicate",
         decision: "skip",
         committedRecordId: null,
@@ -431,12 +431,14 @@ test("consolidated portfolio renders combined quantities, expandable broker date
     {
       id: accountId,
       name: "Broker A",
+      type: "brokerage" as const,
       institutionName: null,
       institutionKey: null,
     },
     {
       id: "88888888-8888-4888-8888-888888888888",
       name: "Broker B",
+      type: "srs" as const,
       institutionName: null,
       institutionKey: null,
     },
@@ -458,19 +460,56 @@ test("consolidated portfolio renders combined quantities, expandable broker date
             assetClass: "stock",
             currency: "SGD",
             quantity: i ? "0.2" : "0.1",
-            averageCost: null,
+            averageCost: i ? null : "80",
             statementPrice: "100",
             statementValue: null,
             quotedAt: null,
             value: { currency: "SGD", amount: i ? "20" : "10" },
           },
         ],
-        cash: [{ currency: "SGD", amount: "5" }],
+        cash: [{ currency: "SGD", amount: "5", bucket: null }],
         totals: [{ currency: "SGD", amount: i ? "25" : "15" }],
         unpriced: 0,
       },
     ]),
   );
+  // With a cost on every lot: 0.3 units cost 24 and are worth 30.
+  const costed = new Map(
+    [...entries].map(([id, h]) => [
+      id,
+      {
+        ...h,
+        positions: h.positions.map((p) => ({ ...p, averageCost: "80" })),
+      },
+    ]),
+  );
+  const withCost = consolidateHoldings(accounts, costed, "SGD", new Map());
+  expect(withCost.positions[0]!.gain).toEqual({
+    cost: "24",
+    amount: "6",
+    percent: "25.0",
+  });
+  expect(withCost.gain).toEqual({ amount: "6", percent: "25.0", holdings: 1 });
+  // Every lot has a cost but one has no price: its cost would otherwise read as a loss.
+  const halfPriced = consolidateHoldings(
+    accounts,
+    new Map(
+      [...costed].map(([id, h], i) => [
+        id,
+        {
+          ...h,
+          positions: h.positions.map((p) => (i ? { ...p, value: null } : p)),
+          unpriced: i,
+        },
+      ]),
+    ),
+    "SGD",
+    new Map(),
+  );
+  expect(halfPriced.positions[0]!.gain).toBeNull();
+  expect(halfPriced.gain).toBeNull();
+  expect(withCost.positions[0]!.inSrs).toBe(true);
+  expect(withCost.srs?.total).toBe("25");
   const portfolio = {
     ...consolidateHoldings(accounts, entries, "SGD", new Map()),
     fxAsOf: null,
@@ -482,8 +521,11 @@ test("consolidated portfolio renders combined quantities, expandable broker date
       portfolio,
     );
   const html = render(<ConsolidatedPortfolio />, setup);
-  expect(html).toContain("Consolidated portfolio");
-  expect(html).toContain("S$40.00");
+  expect(html).toContain("Portfolio");
+  expect(html).toContain("Nasdaq");
+  expect(html).toContain("75.0%");
+  expect(html).toContain(">SRS<");
+  expect(html).toContain("<span>40</span>");
   expect(html).toContain("0.3");
   expect(html).toContain("units · ");
   expect(html).toContain("Broker A");
@@ -493,6 +535,9 @@ test("consolidated portfolio renders combined quantities, expandable broker date
   expect(html).toContain("Imported");
   expect(html).toContain("Manual");
   expect(html).toContain('aria-label="Filter by broker"');
+  // Cost is known for one of the two lots only, so no gain is claimed for the holding.
+  expect(portfolio.positions[0]!.gain).toBeNull();
+  expect(portfolio.gain).toBeNull();
   expect(html).toContain("Search holdings");
   expect(html).toContain("<summary");
   expect(html).toContain("Broker cash");
@@ -506,6 +551,16 @@ test("consolidated portfolio renders combined quantities, expandable broker date
         incomplete: true,
         unpriced: 1,
         unrecorded: 1,
+        brokers: [
+          ...portfolio.brokers,
+          {
+            ...portfolio.brokers[0]!,
+            id: "99999999-9999-4999-8999-999999999999",
+            name: "Broker C",
+            asOf: null,
+            total: null,
+          },
+        ],
         unconverted: [{ currency: "USD", amount: "100" }],
         positions: portfolio.positions.map((p) => ({ ...p, weight: null })),
       },
@@ -513,7 +568,8 @@ test("consolidated portfolio renders combined quantities, expandable broker date
   );
   expect(incomplete).toContain("Partial");
   expect(incomplete).toContain("no price");
-  expect(incomplete).toContain("no recorded holdings");
+  expect(incomplete).toContain("Nothing recorded");
   expect(incomplete).toContain("Waiting for exchange rates");
-  expect(incomplete).not.toContain("% of portfolio");
+  expect(incomplete).toContain("Broker C");
+  expect(incomplete).not.toContain("75.0%");
 });

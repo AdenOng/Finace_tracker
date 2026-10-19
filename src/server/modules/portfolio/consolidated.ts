@@ -1,14 +1,42 @@
 import Decimal from "decimal.js";
 
+import type { AccountType } from "~/lib/accounts";
 import type { Holdings } from "./holdings";
-import { type Amount, convertAmounts, sumByCurrency } from "./valuation";
+import {
+  type Amount,
+  convertAmounts,
+  multiply,
+  sumByCurrency,
+} from "./valuation";
 
 export type PortfolioBroker = {
   id: string;
   name: string;
+  type: AccountType;
   institutionName: string | null;
   institutionKey: string | null;
 };
+
+/** Value less cost, in the display currency; null when either side is missing or unconverted. */
+function gainOf(
+  value: { total: string | null; unconverted: Amount[] },
+  cost: { total: string | null; unconverted: Amount[] } | null,
+) {
+  if (
+    !cost?.total ||
+    value.total === null ||
+    value.unconverted.length > 0 ||
+    cost.unconverted.length > 0
+  )
+    return null;
+  const gain = new Decimal(value.total).minus(cost.total);
+  const base = new Decimal(cost.total);
+  return {
+    cost: cost.total,
+    amount: gain.toFixed(),
+    percent: base.isZero() ? null : gain.div(base).times(100).toFixed(1),
+  };
+}
 
 /** Group the same instrument across brokers, using only each account's current dated entry. */
 export function consolidateHoldings(
@@ -33,11 +61,14 @@ export function consolidateHoldings(
   type Lot = {
     accountId: string;
     accountName: string;
+    accountType: AccountType;
     asOf: string;
     source: Holdings["source"];
     quantity: string;
     quotedAt: Date | null;
     nativeValue: Amount | null;
+    /** Quantity × average cost, in the instrument's currency. */
+    nativeCost: Amount | null;
     total: string | null;
     unconverted: Amount[];
   };
@@ -54,11 +85,18 @@ export function consolidateHoldings(
       group.lots.push({
         accountId: broker.id,
         accountName: broker.name,
+        accountType: broker.type,
         asOf: h.asOf,
         source: h.source,
         quantity: p.quantity,
         quotedAt: p.quotedAt,
         nativeValue: p.value,
+        nativeCost: p.averageCost
+          ? {
+              currency: p.currency,
+              amount: multiply(p.quantity, p.averageCost),
+            }
+          : null,
         ...convertAmounts(p.value ? [p.value] : [], currency, rates),
       });
       grouped.set(p.securityId, group);
@@ -94,8 +132,8 @@ export function consolidateHoldings(
   );
   const unpriced = selected.reduce((n, b) => n + b.unpriced, 0);
   const unrecorded = selected.filter((b) => !b.asOf).length;
-  const incomplete =
-    unpriced > 0 || unrecorded > 0 || total.unconverted.length > 0;
+  // An account with nothing recorded adds nothing; only missing prices and rates leave a gap.
+  const incomplete = unpriced > 0 || total.unconverted.length > 0;
   const positions = [...grouped]
     .map(([securityId, { instrument: p, lots }]) => {
       const value = convertAmounts(
@@ -103,6 +141,13 @@ export function consolidateHoldings(
         currency,
         rates,
       );
+      const costs = lots.flatMap((lot) =>
+        lot.nativeCost ? [lot.nativeCost] : [],
+      );
+      // A gain needs every lot's cost and value; a missing price would read as a loss.
+      const gain = lots.every((lot) => lot.nativeValue && lot.nativeCost)
+        ? gainOf(value, convertAmounts(costs, currency, rates))
+        : null;
       return {
         securityId,
         symbol: p.symbol,
@@ -118,6 +163,8 @@ export function consolidateHoldings(
           lots.flatMap((lot) => (lot.nativeValue ? [lot.nativeValue] : [])),
         ),
         unpriced: lots.filter((lot) => !lot.nativeValue).length,
+        gain,
+        inSrs: lots.some((lot) => lot.accountType === "srs"),
         weight:
           !incomplete &&
           total.total &&
@@ -135,6 +182,17 @@ export function consolidateHoldings(
         a.exchange.localeCompare(b.exchange),
     );
   const dates = selected.flatMap((b) => (b.asOf ? [b.asOf] : [])).sort();
+  // Gain across the holdings that have a cost; the rest are counted separately.
+  const withGain = positions.filter((p) => p.gain);
+  const gainCost = withGain.reduce(
+    (sum, p) => sum.plus(p.gain!.cost),
+    new Decimal(0),
+  );
+  const gainAmount = withGain.reduce(
+    (sum, p) => sum.plus(p.gain!.amount),
+    new Decimal(0),
+  );
+  const srsHoldings = selected.filter((b) => b.type === "srs");
   return {
     currency,
     brokers,
@@ -143,6 +201,22 @@ export function consolidateHoldings(
     securities,
     cash,
     positions,
+    gain: withGain.length
+      ? {
+          amount: gainAmount.toFixed(),
+          percent: gainCost.isZero()
+            ? null
+            : gainAmount.div(gainCost).times(100).toFixed(1),
+          holdings: withGain.length,
+        }
+      : null,
+    srs: srsHoldings.length
+      ? convertAmounts(
+          srsHoldings.flatMap((b) => holdings.get(b.id)?.totals ?? []),
+          currency,
+          rates,
+        )
+      : null,
     unpriced,
     unrecorded,
     incomplete,

@@ -123,7 +123,7 @@ const line = (
 
 /** A document and job as the upload route creates them, staged from a canned extraction. */
 async function stagedJob(
-  account: { id: string; type: "checking" | "brokerage" },
+  account: { id: string; type: "checking" | "brokerage" | "cpf" },
   out: StatementExtraction,
   name: string,
 ) {
@@ -204,7 +204,7 @@ describe("statement imports", () => {
             currency: "SGD",
           },
         ],
-        cashBalances: [{ currency: "SGD", amount: 59.12 }],
+        cashBalances: [{ currency: "SGD", amount: 59.12, bucket: null }],
       },
       "broker-history-regression",
     );
@@ -238,7 +238,7 @@ describe("statement imports", () => {
       {
         ...base,
         documentType: "brokerage_statement",
-        cashBalances: [{ currency: "SGD", amount: 50 }],
+        cashBalances: [{ currency: "SGD", amount: 50, bucket: null }],
       },
       "broker-older-history-regression",
     );
@@ -385,7 +385,7 @@ describe("statement imports", () => {
             currency: "SGD",
           },
         ],
-        cashBalances: [{ currency: "SGD", amount: 612.3 }],
+        cashBalances: [{ currency: "SGD", amount: 612.3, bucket: null }],
       },
       "broker-oct",
     );
@@ -494,7 +494,7 @@ async function removableBroker(name: string) {
           currency: "SGD",
         },
       ],
-      cashBalances: [{ currency: "SGD", amount: 5 }],
+      cashBalances: [{ currency: "SGD", amount: 5, bucket: null }],
       investmentTransactions: [
         {
           type: "buy",
@@ -847,6 +847,66 @@ describe("removing individual imported rows", () => {
         .where(eq(schema.transaction.accountId, account.id)),
     ).toHaveLength(1);
     expect((await alice.accounts.get(account)).holdings!.cash).toHaveLength(1);
+  });
+
+  test("CPF statements save each sub-account; balances without a closing total are kept", async () => {
+    const account = await alice.accounts.create({
+      name: "Imported CPF",
+      type: "cpf",
+      institutionId: null,
+      currency: "SGD",
+      last4: "",
+      notes: "",
+    });
+    const sub = (bucket: "oa" | "sa" | "ma", amount: number) => ({
+      currency: "SGD",
+      amount,
+      bucket,
+    });
+    const jobId = await stagedJob(
+      { id: account.id, type: "cpf" },
+      {
+        ...base,
+        closingBalance: null,
+        cashBalances: [sub("oa", 300), sub("sa", 200), sub("ma", 100)],
+      },
+      "cpf-buckets",
+    );
+    const rows = (await alice.imports.get({ id: jobId })).rows;
+    expect(rows.map((r) => [r.kind, r.data])).toEqual([
+      ["cash_balance", { currency: "SGD", amount: "300", bucket: "oa" }],
+      ["cash_balance", { currency: "SGD", amount: "200", bucket: "sa" }],
+      ["cash_balance", { currency: "SGD", amount: "100", bucket: "ma" }],
+    ]);
+    await alice.imports.commit({ jobId, asOf: "2026-09-30" });
+    expect(
+      (await alice.accounts.get(account))
+        .holdings!.cash.map((c) => `${c.bucket} ${c.amount}`)
+        .sort(),
+    ).toEqual(["ma 100.0000", "oa 300.0000", "sa 200.0000"]);
+    const removal = await alice.imports.lineRemovalPreview({
+      jobId,
+      rowId: rows[1]!.id,
+    });
+    expect(removal.label).toBe("Special SGD");
+
+    // A bank statement that lists balances but prints no closing total keeps them.
+    const bank = await alice.accounts.create({
+      name: "Balances only",
+      type: "checking",
+      institutionId: null,
+      currency: "SGD",
+      last4: "",
+      notes: "",
+    });
+    const bankJob = await stagedJob(
+      { id: bank.id, type: "checking" },
+      { ...base, closingBalance: null, cashBalances: [sub("oa", 42)] },
+      "bank-balances-only",
+    );
+    expect(
+      (await alice.imports.get({ id: bankJob })).rows.map((r) => r.data),
+    ).toEqual([{ currency: "SGD", amount: "42", bucket: null }]);
   });
 });
 

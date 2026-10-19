@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 
 import type { Database } from "~/server/db";
 import { category, institution } from "~/server/db/schema";
+import { preset } from "~/server/lib/preset";
 import { getDefaultLlm, type LlmAdapter } from "../llm";
 import { prepareDocumentInput, UnreadableDocumentError } from "./prepare-input";
 import { buildExtractionPrompt, EXTRACTION_SYSTEM_PROMPT } from "./prompt";
@@ -84,6 +85,7 @@ export async function extractDocument(
       categories,
       institution: inst,
       documentText: prepared.text,
+      cpfSrs: (await preset.features()).cpfSrs,
     }),
     files: prepared.files,
     schema: buildStatementSchema(keys as [string, ...string[]]),

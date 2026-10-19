@@ -130,13 +130,11 @@ export const workspacesRouter = createTRPCRouter({
           .insert(workspace)
           .values({ ...input, ownerId: ctx.scope.userId })
           .returning({ id: workspace.id });
-        await tx
-          .insert(workspaceMember)
-          .values({
-            workspaceId: row!.id,
-            userId: ctx.scope.userId,
-            role: "member",
-          });
+        await tx.insert(workspaceMember).values({
+          workspaceId: row!.id,
+          userId: ctx.scope.userId,
+          role: "member",
+        });
         await recordAudit(tx, {
           actorId: ctx.scope.userId,
           action: "workspace.create",

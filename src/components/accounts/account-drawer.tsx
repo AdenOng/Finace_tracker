@@ -1,6 +1,11 @@
 "use client";
 
-import { ArrowLeft, CandlestickChart, CreditCard } from "lucide-react";
+import {
+  ArrowLeft,
+  CandlestickChart,
+  CreditCard,
+  Landmark,
+} from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -13,6 +18,8 @@ import {
   accountGroupOf,
   accountGroups,
   accountTypeLabels,
+  accountTypes,
+  holdsSecurities,
 } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { errorMessage } from "~/lib/errors";
@@ -38,17 +45,33 @@ const institutionKindLabels: Record<string, string> = {
   depository: "Depository",
   bank: "Banks",
   card_issuer: "Card issuers",
+  other: "Government",
 };
 
 const typeHints: Partial<Record<AccountType, string>> = {
   brokerage: "Shares, ETFs, funds and the cash waiting to be invested.",
-  retirement: "CPF Investment, SRS or another retirement account that invests.",
+  retirement:
+    "CPF Investment Scheme or an overseas retirement account that invests.",
   crypto_wallet: "Coins on an exchange or in your own wallet.",
   savings: "Savings and multiplier accounts that pay interest.",
   checking: "The account your salary lands in and bills leave from.",
   credit_card: "Record what you owe as a negative balance.",
   cash: "Physical cash you want counted.",
   other: "Anything else with a balance.",
+  cpf: "Your Ordinary, Special, MediSave and Retirement balances.",
+  srs: "Your SRS cash and whatever it has bought.",
+};
+
+const defaultType: Record<AccountGroup, AccountType> = {
+  investments: "brokerage",
+  banking: "savings",
+  cpf_srs: "cpf",
+};
+
+const groupColour: Record<AccountGroup, string> = {
+  investments: "bg-art-cobalt text-white",
+  banking: "bg-art-red text-white",
+  cpf_srs: "bg-art-mustard text-[#16130f]",
 };
 
 const GROUP_COPY: Record<
@@ -68,7 +91,7 @@ const GROUP_COPY: Record<
     title: "Add an investment account",
     blurb:
       "Valued from what it holds. You'll list the shares, units and coins, and any cash.",
-    examples: "IBKR, moomoo, Endowus, SRS, Coinhako",
+    examples: "IBKR, moomoo, Endowus, Syfe, Coinhako",
     institution: "Broker or platform",
     next: "Next, you'll enter its holdings.",
     submit: "Add and enter holdings",
@@ -82,6 +105,16 @@ const GROUP_COPY: Record<
     institution: "Bank or card issuer",
     next: "Next, you'll record its balance.",
     submit: "Add and record balance",
+  },
+  cpf_srs: {
+    Icon: Landmark,
+    title: "Add CPF or SRS",
+    blurb:
+      "Money set aside for retirement. Kept apart from your other accounts because you can't spend it yet.",
+    examples: "CPF, DBS SRS, OCBC SRS, Endowus SRS",
+    institution: "Held with",
+    next: "Next, you'll record its balances.",
+    submit: "Add and record balances",
   },
 };
 
@@ -118,14 +151,14 @@ export function AccountDrawer({
   const error = create.error ?? update.error ?? remove.error;
 
   const [type, setType] = useState<AccountType>(
-    existing?.type ?? (group === "investments" ? "brokerage" : "savings"),
+    existing?.type ?? (group ? defaultType[group] : "savings"),
   );
   const [name, setName] = useState(existing?.name ?? "");
   const [nameEdited, setNameEdited] = useState(!!existing);
 
   function choose(next: AccountGroup) {
     setGroup(next);
-    setType(next === "investments" ? "brokerage" : "savings");
+    setType(defaultType[next]);
   }
 
   // An institution archived by the admin after this account was created stays selectable here.
@@ -170,46 +203,60 @@ export function AccountDrawer({
         open={account !== null}
         onClose={onClose}
         title="Add account"
-        description="What kind of account is it? The two are tracked differently."
+        description="What kind of account is it? Each is tracked differently."
       >
         <div className="space-y-3">
-          {(Object.keys(accountGroups) as AccountGroup[]).map((g) => {
-            const copy = GROUP_COPY[g];
-            return (
-              <button
-                key={g}
-                type="button"
-                onClick={() => choose(g)}
-                className="group border-line-2 hover:border-ink rounded-card block w-full border p-5 text-left transition-colors"
-              >
-                <span className="flex items-center gap-3">
-                  <span
-                    className={cn(
-                      "grid size-10 place-items-center rounded-full text-white",
-                      g === "investments" ? "bg-art-cobalt" : "bg-art-red",
-                    )}
-                  >
-                    <copy.Icon className="size-5" strokeWidth={1.8} />
+          {(Object.keys(accountGroups) as AccountGroup[])
+            .filter((g) => g !== "cpf_srs" || settings.cpfSrsEnabled)
+            .map((g) => {
+              const copy = GROUP_COPY[g];
+              return (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => choose(g)}
+                  className="group border-line-2 hover:border-ink rounded-card block w-full border p-5 text-left transition-colors"
+                >
+                  <span className="flex items-center gap-3">
+                    <span
+                      className={cn(
+                        "grid size-10 place-items-center rounded-full",
+                        groupColour[g],
+                      )}
+                    >
+                      <copy.Icon className="size-5" strokeWidth={1.8} />
+                    </span>
+                    <span className="font-poster text-[22px] font-bold">
+                      {accountGroups[g].label}
+                    </span>
                   </span>
-                  <span className="font-poster text-[22px] font-bold">
-                    {accountGroups[g].label}
+                  <span className="text-ink-2 mt-3 block text-sm">
+                    {copy.blurb}
                   </span>
-                </span>
-                <span className="text-ink-2 mt-3 block text-sm">
-                  {copy.blurb}
-                </span>
-                <span className="text-ink-3 mt-2 block font-mono text-[11px] tracking-wide">
-                  {copy.examples}
-                </span>
-              </button>
-            );
-          })}
+                  <span className="text-ink-3 mt-2 block font-mono text-[11px] tracking-wide">
+                    {copy.examples}
+                  </span>
+                </button>
+              );
+            })}
         </div>
       </Drawer>
     );
   }
 
   const copy = GROUP_COPY[group];
+  // Accounts that hold securities can move between those types even with history.
+  // CPF and SRS are only offered when the preset tracks them; an existing one keeps its type.
+  const typeChoices: readonly AccountType[] = (
+    existing && holdsSecurities(existing.type)
+      ? accountTypes.filter(holdsSecurities)
+      : accountGroups[group].types
+  ).filter(
+    (t) =>
+      settings.cpfSrsEnabled ||
+      accountGroupOf(t) !== "cpf_srs" ||
+      t === existing?.type,
+  );
   const kinds = accountGroups[group].institutionKinds as readonly string[];
   const offered = institutions.filter((i) => kinds.includes(i.kind));
   const institutionGroups = kinds
@@ -220,11 +267,7 @@ export function AccountDrawer({
     <Drawer
       open={account !== null}
       onClose={onClose}
-      title={
-        existing
-          ? existing.name
-          : copy.title
-      }
+      title={existing ? existing.name : copy.title}
       description={existing ? undefined : copy.next}
       footer={
         <>
@@ -273,7 +316,7 @@ export function AccountDrawer({
             Type
           </legend>
           <div className="flex flex-wrap gap-2">
-            {accountGroups[group].types.map((t) => (
+            {typeChoices.map((t) => (
               <label
                 key={t}
                 className={cn(
@@ -296,7 +339,7 @@ export function AccountDrawer({
             ))}
           </div>
           <p className="text-ink-3 mt-2 text-[13px]">
-            {existing
+            {existing && !holdsSecurities(existing.type)
               ? "Type can only change before balances, transactions or reconciliations are recorded."
               : typeHints[type]}
           </p>

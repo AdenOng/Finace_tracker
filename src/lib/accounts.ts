@@ -9,6 +9,8 @@ export const accountTypes = [
   "credit_card",
   "cash",
   "other",
+  "cpf",
+  "srs",
 ] as const;
 export type AccountType = (typeof accountTypes)[number];
 
@@ -21,12 +23,17 @@ export const accountTypeLabels: Record<AccountType, string> = {
   credit_card: "Credit card",
   cash: "Cash",
   other: "Other",
+  cpf: "CPF",
+  srs: "SRS",
 };
 
 /** Accounts that hold securities; the rest only carry cash balances and spending. */
 export function holdsSecurities(type: AccountType) {
   return (
-    type === "brokerage" || type === "retirement" || type === "crypto_wallet"
+    type === "brokerage" ||
+    type === "retirement" ||
+    type === "crypto_wallet" ||
+    type === "srs"
   );
 }
 
@@ -53,8 +60,9 @@ export const assetClassLabels: Record<AssetClass | "cash", string> = {
 };
 
 /**
- * Accounts fall on one side of the app or the other: investments are valued from their holdings,
- * bank and card accounts from a balance plus their spending transactions.
+ * Accounts fall into one of three groups: investments are valued from their holdings, bank and
+ * card accounts from a balance plus their spending transactions, and CPF and SRS are kept apart
+ * because the money stays locked until retirement.
  */
 export const accountGroups = {
   investments: {
@@ -67,6 +75,11 @@ export const accountGroups = {
     types: ["savings", "checking", "credit_card", "cash", "other"],
     institutionKinds: ["bank", "card_issuer"],
   },
+  cpf_srs: {
+    label: "CPF & SRS",
+    types: ["cpf", "srs"],
+    institutionKinds: ["other", "bank", "broker"],
+  },
 } as const satisfies Record<
   string,
   {
@@ -78,5 +91,17 @@ export const accountGroups = {
 export type AccountGroup = keyof typeof accountGroups;
 
 export function accountGroupOf(type: AccountType): AccountGroup {
+  if (type === "cpf" || type === "srs") return "cpf_srs";
   return holdsSecurities(type) ? "investments" : "banking";
 }
+
+/** CPF balances are recorded per sub-account; Special closes at 55 and Retirement opens. */
+export const cpfBuckets = ["oa", "sa", "ma", "ra"] as const;
+export type CpfBucket = (typeof cpfBuckets)[number];
+
+export const cpfBucketLabels: Record<CpfBucket, string> = {
+  oa: "Ordinary",
+  sa: "Special",
+  ma: "MediSave",
+  ra: "Retirement",
+};

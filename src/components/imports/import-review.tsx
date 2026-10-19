@@ -23,6 +23,7 @@ import {
   accountGroupOf,
   accountTypeLabels,
   assetClassLabels,
+  cpfBucketLabels,
 } from "~/lib/accounts";
 import { orderCategories } from "~/lib/categories";
 import { cn } from "~/lib/cn";
@@ -869,7 +870,11 @@ function BalanceSection({
             row={r}
             checked={r.decision === "accept"}
             disabled={disabled}
-            label="Save the closing balance"
+            label={
+              r.data.bucket
+                ? `Save the ${cpfBucketLabels[r.data.bucket]} balance`
+                : "Save the closing balance"
+            }
             onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
           />
           <span>
@@ -877,7 +882,8 @@ function BalanceSection({
             <span className="figures font-mono font-semibold">
               {money(r.data.amount, r.data.currency)}
             </span>{" "}
-            as the balance on {asOf ? formatDate(asOf) : "the statement date"}
+            as the {r.data.bucket ? `${cpfBucketLabels[r.data.bucket]} ` : ""}
+            balance on {asOf ? formatDate(asOf) : "the statement date"}
           </span>
         </div>
       ))}

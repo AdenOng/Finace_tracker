@@ -1,14 +1,20 @@
 "use client";
 
+import Decimal from "decimal.js";
 import { ArrowUpRight, ChevronDown, Search } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
+import { Allocation } from "~/components/overview/allocation";
+import { HeroFigure } from "~/components/overview/hero-figure";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
-import { Input, Select } from "~/components/ui/field";
-import { EmptyState, Notice, Tag } from "~/components/ui/panel";
+import { Input } from "~/components/ui/field";
+import { EmptyState, Notice, PageHeader, Tag } from "~/components/ui/panel";
+import { FilterTabs } from "~/components/ui/tabs";
 import { assetClassLabels } from "~/lib/accounts";
+import { cn } from "~/lib/cn";
+import { exchangeName } from "~/lib/exchanges";
 import { formatDate, formatMoney, formatQuantity } from "~/lib/format";
 import { api, type RouterOutputs } from "~/trpc/react";
 
@@ -16,6 +22,53 @@ type Portfolio = RouterOutputs["portfolio"]["consolidated"];
 type Stock = Portfolio["positions"][number];
 const amount = (value: string | null, currency: string) =>
   value === null ? "Not valued" : formatMoney(value, currency);
+
+const link =
+  "font-semibold underline decoration-current/30 underline-offset-4 hover:decoration-current";
+
+const signedPercent = (percent: string) => {
+  const value = new Decimal(percent);
+  return `${value.isZero() ? "" : value.isPositive() ? "+" : "−"}${value.abs().toFixed(1)}%`;
+};
+
+/** Signed money and percentage, coloured by direction. */
+function Gain({
+  gain,
+  currency,
+  className,
+}: {
+  gain: { amount: string; percent: string | null } | null;
+  currency: string;
+  className?: string;
+}) {
+  if (!gain)
+    return (
+      <span
+        className={cn("text-ink-3", className)}
+        title="No average cost recorded"
+      >
+        —
+      </span>
+    );
+  const value = new Decimal(gain.amount);
+  return (
+    <span
+      className={cn(
+        "figures font-mono",
+        value.isPositive() && !value.isZero() && "text-gain",
+        value.isNegative() && "text-loss",
+        className,
+      )}
+    >
+      {formatMoney(gain.amount, currency, { signed: true })}
+      {gain.percent !== null ? (
+        <span className="block text-[11px] opacity-80">
+          {signedPercent(gain.percent)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 export function ConsolidatedPortfolio() {
   const [brokerId, setBrokerId] = useState("");
@@ -27,26 +80,49 @@ export function ConsolidatedPortfolio() {
   const term = search.trim().toLowerCase();
   const positions =
     data?.positions.filter((p) =>
-      `${p.symbol} ${p.name ?? ""} ${p.exchange}`.toLowerCase().includes(term),
+      `${p.symbol} ${p.name ?? ""} ${p.exchange} ${exchangeName(p.exchange)}`
+        .toLowerCase()
+        .includes(term),
     ) ?? [];
+
+  // Allocation by asset class, shown only when every holding is valued.
+  const slices = (() => {
+    if (!data || data.incomplete || data.total === null) return [];
+    if (data.positions.some((p) => p.total === null)) return [];
+    const byClass = new Map<string, Decimal>();
+    for (const p of data.positions)
+      byClass.set(
+        p.assetClass,
+        (byClass.get(p.assetClass) ?? new Decimal(0)).plus(p.total!),
+      );
+    if (data.cash.total) byClass.set("cash", new Decimal(data.cash.total));
+    const positive = [...byClass].filter(([, v]) => v.isPositive());
+    const sum = positive.reduce((s, [, v]) => s.plus(v), new Decimal(0));
+    if (sum.isZero()) return [];
+    return positive.map(([assetClass, v]) => ({
+      assetClass: assetClass as keyof typeof assetClassLabels,
+      share: v.div(sum).times(100).toNumber(),
+      display: formatMoney(v.toFixed(2), data.currency),
+    }));
+  })();
+  const unrecorded = data?.brokers.filter(
+    (b) => !b.asOf && (!brokerId || b.id === brokerId),
+  );
+
   return (
-    <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="font-display text-[30px] leading-tight font-semibold sm:text-4xl">
-            Consolidated portfolio
-          </h1>
-          <p className="text-ink-3 mt-1 text-sm">
-            Your investments across brokers, together.
-          </p>
-        </div>
-        <Link
-          href="/accounts"
-          className="inline-flex min-h-10 items-center gap-1 text-sm font-semibold"
-        >
-          Manage accounts <ArrowUpRight className="size-4" />
-        </Link>
-      </header>
+    <div className="space-y-4">
+      <PageHeader
+        title="Portfolio"
+        description="Every holding across your brokers, added up."
+        actions={
+          <Link
+            href="/accounts"
+            className="text-ink-2 hover:text-ink inline-flex min-h-10 items-center gap-1 text-sm font-semibold"
+          >
+            Manage accounts <ArrowUpRight className="size-4" />
+          </Link>
+        }
+      />
       {query.error ? <Notice tone="error">{query.error.message}</Notice> : null}
       {!data && !query.error ? (
         <div className="card p-6 text-sm" aria-live="polite">
@@ -56,9 +132,9 @@ export function ConsolidatedPortfolio() {
       {data ? (
         <>
           <section className="card min-w-0 overflow-hidden">
-            <div className="ink-strip h-1" />
-            <div className="p-5 sm:p-7">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="ink-strip h-1.5" />
+            <div className="p-5 sm:p-10">
+              <div className="flex items-center justify-between gap-4">
                 <p className="eyebrow">
                   {brokerId
                     ? data.brokers.find((b) => b.id === brokerId)?.name
@@ -69,56 +145,111 @@ export function ConsolidatedPortfolio() {
                   id="consolidated-currency"
                 />
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <p className="figures min-w-0 text-[clamp(1.75rem,7vw,3rem)] leading-tight font-semibold break-all">
-                  {data.total === null
-                    ? data.oldestEntry
-                      ? "Not valued"
-                      : "Not recorded"
-                    : formatMoney(data.total, data.currency)}
-                </p>
-                {data.incomplete ? <Tag tone="warn">Partial</Tag> : null}
-              </div>
-              <p className="text-ink-3 mt-2 text-[13px]">
-                {data.positions.length} holding
-                {data.positions.length === 1 ? "" : "s"} ·{" "}
-                {data.selectedBrokerCount} account
-                {data.selectedBrokerCount === 1 ? "" : "s"}
+              {data.incomplete ? (
+                <p className="text-warn mt-3 text-sm font-semibold">Partial</p>
+              ) : null}
+              <p className="font-poster figures mt-3 text-[clamp(44px,12vw,84px)] leading-[0.9] font-extrabold">
+                {data.total === null ? (
+                  <span className="text-ink-3">
+                    {data.oldestEntry ? "Not valued" : "Not recorded"}
+                  </span>
+                ) : (
+                  <HeroFigure
+                    value={formatMoney(data.total, data.currency)}
+                    muted={false}
+                  />
+                )}
               </p>
-              {data.oldestEntry ? (
-                <p className="text-ink-3 mt-1 text-[12px]">
-                  Latest entry from each account: {formatDate(data.oldestEntry)}
-                  {data.newestEntry !== data.oldestEntry
-                    ? ` – ${formatDate(data.newestEntry!)}`
+              <div className="text-ink-2 mt-4 space-y-1 text-sm">
+                <p>
+                  {data.positions.length} holding
+                  {data.positions.length === 1 ? "" : "s"} across{" "}
+                  {data.selectedBrokerCount} account
+                  {data.selectedBrokerCount === 1 ? "" : "s"}
+                  {data.oldestEntry
+                    ? `, up to ${formatDate(data.newestEntry!)}`
                     : ""}
                   .
+                  {data.srs?.total && !new Decimal(data.srs.total).isZero()
+                    ? ` Includes ${formatMoney(data.srs.total, data.currency)} in SRS.`
+                    : ""}
                 </p>
-              ) : null}
-              <div className="border-line mt-5 grid grid-cols-2 gap-4 border-t pt-4">
-                <div className="min-w-0">
-                  <p className="text-ink-3 text-[12px]">Investments</p>
-                  <p className="figures mt-1 text-lg font-semibold break-all">
-                    {amount(data.securities.total, data.currency)}
+                {unrecorded?.length ? (
+                  <p className="text-ink-3 text-[12px]">
+                    Nothing recorded yet for{" "}
+                    {unrecorded.map((b, i) => (
+                      <span key={b.id}>
+                        {i > 0 ? ", " : ""}
+                        <Link href={`/accounts/${b.id}`} className={link}>
+                          {b.name}
+                        </Link>
+                      </span>
+                    ))}
+                    .
                   </p>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-ink-3 text-[12px]">Broker cash</p>
-                  <p className="figures mt-1 text-lg font-semibold break-all">
-                    {amount(data.cash.total, data.currency)}
-                  </p>
-                </div>
+                ) : null}
               </div>
+              {slices.length > 0 ? (
+                <div className="mt-8">
+                  <Allocation slices={slices} />
+                </div>
+              ) : null}
+            </div>
+            <div className="border-line grid grid-cols-2 border-t sm:grid-cols-3">
+              {[
+                {
+                  label: "Holdings",
+                  value: <>{amount(data.securities.total, data.currency)}</>,
+                },
+                {
+                  label: "Broker cash",
+                  value: <>{amount(data.cash.total, data.currency)}</>,
+                },
+                {
+                  label: "Unrealised gain",
+                  value: data.gain ? (
+                    <span
+                      className={cn(
+                        new Decimal(data.gain.amount).isNegative()
+                          ? "text-loss"
+                          : "text-gain",
+                      )}
+                    >
+                      {formatMoney(data.gain.amount, data.currency, {
+                        signed: true,
+                      })}
+                    </span>
+                  ) : (
+                    <span className="text-ink-3">—</span>
+                  ),
+                  note: data.gain
+                    ? `${data.gain.percent !== null ? `${signedPercent(data.gain.percent)} · ` : ""}${data.gain.holdings} of ${data.positions.length} holdings have a cost`
+                    : "Add average costs to see this",
+                },
+              ].map((part, i) => (
+                <div
+                  key={part.label}
+                  className={cn(
+                    "min-w-0 px-5 py-4 sm:px-10 sm:py-5",
+                    i === 1 && "border-line border-l",
+                    i === 2 &&
+                      "border-line col-span-2 border-t sm:col-span-1 sm:border-t-0 sm:border-l",
+                  )}
+                >
+                  <p className="eyebrow">{part.label}</p>
+                  <p className="font-poster figures mt-1 truncate text-[20px] leading-tight font-bold sm:text-[28px]">
+                    {part.value}
+                  </p>
+                  {part.note ? (
+                    <p className="text-ink-3 text-[12px]">{part.note}</p>
+                  ) : null}
+                </div>
+              ))}
             </div>
           </section>
+
           {data.incomplete ? (
             <Notice tone="warn">
-              {data.unrecorded ? (
-                <p>
-                  {data.unrecorded} account
-                  {data.unrecorded === 1 ? " has" : "s have"} no recorded
-                  holdings or cash yet.
-                </p>
-              ) : null}
               {data.unpriced ? (
                 <p>
                   {data.unpriced} position
@@ -137,42 +268,43 @@ export function ConsolidatedPortfolio() {
               ) : null}
             </Notice>
           ) : null}
-          <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,1fr)]">
-            <label className="relative min-w-0">
-              <span className="sr-only">Search holdings</span>
-              <Search className="text-ink-3 pointer-events-none absolute top-3 left-3 size-4" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search symbol or name"
-                className="pl-9"
-              />
-            </label>
-            <Select
-              aria-label="Filter by broker"
-              value={brokerId}
-              onChange={(e) => setBrokerId(e.target.value)}
-            >
-              <option value="">All brokers</option>
-              {data.brokers.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
-          </div>
+
           <section
-            className="card min-w-0 overflow-hidden"
+            className="card min-w-0 p-5 sm:p-8"
             aria-label="Consolidated holdings"
           >
-            <div className="border-line flex items-center justify-between gap-3 border-b px-5 py-4">
-              <h2 className="text-base font-semibold">Holdings</h2>
-              <span className="text-ink-3 text-[12px]">
-                Value · {data.currency}
-              </span>
+            <div className="border-ink/80 flex flex-wrap items-center justify-between gap-3 border-b-2 pb-3">
+              <p className="eyebrow">Holdings · {data.positions.length}</p>
+              <label className="relative w-full min-w-0 sm:w-64">
+                <span className="sr-only">Search holdings</span>
+                <Search className="text-ink-3 pointer-events-none absolute top-3 left-3 size-4" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search symbol or name"
+                  className="pl-9"
+                />
+              </label>
             </div>
+            {data.brokers.length > 1 ? (
+              <div className="mt-4">
+                <FilterTabs
+                  label="Filter by broker"
+                  value={brokerId}
+                  onChange={setBrokerId}
+                  options={[
+                    { value: "", label: "All" },
+                    ...data.brokers.map((b) => ({
+                      value: b.id,
+                      label: b.name,
+                    })),
+                  ]}
+                />
+              </div>
+            ) : null}
+
             {!positions.length ? (
-              <div className="p-5">
+              <div className="mt-5">
                 <EmptyState
                   title={term ? "No matching holdings" : "No holdings recorded"}
                 >
@@ -182,29 +314,45 @@ export function ConsolidatedPortfolio() {
                 </EmptyState>
               </div>
             ) : (
-              <div className="divide-line divide-y">
-                {positions.map((p) => (
-                  <StockRow
-                    key={p.securityId}
-                    stock={p}
-                    currency={data.currency}
-                  />
-                ))}
+              <div className="mt-4">
+                <div
+                  aria-hidden="true"
+                  className="text-ink-3 hidden grid-cols-[minmax(0,1fr)_7rem_9rem_8rem_4rem_1.25rem] gap-4 px-2 pb-2 font-mono text-[11px] tracking-[0.12em] uppercase md:grid"
+                >
+                  <span>Holding</span>
+                  <span className="text-right">Units</span>
+                  <span className="text-right">Value</span>
+                  <span className="text-right">Gain</span>
+                  <span className="text-right">Weight</span>
+                  <span />
+                </div>
+                <div className="divide-line border-line divide-y border-t">
+                  {positions.map((p) => (
+                    <StockRow
+                      key={p.securityId}
+                      stock={p}
+                      currency={data.currency}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </section>
+
           {data.cashBalances.length ? (
-            <section className="card min-w-0 p-5">
-              <h2 className="mb-3 text-base font-semibold">Broker cash</h2>
+            <section className="card min-w-0 p-5 sm:p-8">
+              <div className="border-ink/80 flex items-baseline justify-between border-b-2 pb-2">
+                <p className="eyebrow">Broker cash</p>
+                <p className="figures font-mono text-[13px] font-semibold">
+                  {amount(data.cash.total, data.currency)}
+                </p>
+              </div>
               <div className="divide-line divide-y">
                 {data.cashBalances.map((c) => (
-                  <details
-                    key={c.currency}
-                    className="group py-3 first:pt-0 last:pb-0"
-                  >
+                  <details key={c.currency} className="group py-3">
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm [&::-webkit-details-marker]:hidden">
                       <span className="font-semibold">{c.currency}</span>
-                      <span className="figures ml-auto min-w-0 text-right break-all">
+                      <span className="figures ml-auto min-w-0 text-right font-mono text-[13px] break-all">
                         {formatMoney(c.amount, c.currency)}
                         {c.currency !== data.currency && c.total !== null ? (
                           <span className="text-ink-3 ml-2 text-[12px]">
@@ -212,9 +360,9 @@ export function ConsolidatedPortfolio() {
                           </span>
                         ) : null}
                       </span>
-                      <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+                      <ChevronDown className="text-ink-3 size-4 shrink-0 transition-transform group-open:rotate-180" />
                     </summary>
-                    <ul className="border-line mt-3 space-y-3 border-t pt-3">
+                    <ul className="mt-3 space-y-2">
                       {c.brokers.map((b) => (
                         <li
                           key={b.accountId}
@@ -222,11 +370,11 @@ export function ConsolidatedPortfolio() {
                         >
                           <Link
                             href={`/accounts/${b.accountId}`}
-                            className="min-w-0 truncate underline underline-offset-4"
+                            className="text-ink-2 min-w-0 truncate underline decoration-current/30 underline-offset-4"
                           >
                             {b.accountName}
                           </Link>
-                          <span className="figures shrink-0">
+                          <span className="figures shrink-0 font-mono text-[12px]">
                             {formatMoney(b.amount, c.currency)}
                           </span>
                         </li>
@@ -237,8 +385,9 @@ export function ConsolidatedPortfolio() {
               </div>
             </section>
           ) : null}
-          <section aria-label="Broker accounts">
-            <h2 className="mb-3 text-base font-semibold">By broker</h2>
+
+          <section aria-label="Broker accounts" className="pt-2">
+            <p className="eyebrow mb-3">By broker</p>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {data.brokers
                 .filter((b) => !brokerId || b.id === brokerId)
@@ -246,36 +395,48 @@ export function ConsolidatedPortfolio() {
                   <Link
                     key={b.id}
                     href={`/accounts/${b.id}`}
-                    className="card hover:border-ink-3 flex min-w-0 items-center gap-3 p-4"
+                    className="card hover:border-ink-3 group flex min-w-0 items-center gap-3.5 p-4"
                   >
                     <InstitutionMark
                       institutionKey={b.institutionKey}
                       name={b.institutionName ?? b.name}
-                      className="size-9 shrink-0"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-semibold">
+                      <p className="truncate text-[14px] font-semibold group-hover:underline group-hover:underline-offset-4">
                         {b.name}
+                        {b.type === "srs" ? (
+                          <Tag tone="outline" className="ml-2">
+                            SRS
+                          </Tag>
+                        ) : null}
                       </p>
-                      <p className="text-ink-3 mt-0.5 text-[11px]">
-                        {b.asOf ? formatDate(b.asOf) : "No entry recorded"}
+                      <p className="text-ink-3 text-[12px]">
+                        {b.asOf ? formatDate(b.asOf) : "Nothing recorded"}
                       </p>
-                      <p className="figures mt-1 text-lg font-semibold break-all">
-                        {amount(b.total, data.currency)}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p
+                        className={cn(
+                          "figures font-mono text-[14px] font-semibold",
+                          b.total === null &&
+                            "text-ink-3 font-sans font-normal",
+                        )}
+                      >
+                        {b.total === null
+                          ? "—"
+                          : formatMoney(b.total, data.currency)}
                       </p>
                       {b.unpriced || b.unconverted.length ? (
-                        <Tag tone="warn">Partial</Tag>
+                        <span className="text-warn text-[11px]">Partial</span>
                       ) : null}
                     </div>
-                    <ArrowUpRight className="text-ink-3 size-4 shrink-0" />
                   </Link>
                 ))}
             </div>
           </section>
+
           <p className="text-ink-3 text-[12px]">
-            Identical instruments are combined by symbol and exchange. Values
-            use available quotes, otherwise the recorded statement value or
-            price. Expand a holding to see each broker’s entry and source.
+            The same symbol on the same exchange is combined across brokers.
             {data.fxAsOf
               ? ` Exchange rates as of ${formatDate(data.fxAsOf)}.`
               : ""}
@@ -283,12 +444,11 @@ export function ConsolidatedPortfolio() {
               <>
                 {" "}
                 {data.archivedCount} archived account
-                {data.archivedCount === 1 ? " is" : "s are"} excluded; restore
-                under{" "}
+                {data.archivedCount === 1 ? " is" : "s are"} left out (
                 <Link href="/accounts" className="underline underline-offset-4">
                   Accounts → Archived
                 </Link>
-                .
+                ).
               </>
             ) : null}
           </p>
@@ -298,82 +458,135 @@ export function ConsolidatedPortfolio() {
   );
 }
 
+/** Second line under the symbol: the name, then where it trades or what it is. */
+function describe(p: Stock) {
+  return [
+    p.name,
+    p.exchange ? exchangeName(p.exchange) : assetClassLabels[p.assetClass],
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
-  const brokerCount = new Set(p.brokers.map((b) => b.accountId)).size;
+  const brokers = [...new Map(p.brokers.map((b) => [b.accountId, b])).values()];
+  const several = brokers.length > 1;
+  const partial = p.unpriced > 0 || p.unconverted.length > 0;
+  const cells = (
+    <>
+      <div className="min-w-0">
+        <p className="flex min-w-0 items-center gap-2 text-[14px] font-semibold">
+          <span className="truncate">{p.symbol}</span>
+          {p.inSrs ? <Tag tone="outline">SRS</Tag> : null}
+        </p>
+        <p className="text-ink-3 truncate text-[12px]">
+          {describe(p)}
+          {!several && brokers[0] ? (
+            <>
+              {" · "}
+              <Link
+                href={`/accounts/${brokers[0].accountId}`}
+                className="hover:text-ink underline decoration-current/30 underline-offset-4"
+              >
+                {brokers[0].accountName}
+              </Link>
+            </>
+          ) : (
+            ` · ${brokers.length} brokers`
+          )}
+        </p>
+        <p className="text-ink-3 text-[12px] md:hidden">
+          {formatQuantity(p.quantity)} units ·{" "}
+          {p.weight !== null ? `${p.weight}%` : "—"}
+        </p>
+      </div>
+      <p className="figures text-ink-2 hidden text-right font-mono text-[13px] md:block">
+        {formatQuantity(p.quantity)}
+      </p>
+      <div className="text-right">
+        <p className="figures font-mono text-[14px] font-semibold">
+          {amount(p.total, currency)}
+        </p>
+        {partial ? (
+          <span className="text-warn text-[11px]">Partial</span>
+        ) : null}
+        <Gain
+          gain={p.gain}
+          currency={currency}
+          className="mt-0.5 block text-[12px] md:hidden"
+        />
+      </div>
+      <Gain
+        gain={p.gain}
+        currency={currency}
+        className="hidden text-right text-[13px] md:block"
+      />
+      <p className="figures text-ink-3 hidden text-right font-mono text-[12px] md:block">
+        {p.weight !== null ? `${p.weight}%` : "—"}
+      </p>
+    </>
+  );
+  const grid =
+    "grid grid-cols-[minmax(0,1fr)_auto_1.25rem] items-center gap-4 px-2 py-3 md:grid-cols-[minmax(0,1fr)_7rem_9rem_8rem_4rem_1.25rem]";
+
+  if (!several)
+    return (
+      <div className={grid}>
+        {cells}
+        <span />
+      </div>
+    );
   return (
     <details className="group min-w-0">
-      <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">
-            {p.symbol}
-            <span className="text-ink-3 ml-2 text-[11px] font-normal">
-              {p.exchange || "Exchange unspecified"}
-            </span>
-          </p>
-          <p className="text-ink-3 mt-0.5 truncate text-[12px]">
-            {formatQuantity(p.quantity)} units · {brokerCount} broker
-            {brokerCount === 1 ? "" : "s"}
-          </p>
-        </div>
-        <div className="max-w-[52%] min-w-0 text-right">
-          <p className="figures text-sm font-semibold break-all">
-            {amount(p.total, currency)}
-          </p>
-          {p.unpriced || p.unconverted.length ? (
-            <Tag tone="warn">Partial</Tag>
-          ) : p.weight !== null ? (
-            <p className="text-ink-3 mt-0.5 text-[11px]">
-              {p.weight}% of portfolio
-            </p>
-          ) : null}
-        </div>
+      <summary
+        className={cn(
+          grid,
+          "hover:bg-wash cursor-pointer list-none rounded-[8px] [&::-webkit-details-marker]:hidden",
+        )}
+      >
+        {cells}
         <ChevronDown className="text-ink-3 size-4 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="bg-wash/50 border-line border-t px-5 py-4">
-        <p className="text-ink-2 mb-3 text-[13px]">
-          {p.name ?? p.symbol} · {assetClassLabels[p.assetClass]}
-        </p>
-        <ul className="space-y-4">
-          {p.brokers.map((b) => (
-            <li key={b.accountId} className="min-w-0">
-              <div className="flex items-start justify-between gap-3">
-                <Link
-                  href={`/accounts/${b.accountId}`}
-                  className="min-w-0 truncate text-[13px] font-semibold underline underline-offset-4"
-                >
-                  {b.accountName}
-                </Link>
-                <p className="figures shrink-0 text-[13px]">
-                  {amount(b.total, currency)}
-                </p>
-              </div>
-              <div className="text-ink-3 mt-1 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12px]">
-                <span>
-                  {formatQuantity(b.quantity)} units · {formatDate(b.asOf)}
-                </span>
-                <span>
-                  {b.source === "statement"
-                    ? "Imported"
-                    : b.source === "manual"
-                      ? "Manual"
-                      : "Synced"}
-                  {b.quotedAt ? ` · Quote ${formatDate(b.quotedAt)}` : ""}
-                </span>
-              </div>
-              {b.nativeValue &&
-              (b.nativeValue.currency !== currency ||
-                b.unconverted.length > 0) ? (
-                <p className="text-ink-3 mt-1 text-[12px]">
-                  {formatMoney(b.nativeValue.amount, b.nativeValue.currency)}
-                  {b.unconverted.length
-                    ? " · Exchange rate unavailable"
-                    : " before conversion"}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ul className="bg-wash/60 mb-3 space-y-3 rounded-[8px] px-4 py-3">
+        {p.brokers.map((b) => (
+          <li key={b.accountId} className="min-w-0">
+            <div className="flex items-start justify-between gap-3">
+              <Link
+                href={`/accounts/${b.accountId}`}
+                className="min-w-0 truncate text-[13px] font-semibold underline decoration-current/30 underline-offset-4"
+              >
+                {b.accountName}
+              </Link>
+              <p className="figures shrink-0 font-mono text-[13px]">
+                {amount(b.total, currency)}
+              </p>
+            </div>
+            <div className="text-ink-3 mt-1 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12px]">
+              <span>
+                {formatQuantity(b.quantity)} units · {formatDate(b.asOf)}
+              </span>
+              <span>
+                {b.source === "statement"
+                  ? "Imported"
+                  : b.source === "manual"
+                    ? "Manual"
+                    : "Synced"}
+                {b.quotedAt ? ` · Quote ${formatDate(b.quotedAt)}` : ""}
+              </span>
+            </div>
+            {b.nativeValue &&
+            (b.nativeValue.currency !== currency ||
+              b.unconverted.length > 0) ? (
+              <p className="text-ink-3 mt-1 text-[12px]">
+                {formatMoney(b.nativeValue.amount, b.nativeValue.currency)}
+                {b.unconverted.length
+                  ? " · Exchange rate unavailable"
+                  : " before conversion"}
+              </p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </details>
   );
 }

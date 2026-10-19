@@ -13,7 +13,7 @@ import {
   Textarea,
 } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
-import { holdsSecurities } from "~/lib/accounts";
+import { accountGroupOf } from "~/lib/accounts";
 import { orderCategories } from "~/lib/categories";
 import { cn } from "~/lib/cn";
 import { todayIso } from "~/lib/dates";
@@ -55,7 +55,8 @@ export function TransactionDrawer({
   const initialAccount =
     existing?.accountId ??
     choices.find((a) => a.id === defaultAccountId)?.id ??
-    (choices.find((a) => !holdsSecurities(a.type)) ?? choices[0])?.id;
+    (choices.find((a) => accountGroupOf(a.type) === "banking") ?? choices[0])
+      ?.id;
   const [accountId, setAccountId] = useState(initialAccount ?? "");
   const accountCurrency = accounts.find((a) => a.id === accountId)?.currency;
 

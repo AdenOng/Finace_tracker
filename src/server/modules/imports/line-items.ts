@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 
 import { TRPCError } from "@trpc/server";
 import Decimal from "decimal.js";
-import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 
+import { cpfBucketLabels } from "~/lib/accounts";
 import {
   accountSnapshot,
   auditLog,
@@ -265,13 +266,18 @@ export async function importLinePreview(
           and(
             eq(cashBalance.snapshotId, snapshot.id),
             eq(cashBalance.currency, data.currency),
+            data.bucket
+              ? eq(cashBalance.bucket, data.bucket)
+              : isNull(cashBalance.bucket),
           ),
         );
       if (matches.length !== 1 || !sameNumber(matches[0]!.amount, data.amount))
         conflict(adjusted);
       const match = matches[0]!;
       targetId = match.id;
-      label = `${data.currency} cash`;
+      label = data.bucket
+        ? `${cpfBucketLabels[data.bucket]} ${data.currency}`
+        : `${data.currency} cash`;
       facts.push({
         label: "Amount",
         value: `${data.currency} ${match.amount}`,

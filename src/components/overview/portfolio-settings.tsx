@@ -3,6 +3,7 @@
 import { Settings } from "lucide-react";
 import { Suspense, useState } from "react";
 
+import { CountCpfSrs } from "~/components/settings/count-cpf-srs";
 import { CurrencySelect } from "~/components/settings/currency-select";
 import { Button } from "~/components/ui/button";
 import { Drawer } from "~/components/ui/dialog";
@@ -62,6 +63,9 @@ export function PortfolioSettings({
           Exchange rates refresh automatically. If a rate is unavailable, the
           total is marked as partial until conversion is available.
         </p>
+        <Suspense fallback={null}>
+          <CountCpfSrs />
+        </Suspense>
       </Drawer>
     </>
   );

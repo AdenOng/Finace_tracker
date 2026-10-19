@@ -193,6 +193,8 @@ export const userSettings = pgTable("user_settings", {
   displayCurrency: varchar("display_currency", { length: 3 })
     .default("SGD")
     .notNull(),
+  /** Whether CPF and SRS balances count toward the net worth headline. */
+  countCpfSrs: boolean("count_cpf_srs").default(true).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .$onUpdate(() => new Date())

@@ -38,7 +38,7 @@ const GROUPS: {
     description:
       "Brokerage, retirement and crypto accounts, valued from their holdings.",
     empty:
-      "Add a brokerage, robo-adviser, SRS or crypto account and list what it holds.",
+      "Add a brokerage, robo-adviser or crypto account and list what it holds.",
     add: "Add investment account",
     institution: "Broker",
     value: "Value",
@@ -54,6 +54,17 @@ const GROUPS: {
     institution: "Bank",
     value: "Balance",
   },
+  {
+    group: "cpf_srs",
+    title: "CPF & SRS",
+    description:
+      "Retirement money you can't spend yet. Shown apart on the overview.",
+    empty:
+      "Add your CPF balances, or an SRS account with your bank or platform.",
+    add: "Add CPF or SRS",
+    institution: "Held with",
+    value: "Value",
+  },
 ];
 
 export function AccountsView({
@@ -64,9 +75,12 @@ export function AccountsView({
   const router = useRouter();
   const utils = api.useUtils();
   const [rows] = api.accounts.list.useSuspenseQuery();
+  const [settings] = api.settings.get.useSuspenseQuery();
+  const offered = (group: AccountGroup) =>
+    group !== "cpf_srs" || settings.cpfSrsEnabled;
   const [filter, setFilter] = useState<Filter>("open");
   const [adding, setAdding] = useState<AccountGroup | "choose" | null>(
-    initialAdd ?? null,
+    initialAdd && offered(initialAdd) ? initialAdd : null,
   );
   const [flash, setFlash] = useState<string | null>(null);
   const restore = api.accounts.restore.useMutation({
@@ -112,7 +126,11 @@ export function AccountsView({
           const items = visible.filter(
             (r) => accountGroupOf(r.type) === g.group,
           );
-          if (filter === "archived" && items.length === 0) return null;
+          if (
+            (filter === "archived" || !offered(g.group)) &&
+            items.length === 0
+          )
+            return null;
           return (
             <Section
               key={g.group}
@@ -129,14 +147,16 @@ export function AccountsView({
                         Consolidated view
                       </Link>
                     ) : null}
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setAdding(g.group)}
-                    >
-                      <Plus className="size-4" />
-                      {g.add}
-                    </Button>
+                    {offered(g.group) ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setAdding(g.group)}
+                      >
+                        <Plus className="size-4" />
+                        {g.add}
+                      </Button>
+                    ) : null}
                   </>
                 ) : undefined
               }

@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { z } from "zod";
 
-import { holdsSecurities } from "~/lib/accounts";
+import { accountGroupOf } from "~/lib/accounts";
 import { currencyInput, isoDateInput, moneyInput } from "~/server/api/inputs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { accountReconciliation, transaction } from "~/server/db/schema";
@@ -41,11 +41,11 @@ async function previewPeriod(
   const account = await requireWritableAccount(db, scope, input.accountId, {
     allowArchived: true,
   });
-  if (holdsSecurities(account.type))
+  if (accountGroupOf(account.type) !== "banking")
     throw new TRPCError({
       code: "BAD_REQUEST",
       message:
-        "Reconcile bank, card, cash and wallet transactions here; brokerage holdings use snapshots",
+        "Reconcile bank, card and cash transactions here; investment, CPF and SRS accounts use snapshots",
     });
   const rows = await db
     .select({

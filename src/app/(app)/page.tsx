@@ -1,14 +1,17 @@
 import { and, eq, isNull } from "drizzle-orm";
 import Decimal from "decimal.js";
-import { ArrowUpRight, Check, Minus } from "lucide-react";
+import { Check, Minus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
 import { Allocation } from "~/components/overview/allocation";
 import { AccountRow } from "~/components/overview/account-row";
+import { HeroFigure } from "~/components/overview/hero-figure";
+import { CpfSrsSheet } from "~/components/overview/cpf-srs-sheet";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
-import { holdsSecurities } from "~/lib/accounts";
+import { SheetHeader } from "~/components/overview/sheet-header";
+import { accountGroupOf } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { currentMonth, shiftMonth } from "~/lib/dates";
 import { formatDate, formatMoney, formatMonth } from "~/lib/format";
@@ -18,60 +21,6 @@ import { llmProvider } from "~/server/db/schema";
 import { api, HydrateClient } from "~/trpc/server";
 
 export const metadata: Metadata = { title: "Overview" };
-
-/** Hero figure: symbol and minor units set back so the whole number leads. */
-function HeroFigure({ value, muted }: { value: string; muted: boolean }) {
-  const match = /^([−+]?)(\D*?)([\d,]+)(\.\d+)?$/.exec(value);
-  if (!match) return <>{value}</>;
-  const [, sign, symbol, whole, fraction] = match;
-  return (
-    <>
-      <span className="text-ink-3 mr-2 align-[0.5em] text-[0.36em]">
-        {sign}
-        {symbol}
-      </span>
-      <span className={muted ? "text-ink-3" : undefined}>{whole}</span>
-      {fraction ? (
-        <span className="text-ink-3 text-[0.5em]">{fraction}</span>
-      ) : null}
-    </>
-  );
-}
-
-function SheetHeader({
-  eyebrow,
-  title,
-  href,
-  linkLabel,
-  settings,
-}: {
-  eyebrow: string;
-  title: React.ReactNode;
-  href: string;
-  linkLabel: string;
-  settings?: React.ReactNode;
-}) {
-  return (
-    <div className="border-ink/80 border-b-2 pb-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="eyebrow">{eyebrow}</p>
-        <div className="flex shrink-0 items-center gap-2">
-          <Link
-            href={href}
-            className="text-ink-2 hover:text-ink inline-flex items-center gap-1 text-[13px] font-semibold"
-          >
-            {linkLabel}
-            <ArrowUpRight className="size-3.5" />
-          </Link>
-          {settings}
-        </div>
-      </div>
-      <p className="font-poster figures mt-1.5 text-[clamp(26px,7vw,34px)] leading-none font-extrabold">
-        {title}
-      </p>
-    </div>
-  );
-}
 
 function ChecklistItem({
   done,
@@ -135,8 +84,16 @@ export default async function OverviewPage() {
   const recorded = worth.accounts.some((a) => a.asOf);
 
   // Investments: valued from holdings, split by asset class.
-  const investing = worth.accounts.filter((a) => holdsSecurities(a.type));
-  const banking = worth.accounts.filter((a) => !holdsSecurities(a.type));
+  const investing = worth.accounts.filter(
+    (a) => accountGroupOf(a.type) === "investments",
+  );
+  const banking = worth.accounts.filter(
+    (a) => accountGroupOf(a.type) === "banking",
+  );
+  const forLater = worth.accounts.filter(
+    (a) => accountGroupOf(a.type) === "cpf_srs",
+  );
+  const forLaterTotal = new Decimal(worth.cpfSrs.total ?? 0);
   const investTotal = sum(worth.allocation.map((a) => a.total));
   const investmentIncomplete = investing.some(
     (a) => a.unconverted.length > 0 || a.unpriced > 0,
@@ -243,6 +200,13 @@ export default async function OverviewPage() {
             ) : (
               <p>Latest balances, up to {formatDate(worth.asOf!)}.</p>
             )}
+            {recorded && !forLaterTotal.isZero() ? (
+              <p>
+                {worth.countCpfSrs
+                  ? `${formatMoney(investTotal.plus(bankTotal).toFixed(2), currency)} you can reach today. ${formatMoney(forLaterTotal.toFixed(2), currency)} is in CPF and SRS.`
+                  : `Leaves out ${formatMoney(forLaterTotal.toFixed(2), currency)} in CPF and SRS.`}
+              </p>
+            ) : null}
             {worth.fxAsOf ? (
               <p className="text-ink-3 text-[12px]">
                 Converted to {currency} · exchange rates as of{" "}
@@ -269,7 +233,12 @@ export default async function OverviewPage() {
         </div>
 
         {/* What the number is made of */}
-        <div className="border-line grid grid-cols-2 border-t">
+        <div
+          className={cn(
+            "border-line grid grid-cols-2 border-t",
+            forLater.length > 0 && "sm:grid-cols-3",
+          )}
+        >
           {[
             {
               href: "#investments",
@@ -285,6 +254,18 @@ export default async function OverviewPage() {
                 ? `${banking.length} account${banking.length === 1 ? "" : "s"} · ${share(bankTotal)}`
                 : `After ${formatMoney(owed.toFixed(2), currency)} card debt`,
             },
+            ...(forLater.length > 0
+              ? [
+                  {
+                    href: "#cpf-srs",
+                    label: "CPF & SRS",
+                    value: forLaterTotal,
+                    note: worth.countCpfSrs
+                      ? `Locked for later · ${share(forLaterTotal)}`
+                      : "Not counted in net worth",
+                  },
+                ]
+              : []),
           ].map((part, i) => (
             <a
               key={part.label}
@@ -292,6 +273,8 @@ export default async function OverviewPage() {
               className={cn(
                 "hover:bg-wash group min-w-0 px-5 py-4 transition-colors sm:px-10 sm:py-5",
                 i === 1 && "border-line border-l",
+                i === 2 &&
+                  "border-line col-span-2 border-t sm:col-span-1 sm:border-t-0 sm:border-l",
               )}
             >
               <p className="eyebrow">{part.label}</p>
@@ -490,6 +473,12 @@ export default async function OverviewPage() {
           )}
         </section>
       </div>
+
+      {worth.cpfSrsEnabled || forLater.length > 0 ? (
+        <div className="mt-4">
+          <CpfSrsSheet worth={worth} />
+        </div>
+      ) : null}
     </HydrateClient>
   );
 }

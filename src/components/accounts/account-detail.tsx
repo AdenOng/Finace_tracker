@@ -23,9 +23,11 @@ import {
 } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
 import {
+  accountGroupOf,
   accountGroups,
   accountTypeLabels,
   assetClassLabels,
+  cpfBucketLabels,
   holdsSecurities,
 } from "~/lib/accounts";
 import { formatDate, formatMoney, formatQuantity } from "~/lib/format";
@@ -69,6 +71,11 @@ export function AccountDetail({
 
   const holdings = account.holdings;
   const investments = holdsSecurities(account.type);
+  const banking = accountGroupOf(account.type) === "banking";
+  const cpfSplit =
+    account.type === "cpf" && holdings?.cash.some((c) => c.bucket)
+      ? holdings.cash
+      : null;
   const readOnly = !!workspaceId;
   // Weight of each holding, when every value is in one currency and can be added up.
   const valued = holdings?.positions.filter((p) => p.value) ?? [];
@@ -97,7 +104,7 @@ export function AccountDetail({
           className="size-12"
         />
         <Tag tone="outline">
-          {accountGroups[investments ? "investments" : "banking"].label}
+          {accountGroups[accountGroupOf(account.type)].label}
         </Tag>
       </div>
       <PageHeader
@@ -208,6 +215,26 @@ export function AccountDetail({
           )}
         </Section>
 
+        {cpfSplit ? (
+          <Section title="By account">
+            <ul className="max-w-md">
+              {cpfSplit.map((c) => (
+                <li
+                  key={`${c.bucket}-${c.currency}`}
+                  className="border-line flex items-baseline justify-between border-b py-2.5 text-sm"
+                >
+                  <span>
+                    {c.bucket ? cpfBucketLabels[c.bucket] : "Not split"}
+                  </span>
+                  <span className="figures font-mono">
+                    {formatMoney(c.amount, c.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        ) : null}
+
         {investments && holdings ? (
           <Section title="Holdings">
             {holdings.positions.length === 0 ? (
@@ -305,7 +332,7 @@ export function AccountDetail({
           />
         ) : null}
 
-        {!investments ? (
+        {banking ? (
           <AccountTransactions
             accountId={account.id}
             readOnly={readOnly || !!account.archivedAt}
@@ -316,7 +343,7 @@ export function AccountDetail({
             }
           />
         ) : null}
-        {!investments && !readOnly ? (
+        {banking && !readOnly ? (
           <AccountReconciliation
             accountId={account.id}
             currency={account.currency}

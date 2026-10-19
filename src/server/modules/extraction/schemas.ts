@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { cpfBuckets } from "~/lib/accounts";
+
 /**
  * Structured output contract for document extraction (the TypeScript equivalent of Pydantic
  * models). The same schema is sent to the LLM as JSON Schema and used to validate its answer.
@@ -125,7 +127,16 @@ export function buildStatementSchema(categoryKeys: [string, ...string[]]) {
     transactions: z.array(transaction),
     positions: z.array(position),
     cashBalances: z.array(
-      z.object({ currency: currencyCode, amount: z.number() }),
+      z.object({
+        currency: currencyCode,
+        amount: z.number(),
+        bucket: z
+          .enum(cpfBuckets)
+          .nullable()
+          .describe(
+            "CPF sub-account: oa (Ordinary), sa (Special), ma (MediSave), ra (Retirement); null for other accounts",
+          ),
+      }),
     ),
     investmentTransactions: z.array(investmentTransaction),
     warnings: z

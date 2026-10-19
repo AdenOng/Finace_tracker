@@ -216,4 +216,15 @@ export const institutions: PresetPack["institutions"] = [
   { key: "binance", name: "Binance", kind: "crypto_exchange" },
   { key: "coinhako", name: "Coinhako", kind: "crypto_exchange", country: "SG" },
   { key: "gemini", name: "Gemini", kind: "crypto_exchange", country: "US" },
+
+  // Retirement
+  {
+    key: "cpf_board",
+    name: "CPF Board",
+    kind: "other",
+    country: "SG",
+    website: "https://www.cpf.gov.sg",
+    extractionHints:
+      "CPF statements show balances per sub-account: Ordinary (OA), Special (SA), MediSave (MA) and, from 55, Retirement (RA). All amounts are in SGD.",
+  },
 ];

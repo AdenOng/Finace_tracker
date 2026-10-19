@@ -1,12 +1,13 @@
 import Decimal from "decimal.js";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
   financialAccount,
   institution,
+  investmentTransaction,
   userSettings,
   user,
   accountSnapshot,
@@ -17,7 +18,15 @@ import {
   writableBy,
   type AccessScope,
 } from "~/server/lib/access";
-import { type assetClasses, holdsSecurities } from "~/lib/accounts";
+import { preset } from "~/server/lib/preset";
+import {
+  type assetClasses,
+  type CpfBucket,
+  accountGroupOf,
+  cpfBuckets,
+  holdsSecurities,
+} from "~/lib/accounts";
+import { todayIso } from "~/lib/dates";
 import { requireWritableAccount } from "~/server/modules/accounts/ownership";
 import {
   lockAccounts,
@@ -283,7 +292,10 @@ export const portfolioRouter = createTRPCRouter({
       );
       const [settingsRows, accounts] = await Promise.all([
         ctx.db
-          .select({ displayCurrency: userSettings.displayCurrency })
+          .select({
+            displayCurrency: userSettings.displayCurrency,
+            countCpfSrs: userSettings.countCpfSrs,
+          })
           .from(userSettings)
           .where(eq(userSettings.userId, ctx.scope.userId))
           .limit(1),
@@ -326,28 +338,69 @@ export const portfolioRouter = createTRPCRouter({
         accounts.map((a) => a.id),
       );
 
-      // Investments are split by asset class; bank and card balances are reported on their own.
+      // Investments are split by asset class; bank and card balances, and CPF and SRS, are
+      // reported on their own. CPF is also split by sub-account.
       const allocation = new Map<string, Amount[]>();
       const banking: Amount[] = [];
+      const cpfSrs: Amount[] = [];
+      const cpf = new Map<CpfBucket | null, Amount[]>();
       const add = (key: string, amount: Amount) =>
         allocation.set(key, [...(allocation.get(key) ?? []), amount]);
-      const investing = new Set(
-        accounts.filter((a) => holdsSecurities(a.type)).map((a) => a.id),
-      );
+      const typeOf = new Map(accounts.map((a) => [a.id, a.type]));
       for (const [accountId, h] of holdings) {
-        if (!investing.has(accountId)) {
+        const type = typeOf.get(accountId)!;
+        const group = accountGroupOf(type);
+        if (group === "banking") {
           banking.push(...h.cash);
+          continue;
+        }
+        if (group === "cpf_srs") {
+          cpfSrs.push(...h.totals);
+          if (type === "cpf")
+            for (const c of h.cash)
+              cpf.set(c.bucket, [...(cpf.get(c.bucket) ?? []), c]);
           continue;
         }
         for (const p of h.positions) if (p.value) add(p.assetClass, p.value);
         for (const c of h.cash) add("cash", c);
       }
-      const everything = [...[...allocation.values()].flat(), ...banking];
+      // Without CPF and SRS in the preset the setting is hidden, so existing accounts still count.
+      const { cpfSrs: cpfSrsEnabled } = await preset.features();
+      const countCpfSrs =
+        !cpfSrsEnabled || (settingsRows[0]?.countCpfSrs ?? true);
+      const counted = [
+        ...[...allocation.values()].flat(),
+        ...banking,
+        ...(countCpfSrs ? cpfSrs : []),
+      ];
       const { rates, asOf: fxAsOf } = await ratesInto(
         ctx.db,
         target,
-        everything.map((a) => a.currency),
+        [...counted, ...cpfSrs].map((a) => a.currency),
       );
+
+      // SRS top-ups this calendar year, from imported deposits into your own SRS accounts.
+      // Transfers between SRS accounts move existing money and do not use up the cap.
+      const year = todayIso().slice(0, 4);
+      const srsIds = accounts
+        .filter((a) => a.type === "srs" && a.ownerId === ctx.scope.userId)
+        .map((a) => a.id);
+      const [srsTopUps] = srsIds.length
+        ? await ctx.db
+            .select({
+              total: sql<string>`coalesce(sum(abs(${investmentTransaction.amount})), 0)::text`,
+            })
+            .from(investmentTransaction)
+            .where(
+              and(
+                writableBy(ctx.scope, investmentTransaction.ownerId),
+                inArray(investmentTransaction.accountId, srsIds),
+                eq(investmentTransaction.type, "deposit"),
+                eq(investmentTransaction.currency, "SGD"),
+                gte(investmentTransaction.tradeDate, `${year}-01-01`),
+              ),
+            )
+        : [];
 
       const latest = [...holdings.values()]
         .map((h) => h.asOf)
@@ -356,9 +409,27 @@ export const portfolioRouter = createTRPCRouter({
       return {
         currency: target,
         fxAsOf,
-        ...convertAmounts(everything, target, rates),
+        ...convertAmounts(counted, target, rates),
         asOf: latest ?? null,
-        unpriced: [...holdings.values()].reduce((n, h) => n + h.unpriced, 0),
+        unpriced: [...holdings]
+          .filter(
+            ([id]) =>
+              countCpfSrs || accountGroupOf(typeOf.get(id)!) !== "cpf_srs",
+          )
+          .reduce((n, [, h]) => n + h.unpriced, 0),
+        countCpfSrs,
+        cpfSrsEnabled,
+        cpfSrs: convertAmounts(cpfSrs, target, rates),
+        cpf: [...cpf]
+          .sort(
+            ([a], [b]) =>
+              (a ? cpfBuckets.indexOf(a) : 9) - (b ? cpfBuckets.indexOf(b) : 9),
+          )
+          .map(([bucket, amounts]) => ({
+            bucket,
+            ...convertAmounts(amounts, target, rates),
+          })),
+        srs: srsTopUps ? { year, toppedUp: srsTopUps.total } : null,
         accounts: accounts.map((a) => {
           const h = holdings.get(a.id);
           return {

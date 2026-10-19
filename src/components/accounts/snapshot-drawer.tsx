@@ -10,8 +10,11 @@ import { Field, Input, Select } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
 import {
   type AssetClass,
+  type CpfBucket,
   assetClasses,
   assetClassLabels,
+  cpfBucketLabels,
+  cpfBuckets,
   holdsSecurities,
 } from "~/lib/accounts";
 import { todayIso } from "~/lib/dates";
@@ -32,7 +35,12 @@ type PositionRow = {
   averageCost: string;
   value: string;
 };
-type CashRow = { key: number; currency: string; amount: string };
+type CashRow = {
+  key: number;
+  currency: string;
+  amount: string;
+  bucket?: CpfBucket | null;
+};
 
 let lastKey = 0;
 const key = () => ++lastKey;
@@ -61,6 +69,7 @@ export function SnapshotDrawer({
   createOnly?: boolean;
 }) {
   const investments = holdsSecurities(account.type);
+  const cpf = account.type === "cpf";
   const latest = entry ?? account.holdings;
 
   const [asOf, setAsOf] = useState(() => entry?.asOf ?? todayIso());
@@ -78,15 +87,37 @@ export function SnapshotDrawer({
       value: plain(p.statementValue),
     })),
   );
-  const [cash, setCash] = useState<CashRow[]>(() =>
-    latest?.cash.length
+  const [cash, setCash] = useState<CashRow[]>(() => {
+    // CPF is always entered per sub-account, in SGD; an old unsplit total is kept until cleared.
+    if (cpf) {
+      const known = latest?.cash ?? [];
+      const unsplit = known.filter((c) => !c.bucket);
+      return [
+        ...cpfBuckets.map((bucket) => ({
+          key: key(),
+          currency: "SGD",
+          bucket,
+          amount: plain(
+            known.find((c) => c.bucket === bucket && c.currency === "SGD")
+              ?.amount ?? null,
+          ),
+        })),
+        ...unsplit.map((c) => ({
+          key: key(),
+          currency: c.currency,
+          bucket: null,
+          amount: plain(c.amount),
+        })),
+      ];
+    }
+    return latest?.cash.length
       ? latest.cash.map((c) => ({
           key: key(),
           currency: c.currency,
           amount: plain(c.amount),
         }))
-      : [{ key: key(), currency: account.currency, amount: "" }],
-  );
+      : [{ key: key(), currency: account.currency, amount: "" }];
+  });
   const record = api.portfolio.recordSnapshot.useMutation();
   const add = api.portfolio.addSnapshot.useMutation();
   const update = api.portfolio.updateSnapshot.useMutation();
@@ -126,7 +157,11 @@ export function SnapshotDrawer({
         })),
       cash: cash
         .filter((c) => c.amount.trim())
-        .map(({ currency, amount }) => ({ currency, amount })),
+        .map(({ currency, amount, bucket }) => ({
+          currency,
+          amount,
+          ...(cpf ? { bucket: bucket ?? null } : {}),
+        })),
     };
     const result = entry
       ? await update.mutateAsync({
@@ -165,9 +200,11 @@ export function SnapshotDrawer({
       description={
         investments
           ? "What the account held on a date. Prices are used until live quotes are available."
-          : account.type === "credit_card"
-            ? "Enter what you owe as a negative amount."
-            : "The balance shown by your bank on a date."
+          : cpf
+            ? "Copy each balance from the CPF app or your latest statement. Leave out any you don't have."
+            : account.type === "credit_card"
+              ? "Enter what you owe as a negative amount."
+              : "The balance shown by your bank on a date."
       }
       footer={
         <>
@@ -402,70 +439,122 @@ export function SnapshotDrawer({
           </fieldset>
         ) : null}
 
-        <fieldset className="space-y-3">
-          <legend className="mb-3 text-[15px] font-bold">
-            {investments ? "Cash" : "Balance"}
-          </legend>
-          {cash.map((c, i) => (
-            <div key={c.key} className="flex items-end gap-3">
-              <Field label="Currency" htmlFor={`c-currency-${c.key}`}>
-                <Input
-                  id={`c-currency-${c.key}`}
-                  required
-                  pattern="[A-Za-z]{3}"
-                  maxLength={3}
-                  value={c.currency}
-                  onChange={(e) =>
-                    setCashRow(c.key, { currency: e.target.value })
-                  }
-                  className="w-24 uppercase"
-                />
-              </Field>
-              <Field
-                label="Amount"
-                htmlFor={`c-amount-${c.key}`}
-                className="flex-1"
-              >
-                <Input
-                  id={`c-amount-${c.key}`}
-                  inputMode="decimal"
-                  required={!investments && i === 0}
-                  value={c.amount}
-                  onChange={(e) =>
-                    setCashRow(c.key, { amount: e.target.value })
-                  }
-                  className="figures"
-                />
-              </Field>
-              {cash.length > 1 ? (
+        {cpf ? (
+          <fieldset className="space-y-3">
+            <legend className="mb-3 text-[15px] font-bold">Balances</legend>
+            <div className="grid grid-cols-2 gap-3">
+              {cash
+                .filter((c) => c.bucket)
+                .map((c) => (
+                  <Field
+                    key={c.key}
+                    label={`${cpfBucketLabels[c.bucket!]} (SGD)`}
+                    htmlFor={`c-bucket-${c.bucket}`}
+                  >
+                    <Input
+                      id={`c-bucket-${c.bucket}`}
+                      inputMode="decimal"
+                      value={c.amount}
+                      onChange={(e) =>
+                        setCashRow(c.key, { amount: e.target.value })
+                      }
+                      className="figures"
+                    />
+                  </Field>
+                ))}
+            </div>
+            <p className="text-ink-3 text-[13px]">
+              Retirement opens at 55, when Special closes.
+            </p>
+            {cash.some((c) => !c.bucket) ? (
+              <Notice>
+                An earlier entry recorded{" "}
+                {cash
+                  .filter((c) => !c.bucket)
+                  .map((c) => `${c.currency} ${c.amount}`)
+                  .join(", ")}{" "}
+                without a split.{" "}
                 <button
                   type="button"
-                  aria-label={`Remove ${c.currency || "cash"} balance`}
+                  className="font-semibold underline underline-offset-4"
                   onClick={() =>
-                    setCash((rows) => rows.filter((r) => r.key !== c.key))
+                    setCash((rows) => rows.filter((r) => r.bucket))
                   }
-                  className="rounded-ctl hover:bg-wash mb-1 grid size-8 place-items-center"
                 >
-                  <X className="size-4" />
-                </button>
-              ) : null}
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              setCash((rows) => [
-                ...rows,
-                { key: key(), currency: "", amount: "" },
-              ])
-            }
-          >
-            <Plus className="size-4" />
-            Add currency
-          </Button>
-        </fieldset>
+                  Remove it
+                </button>{" "}
+                once you&apos;ve entered the balances above.
+              </Notice>
+            ) : null}
+          </fieldset>
+        ) : null}
+
+        {cpf ? null : (
+          <fieldset className="space-y-3">
+            <legend className="mb-3 text-[15px] font-bold">
+              {investments ? "Cash" : "Balance"}
+            </legend>
+            {cash.map((c, i) => (
+              <div key={c.key} className="flex items-end gap-3">
+                <Field label="Currency" htmlFor={`c-currency-${c.key}`}>
+                  <Input
+                    id={`c-currency-${c.key}`}
+                    required
+                    pattern="[A-Za-z]{3}"
+                    maxLength={3}
+                    value={c.currency}
+                    onChange={(e) =>
+                      setCashRow(c.key, { currency: e.target.value })
+                    }
+                    className="w-24 uppercase"
+                  />
+                </Field>
+                <Field
+                  label="Amount"
+                  htmlFor={`c-amount-${c.key}`}
+                  className="flex-1"
+                >
+                  <Input
+                    id={`c-amount-${c.key}`}
+                    inputMode="decimal"
+                    required={!investments && i === 0}
+                    value={c.amount}
+                    onChange={(e) =>
+                      setCashRow(c.key, { amount: e.target.value })
+                    }
+                    className="figures"
+                  />
+                </Field>
+                {cash.length > 1 ? (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${c.currency || "cash"} balance`}
+                    onClick={() =>
+                      setCash((rows) => rows.filter((r) => r.key !== c.key))
+                    }
+                    className="rounded-ctl hover:bg-wash mb-1 grid size-8 place-items-center"
+                  >
+                    <X className="size-4" />
+                  </button>
+                ) : null}
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                setCash((rows) => [
+                  ...rows,
+                  { key: key(), currency: "", amount: "" },
+                ])
+              }
+            >
+              <Plus className="size-4" />
+              Add currency
+            </Button>
+          </fieldset>
+        )}
       </form>
     </Drawer>
   );

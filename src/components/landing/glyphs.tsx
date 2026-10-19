@@ -226,7 +226,7 @@ export function KeepGlyph() {
         >
           <animate
             attributeName="r"
-            values="30; 30; 52; 52"
+            values="30; 30; 42; 42"
             keyTimes="0; 0.42; 0.7; 1"
             dur={LOCK_DUR}
             repeatCount="indefinite"

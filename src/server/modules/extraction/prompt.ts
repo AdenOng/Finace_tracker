@@ -24,6 +24,8 @@ export function buildExtractionPrompt(options: {
   categories: PromptCategory[];
   institution?: PromptInstitution | null;
   documentText?: string | null;
+  /** Whether the preset tracks CPF and SRS accounts. */
+  cpfSrs?: boolean;
 }): string {
   const categoryLines = options.categories
     .map(
@@ -36,6 +38,11 @@ export function buildExtractionPrompt(options: {
     "Extract every transaction, holding, cash balance and investment activity in the attached document.",
     `Spending categories (use the key):\n${categoryLines}`,
   ];
+  if (options.cpfSrs) {
+    sections.push(
+      'On CPF statements, list each sub-account balance (Ordinary, Special, MediSave, Retirement) in "cashBalances" with its bucket.',
+    );
+  }
   if (options.institution) {
     sections.push(
       `The document is from ${options.institution.name}.${

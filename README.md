@@ -30,7 +30,7 @@ using the same database and encrypted provider credentials. The Compose project 
 | Admin console: status overview, users and invitations, account recovery (sessions, two-step reset, password reset links), brokers & banks, categories, AI providers, activity log | Done |
 | LLM layer: opencode / OpenAI-compatible / Anthropic adapters, structured output | Done |
 | Extraction: PDF text layer, scanned-PDF rasterising, admin playground | Done |
-| Accounts: bank, card, brokerage and wallet accounts; archive instead of delete when in use | Done |
+| Accounts: bank, card, brokerage, wallet, CPF and SRS accounts; archive instead of delete when in use | Done |
 | Portfolio: manual balance and holdings entries, net worth in the display currency | Done |
 | Spending: manual transactions, monthly summary by category, transfers excluded | Done |
 | Reconciliation: statement-period review, exact balance checks, protected entries and reopening | Done |
@@ -252,6 +252,17 @@ src/
   opens the display-currency setting, which updates all portfolio totals together. The overview
   shows the rate date. Missing rates or prices explicitly mark totals as partial and hide an
   incomplete investment allocation. No API key or additional configuration is required.
+- **CPF and SRS sit apart from investments.** CPF balances are entered per sub-account
+  (Ordinary, Special, MediSave, Retirement); SRS accounts hold cash and securities like a
+  brokerage. The overview shows them in their own sheet with an interest estimate and this
+  year's SRS top-ups (imported deposits) against the S$15,300 cap. They count toward net worth by
+  default; untick "Count CPF and SRS in net worth" under the display gear to leave them out. An
+  existing `Retirement` account can be switched to `SRS` from its Edit drawer without losing
+  holdings. The Portfolio page includes SRS holdings, tagged, and shows unrealised gain wherever
+  an average cost was recorded. CPF and SRS come with the Singapore preset (`DATA_PRESET=sg`); a
+  custom `PRESET_FILE` turns them on with `"features": { "cpfSrs": true }`. With them off, new CPF
+  and SRS accounts can't be added, but existing ones stay visible and always count toward net
+  worth.
 
 ## Scripts
 

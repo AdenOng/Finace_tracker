@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { z } from "zod";
 
-import { assetClasses } from "~/lib/accounts";
+import { assetClasses, cpfBuckets } from "~/lib/accounts";
 import {
   currencyInput,
   isoDateInput,
@@ -44,6 +44,8 @@ export const stagedPosition = z.object({
 export const stagedCashBalance = z.object({
   currency: currencyInput,
   amount: moneyInput,
+  /** CPF sub-account; rows staged before sub-accounts existed have none. */
+  bucket: z.enum(cpfBuckets).nullable().default(null),
 });
 
 export const investmentTxnTypes = [

@@ -18,6 +18,7 @@ const builtInPacks: Record<string, PresetPack> = {
     currencies,
     institutions: sgInstitutions,
     categories,
+    features: { cpfSrs: true },
   },
 };
 
