@@ -27,20 +27,22 @@ using the same database and encrypted provider credentials. The Compose project 
 | Area | State |
 | --- | --- |
 | Auth: invite-only sign-up, first user is admin, TOTP two-step, passkeys, rate limits | Done |
+| Self-service: name, password change, signed-in devices, "Forgot password" when email is set up | Done |
 | Admin console: status overview, users and invitations, account recovery (sessions, two-step reset, password reset links), brokers & banks, categories, AI providers, activity log | Done |
 | Admin operations: security policy and sign-in history, import jobs, AI usage, cost and limits, provider health and fallback, backups, market data, storage retention, data packs, system info, optional email | Done |
 | LLM layer: opencode / OpenAI-compatible / Anthropic adapters, structured output | Done |
 | Extraction: PDF text layer, scanned-PDF rasterising, admin playground | Done |
 | Accounts: bank, card, brokerage, wallet, CPF and SRS accounts; archive instead of delete when in use | Done |
 | Portfolio: manual balance and holdings entries, net worth in the display currency | Done |
-| Spending: manual transactions, monthly summary by category, transfers excluded | Done |
+| Net-worth history: daily figures plus an estimate from earlier entries, chart on the overview | Done |
+| Spending: manual transactions, monthly summary by category, transfers excluded, search and CSV export | Done |
 | Reconciliation: statement-period review, exact balance checks, protected entries and reopening | Done |
 | Merchant rules: per-user text matching, automatic categorization and previewed application | Done |
 | Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion | Done |
-| Import pipeline: upload → background job → review & dedupe → commit | Done |
+| Import pipeline: upload → background job → review & dedupe → commit, restart recovery, review reminders | Done |
 | Daily FX conversion, combined net worth and investment account totals | Done |
 | Hourly market prices for stocks, ETFs and crypto | Done |
-| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), net-worth history | Later |
+| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), CSV statement import | Later |
 
 The full database schema for the later phases already exists (`src/server/db/schema`).
 
@@ -167,6 +169,13 @@ never merges another account or moves its records.
   Fields default to keeping their existing values; selecting a blank value clears that field.
   Bulk deletion has a separate review step. Each operation succeeds for the whole selection or
   leaves every entry unchanged. Refresh a preview if another edit changes its underlying data.
+- **Search and export:** type in **Search every month** to find transactions by description,
+  merchant or note across all months (newest 500 matches; account and category filters still
+  apply). **Export CSV** downloads the transactions currently listed. Text that a spreadsheet
+  would treat as a formula is prefixed with `'`.
+- **Other currencies:** the overview's spending card converts every currency into your display
+  currency at the latest exchange rate; a currency without a rate is named instead of counted.
+  The Spending page keeps each currency's totals separate.
 
 The new reconciliation schema is applied by the existing startup migrations. No additional
 configuration is required.
@@ -212,8 +221,8 @@ recorded in **Admin → Activity log**.
 ### Optional email
 
 Without email, invite and reset links are shown to the admin to hand over. To send them instead,
-and to warn people about sign-ins from a new device or remind them about statements waiting for
-review, add an SMTP server to `.env` and restart:
+to let people reset a forgotten password themselves, to warn them about sign-ins from a new device
+and to remind them about statements waiting for review, add an SMTP server to `.env` and restart:
 
 ```bash
 SMTP_URL=smtps://user:password@smtp.example.com:465
@@ -221,6 +230,20 @@ SMTP_FROM="Finfolio <finfolio@example.com>"
 ```
 
 **Admin → System → Send me a test email** checks the settings.
+
+With email set up, **Forgot password?** on the sign-in form emails a reset link to the address
+entered, if an account uses it. The page answers the same way either way, so it cannot be used to
+find out who has an account. A requested link works once within an hour and signs the person out
+everywhere; each person can ask for one every five minutes, and each request is recorded in
+**Admin → Activity log**. Imports that have waited a week for review are mentioned once in a
+daily reminder email to their owner.
+
+### Your account
+
+**Settings** lets everyone change their name and password, and lists the devices signed in to
+their account with how and when they signed in. Any other device can be signed out there, or all
+of them at once; changing the password signs the others out by default. Email addresses are
+changed by an admin.
 
 ### Backups and restore
 
@@ -246,6 +269,11 @@ The app runs a few timers in-process: provider health checks every 6 hours (swit
 (switch off on **Admin → Data → Market data**), and a daily clean-up of uploaded statement files
 when a retention period is set on **Admin → Data → Storage**. Only files whose imports are
 finished are deleted; the transactions they produced stay.
+
+Every 6 hours each person's net worth is saved for the day (`networth_snapshot`; the day's last
+run wins) for the overview chart. Every 5 minutes, imports a restart interrupted are marked
+failed so their owner can read them again, and uploads that never started reading are started.
+With email set up, a daily run sends the review reminders described above.
 
 ## Architecture
 
@@ -282,8 +310,8 @@ src/
 - **Removing is archiving** when something still references a row (institutions with accounts,
   categories with transactions). Archiving a category asks where its transactions should go.
 - **The LLM never writes to finance tables.** Extraction returns schema-validated JSON. The import
-  pipeline will stage it for review, dedupe it (file hash → row fingerprint → fuzzy match) and only
-  then commit. Category keys are a dynamic enum of the active categories, so the model cannot
+  pipeline stages it for review, dedupes it (file hash → row fingerprint → fuzzy match) and only
+  then commits. Category keys are a dynamic enum of the active categories, so the model cannot
   invent one.
 - **Scanned PDFs are rendered to page images**, because most vision models accept images but not
   PDFs. PDFs with a text layer send the text instead, which is cheaper and more accurate.
@@ -310,6 +338,11 @@ src/
   opens the display-currency setting, which updates all portfolio totals together. The overview
   shows the rate date. Missing rates or prices explicitly mark totals as partial and hide an
   incomplete investment allocation. No API key or additional configuration is required.
+- **Net-worth history.** Every 6 hours the overview's net worth is saved for the day, and the
+  overview charts it. Days before the first saved figure are estimated from account entries:
+  on each entry date, every open account's latest entry at its recorded values. Estimated stretches
+  are dashed. Past figures are converted at the latest exchange rates, so changing the display
+  currency keeps the history. The chart covers personal accounts only.
 - **Market prices between statements.** Stocks, ETFs and crypto in each account's latest entry
   are priced hourly from Yahoo Finance's public chart endpoint, so net worth follows the market
   instead of waiting for the next statement. **Refresh prices** on the overview fetches them on

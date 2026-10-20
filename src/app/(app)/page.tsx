@@ -8,13 +8,17 @@ import { Suspense } from "react";
 import { Allocation } from "~/components/overview/allocation";
 import { AccountRow } from "~/components/overview/account-row";
 import { HeroFigure } from "~/components/overview/hero-figure";
+import {
+  NetWorthChart,
+  type NetWorthPoint,
+} from "~/components/overview/net-worth-chart";
 import { CpfSrsSheet } from "~/components/overview/cpf-srs-sheet";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
 import { PriceRefresh } from "~/components/overview/price-refresh";
 import { SheetHeader } from "~/components/overview/sheet-header";
 import { accountGroupOf } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
-import { currentMonth, shiftMonth } from "~/lib/dates";
+import { currentMonth, shiftMonth, todayIso } from "~/lib/dates";
 import {
   formatDate,
   formatMoney,
@@ -69,11 +73,12 @@ const sum = (values: (string | null)[]) =>
 export default async function OverviewPage() {
   const session = await requireEnrolledSession();
   const month = currentMonth();
-  const [worth, categories, thisMonth, lastMonth] = await Promise.all([
+  const [worth, history, categories, thisMonth, lastMonth] = await Promise.all([
     api.portfolio.netWorth(),
+    api.portfolio.netWorthHistory(),
     api.catalog.categories(),
-    api.spending.summary({ month }),
-    api.spending.summary({ month: shiftMonth(month, -1) }),
+    api.spending.converted({ month }),
+    api.spending.converted({ month: shiftMonth(month, -1) }),
   ]);
   void api.catalog.currencies.prefetch();
   void api.settings.get.prefetch();
@@ -88,6 +93,21 @@ export default async function OverviewPage() {
   const firstName = session.user.name.split(" ")[0];
   const currency = worth.currency;
   const recorded = worth.accounts.some((a) => a.asOf);
+  // The chart ends on the figure shown above it, whatever today's recorded value was.
+  const today = todayIso();
+  const trend: NetWorthPoint[] = [
+    ...history.points.filter((p) => p.date < today),
+    ...(recorded && worth.total
+      ? [
+          {
+            date: today,
+            total: worth.total,
+            partial: worth.unconverted.length > 0 || worth.unpriced > 0,
+            estimated: false,
+          },
+        ]
+      : []),
+  ];
 
   // Investments: valued from holdings, split by asset class.
   const investing = worth.accounts.filter(
@@ -127,19 +147,15 @@ export default async function OverviewPage() {
   // This month's spending in the display currency, rolled up to top-level categories.
   const parentOf = new Map(categories.map((c) => [c.id, c.parentId ?? c.id]));
   const nameOf = new Map(categories.map((c) => [c.id, c.name]));
-  const inCurrency = thisMonth.filter((r) => r.currency === currency);
-  const otherCurrencies = [
-    ...new Set(
-      thisMonth.filter((r) => r.currency !== currency).map((r) => r.currency),
-    ),
-  ];
-  const moneyIn = sum(inCurrency.map((r) => r.received));
-  const moneyOut = sum(inCurrency.map((r) => r.spent));
-  const lastOut = sum(
-    lastMonth.filter((r) => r.currency === currency).map((r) => r.spent),
-  );
+  const otherCurrencies = thisMonth.unconverted;
+  const moneyIn = new Decimal(thisMonth.received);
+  const moneyOut = new Decimal(thisMonth.spent);
+  // A partial last month would make the comparison misleading.
+  const lastOut = lastMonth.unconverted.length
+    ? new Decimal(0)
+    : new Decimal(lastMonth.spent);
   const byCategory = new Map<string, Decimal>();
-  for (const r of inCurrency) {
+  for (const r of thisMonth.categories) {
     if (new Decimal(r.spent).isZero()) continue;
     const root = r.categoryId
       ? (parentOf.get(r.categoryId) ?? r.categoryId)
@@ -272,6 +288,9 @@ export default async function OverviewPage() {
               </p>
             ) : null}
           </div>
+          {trend.length > 1 && history.currency === currency ? (
+            <NetWorthChart points={trend} currency={currency} />
+          ) : null}
         </div>
 
         {/* What the number is made of */}
@@ -479,17 +498,18 @@ export default async function OverviewPage() {
                   </li>
                 ))}
               </ul>
-              {otherCurrencies.length > 0 ? (
-                <p className="text-ink-3 mt-2 text-[12px]">
-                  Spending in {otherCurrencies.join(", ")} isn&apos;t included.
-                </p>
-              ) : null}
             </div>
           ) : (
             <p className="text-ink-2 mt-6 text-sm">
               No spending recorded for {formatMonth(month)} yet.
             </p>
           )}
+          {otherCurrencies.length > 0 ? (
+            <p className="text-ink-3 mt-2 text-[12px]">
+              Spending in {otherCurrencies.join(", ")} isn&apos;t included:
+              there is no exchange rate for it yet.
+            </p>
+          ) : null}
 
           <div className="border-ink/80 mt-8 flex items-baseline justify-between border-b-2 pb-2">
             <p className="eyebrow">Bank & cards</p>

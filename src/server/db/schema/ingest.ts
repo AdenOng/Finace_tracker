@@ -92,6 +92,8 @@ export const extractionJob = pgTable(
     outputTokens: integer("output_tokens"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** When the owner was emailed that this import still waits for review; once is enough. */
+    reviewRemindedAt: timestamp("review_reminded_at", { withTimezone: true }),
     ...timestamps(),
   },
   (t) => [index("extraction_job_owner_status_idx").on(t.ownerId, t.status)],

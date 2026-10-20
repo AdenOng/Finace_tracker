@@ -16,7 +16,7 @@ import { id, money, price, timestamps } from "./_columns";
 import { user } from "./auth";
 import { security } from "./finance";
 
-/** Latest quote per security. Refreshed only while someone is looking at the app. */
+/** Latest quote per security. Refreshed hourly, and on demand from the overview. */
 export const securityQuote = pgTable("security_quote", {
   securityId: uuid("security_id")
     .primaryKey()

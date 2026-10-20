@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-test("import runner: stale attempts, vision fallback, broken fallback keys, kept usage", () => {
+test("import runner: stale attempts, vision fallback, broken fallback keys, restart recovery, kept usage", () => {
   // Isolated so its LLM and storage fakes cannot leak into other test files.
   const result = Bun.spawnSync({
     cmd: [

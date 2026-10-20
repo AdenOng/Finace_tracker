@@ -317,7 +317,9 @@ export function ImportReview({ id }: { id: string }) {
           </p>
           <p className="text-ink-2 mt-2 text-sm">
             {job.stale
-              ? "Reading stopped part-way, probably because the server restarted."
+              ? job.status === "queued"
+                ? "Reading never started, probably because the server restarted."
+                : "Reading stopped part-way, probably because the server restarted."
               : (job.error ?? "Something went wrong reading the file.")}
           </p>
           <div className="mt-5 flex flex-wrap gap-2">

@@ -92,7 +92,7 @@ await mock.module("~/server/modules/imports/storage", () => ({
   sha256: () => "unused",
 }));
 
-const { runImportJob } =
+const { isStaleJob, recoverImportJobs, runImportJob } =
   await import("../../src/server/modules/imports/runner");
 const { monthlyTokenUsage } =
   await import("../../src/server/modules/llm/routing");
@@ -249,7 +249,45 @@ const brokenKey = await provider("broken-key", {
   assert.match(row.error ?? "", /Fallback broken-key also failed/);
 }
 
-// 4. Spent tokens still count after the import is deleted.
+// 4. After a restart, an interrupted read fails (to be retried) and a lost queued read is run.
+{
+  const recovered = await provider("recovered");
+  await setProviders(recovered.id, null);
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000);
+  const interrupted = await job();
+  await db
+    .update(schema.extractionJob)
+    .set({ status: "running", attempts: 1, startedAt: minutesAgo(7) })
+    .where(eq(schema.extractionJob.id, interrupted.id));
+  const lost = await job();
+  await db
+    .update(schema.extractionJob)
+    .set({ updatedAt: minutesAgo(2) })
+    .where(eq(schema.extractionJob.id, lost.id));
+  // Just uploaded: its own request is about to read it.
+  const fresh = await job();
+
+  assert.deepEqual(await recoverImportJobs(), { interrupted: 1, started: 1 });
+  const failed = await read(interrupted.id);
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error ?? "", /server restarted/);
+  assert.equal(failed.attempts, 1, "an interrupted read is not re-run");
+  assert.equal((await read(lost.id)).status, "needs_review");
+  assert.equal(await resultOf(lost.id), "recovered");
+  const waiting = await read(fresh.id);
+  assert.equal(waiting.status, "queued");
+
+  // The owner sees a long-queued read as interrupted, and can read it again.
+  assert.equal(isStaleJob(waiting), false);
+  assert.equal(isStaleJob({ ...waiting, updatedAt: minutesAgo(7) }), true);
+  assert.equal(
+    isStaleJob({ ...failed, status: "running", startedAt: minutesAgo(1) }),
+    false,
+  );
+}
+
+// 5. Spent tokens still count after the import is deleted.
 {
   const before = (await monthlyTokenUsage(db)).get(vision.id);
   assert.equal(before, 110);

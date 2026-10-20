@@ -29,7 +29,7 @@ import {
   LIMIT_WARNING_SHARE,
   monthlyTokenUsage,
 } from "~/server/modules/llm/routing";
-import { REVIEW_WAITING_DAYS } from "./jobs";
+import { REVIEW_WAITING_DAYS } from "~/server/modules/imports/reminders";
 
 const DAY_MS = 86_400_000;
 const STALE_AFTER_MS = 6 * 60_000;

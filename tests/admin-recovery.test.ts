@@ -30,9 +30,24 @@ await mock.module("~/server/auth/config", () => ({
     }),
   },
 }));
+/** Outgoing email is captured instead of sent. */
+const outbox: { to: string; subject: string; text: string }[] = [];
+await mock.module("~/server/lib/mailer", () => ({
+  isEmailConfigured: () => true,
+  sendMail: async (message: (typeof outbox)[number]) => {
+    outbox.push(message);
+  },
+  trySendMail: async (message: (typeof outbox)[number]) => {
+    outbox.push(message);
+    return null;
+  },
+}));
 const { adminRouter } = await import("../src/server/api/routers/admin");
-const { consumePasswordReset, findPendingPasswordReset } =
+const { settingsRouter } = await import("../src/server/api/routers/settings");
+const { consumePasswordReset, findPendingPasswordReset, requestPasswordReset } =
   await import("../src/server/auth/password-reset");
+const { sendReviewReminders } =
+  await import("../src/server/modules/imports/reminders");
 
 const admin = adminRouter.createCaller({
   db: db as unknown as Database,
@@ -58,6 +73,39 @@ const admin = adminRouter.createCaller({
       updatedAt: new Date(),
       image: null,
       role: "admin",
+      banned: false,
+      banReason: null,
+      banExpires: null,
+      twoFactorEnabled: true,
+    },
+  },
+});
+
+/** The member, signed in on "member-session". */
+const member = settingsRouter.createCaller({
+  db: db as unknown as Database,
+  headers: new Headers(),
+  session: {
+    session: {
+      id: "member-session",
+      userId: "member",
+      token: "synthetic-member-token",
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ipAddress: null,
+      userAgent: null,
+      impersonatedBy: null,
+    },
+    user: {
+      id: "member",
+      name: "Example Member",
+      email: "member@example.com",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      image: null,
+      role: "user",
       banned: false,
       banReason: null,
       banExpires: null,
@@ -227,6 +275,158 @@ describe("account recovery", () => {
     await expect(
       consumePasswordReset(db as never, tokenFrom(url), "a-new-long-password"),
     ).rejects.toThrow("no longer works");
+  });
+});
+
+describe("forgot password", () => {
+  test("emails a short-lived link to known, unbanned addresses at most every five minutes", async () => {
+    outbox.length = 0;
+    expect(await requestPasswordReset(db as never, "nobody@example.com")).toBe(
+      "unknown",
+    );
+    expect(
+      await requestPasswordReset(db as never, " Member@Example.com "),
+    ).toBe("sent");
+    expect(outbox.map((m) => m.to)).toEqual(["member@example.com"]);
+    const token = /\/reset\/([\w-]+)/.exec(outbox[0]!.text)![1]!;
+    expect(await findPendingPasswordReset(db as never, token)).toMatchObject({
+      userId: "member",
+    });
+    const [link] = await db.select().from(schema.passwordReset);
+    expect(link!.createdById).toBe("member");
+    expect(link!.expiresAt.getTime()).toBeLessThanOrEqual(
+      Date.now() + 60 * 60_000,
+    );
+
+    // Asking again straight away sends nothing and keeps the first link working.
+    expect(await requestPasswordReset(db as never, "member@example.com")).toBe(
+      "throttled",
+    );
+    expect(outbox).toHaveLength(1);
+    expect(await findPendingPasswordReset(db as never, token)).not.toBeNull();
+
+    // Once the window has passed, a new link replaces the old one.
+    await db
+      .update(schema.passwordReset)
+      .set({ createdAt: new Date(Date.now() - 6 * 60_000) })
+      .where(eq(schema.passwordReset.userId, "member"));
+    expect(await requestPasswordReset(db as never, "member@example.com")).toBe(
+      "sent",
+    );
+    expect(await findPendingPasswordReset(db as never, token)).toBeNull();
+
+    await db
+      .update(schema.user)
+      .set({ banned: true })
+      .where(eq(schema.user.id, "member"));
+    await db
+      .update(schema.passwordReset)
+      .set({ createdAt: new Date(Date.now() - 6 * 60_000) })
+      .where(eq(schema.passwordReset.userId, "member"));
+    expect(await requestPasswordReset(db as never, "member@example.com")).toBe(
+      "unknown",
+    );
+    expect(await auditActions()).toEqual([
+      "user.password_reset_requested",
+      "user.password_reset_requested",
+    ]);
+  });
+});
+
+describe("review reminders", () => {
+  test("email each person once about imports waiting over a week", async () => {
+    outbox.length = 0;
+    const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
+    async function job(
+      ownerId: string,
+      values: Partial<typeof schema.extractionJob.$inferInsert>,
+    ) {
+      const [doc] = await db
+        .insert(schema.document)
+        .values({
+          ownerId,
+          fileName: "statement.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 1,
+          sha256: crypto.randomUUID(),
+          storageKey: crypto.randomUUID(),
+        })
+        .returning();
+      await db
+        .insert(schema.extractionJob)
+        .values({ ownerId, documentId: doc!.id, ...values });
+    }
+    await job("member", { status: "needs_review", finishedAt: daysAgo(8) });
+    await job("member", { status: "needs_review", finishedAt: daysAgo(9) });
+    await job("member", { status: "needs_review", finishedAt: daysAgo(1) });
+    await job("member", { status: "completed", finishedAt: daysAgo(8) });
+    await job("admin", {
+      status: "needs_review",
+      finishedAt: daysAgo(8),
+      reviewRemindedAt: daysAgo(1),
+    });
+
+    expect(await sendReviewReminders(db as never)).toEqual({
+      emails: 1,
+      imports: 2,
+    });
+    expect(outbox.map((m) => [m.to, m.subject])).toEqual([
+      [
+        "member@example.com",
+        "2 statements are waiting for your review in Finfolio",
+      ],
+    ]);
+    expect(await sendReviewReminders(db as never)).toEqual({
+      emails: 0,
+      imports: 0,
+    });
+    expect(outbox).toHaveLength(1);
+  });
+});
+
+describe("own devices", () => {
+  test("people see and sign out only their own other sessions, never tokens", async () => {
+    await db.insert(schema.session).values([
+      {
+        id: "member-phone",
+        userId: "member",
+        token: "synthetic-phone-token",
+        expiresAt: inAnHour(),
+        userAgent: "Mozilla/5.0 (iPhone) Safari/605",
+      },
+      {
+        id: "member-tablet",
+        userId: "member",
+        token: "synthetic-tablet-token",
+        expiresAt: inAnHour(),
+      },
+    ]);
+    const sessions = await member.sessions();
+    expect(sessions.map((s) => [s.id, s.current]).sort()).toEqual([
+      ["member-phone", false],
+      ["member-session", true],
+      ["member-tablet", false],
+    ]);
+    expect(JSON.stringify(sessions)).not.toContain("synthetic-");
+
+    await expect(
+      member.revokeSession({ sessionId: "member-session" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      member.revokeSession({ sessionId: "admin-session" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await member.revokeSession({ sessionId: "member-phone" });
+    expect((await member.sessions()).map((s) => s.id).sort()).toEqual([
+      "member-session",
+      "member-tablet",
+    ]);
+
+    expect(await member.revokeOtherSessions()).toEqual({ revoked: 1 });
+    expect((await member.sessions()).map((s) => s.id)).toEqual([
+      "member-session",
+    ]);
+    // Someone else's session is untouched.
+    expect(await db.$count(schema.session)).toBe(2);
   });
 });
 

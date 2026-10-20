@@ -6,8 +6,10 @@ import {
   ArrowUpRight,
   ChevronLeft,
   ChevronRight,
+  Download,
   Plus,
   ReceiptText,
+  Search,
   SlidersHorizontal,
   Sparkles,
   X,
@@ -23,11 +25,12 @@ import { MerchantRulesDrawer } from "~/components/spending/merchant-rules-drawer
 import { MobileTransactionRow } from "~/components/spending/mobile-transaction-row";
 import { TransactionDrawer } from "~/components/spending/transaction-drawer";
 import { Button } from "~/components/ui/button";
-import { Select } from "~/components/ui/field";
+import { Input, Select } from "~/components/ui/field";
 import { EmptyState, Notice, Tag } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
 import { orderCategories } from "~/lib/categories";
 import { cn } from "~/lib/cn";
+import { downloadFile, toCsv } from "~/lib/csv";
 import { currentMonth, shiftMonth } from "~/lib/dates";
 import { formatDate, formatMoney, formatMonth } from "~/lib/format";
 import { api, type RouterOutputs } from "~/trpc/react";
@@ -48,6 +51,18 @@ export function SpendingView({
   }, []);
   const [accountId, setAccountId] = useState(initialAccountId);
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const next = search.trim();
+      setQuery((previous) => {
+        if (previous !== next) setSelected(new Set());
+        return next;
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [editing, setEditing] = useState<Transaction | "new" | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
@@ -58,7 +73,7 @@ export function SpendingView({
   const [accounts] = api.accounts.list.useSuspenseQuery();
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const list = api.spending.list.useQuery(
-    { month, accountId, categoryId },
+    { month, accountId, categoryId, search: query },
     { placeholderData: (previous) => previous },
   );
   const summary = api.spending.summary.useQuery(
@@ -104,12 +119,52 @@ export function SpendingView({
       utils.merchantRules.preview.invalidate(),
     ]);
 
-  const activeFilters = Number(!!accountId) + Number(!!categoryId);
+  const activeFilters =
+    Number(!!accountId) + Number(!!categoryId) + Number(!!query);
   const clearFilters = () => {
     setSelected(new Set());
     setAccountId(null);
     setCategoryId(null);
+    setSearch("");
+    setQuery("");
   };
+  function exportCsv() {
+    const rows = list.data ?? [];
+    downloadFile(
+      `finfolio-transactions-${query ? "search" : month}.csv`,
+      toCsv([
+        [
+          "Date",
+          "Description",
+          "Merchant",
+          "Account",
+          "Category",
+          "Amount",
+          "Currency",
+          "Transfer",
+          "Status",
+          "Notes",
+        ],
+        ...rows.map((t) => [
+          t.postedDate,
+          t.description,
+          t.merchant,
+          t.accountName,
+          t.categoryName,
+          t.amount,
+          t.currency,
+          t.isTransfer ? "Yes" : "No",
+          t.reconciliationId
+            ? "Reconciled"
+            : t.cleared
+              ? "Cleared"
+              : "Uncleared",
+          t.notes,
+        ]),
+      ]),
+      "text/csv;charset=utf-8",
+    );
+  }
   const allSelected =
     selectable.length > 0 && selectable.every((r) => selected.has(r.id));
   const toggleAll = (checked: boolean) =>
@@ -306,6 +361,19 @@ export function SpendingView({
                     {list.data.length}
                   </span>
                 ) : null}
+                {list.data?.length ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-10 rounded-full px-2 sm:px-3"
+                    aria-label="Export these transactions as CSV"
+                    disabled={list.isPlaceholderData}
+                    onClick={exportCsv}
+                  >
+                    <Download className="size-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Export CSV</span>
+                  </Button>
+                ) : null}
               </div>
               <Button
                 variant={showFilters || activeFilters ? "secondary" : "ghost"}
@@ -331,10 +399,30 @@ export function SpendingView({
             <div
               id="spending-filters"
               className={cn(
-                "mt-3 grid min-w-0 grid-cols-2 gap-2",
+                "mt-3 grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-[1.4fr_1fr_1fr]",
                 !showFilters && "hidden sm:grid",
               )}
             >
+              <label className="col-span-2 min-w-0 sm:col-span-1">
+                <span className="text-ink-3 mb-1 block text-[11px]">
+                  Search every month
+                </span>
+                <span className="relative block">
+                  <Search
+                    className="text-ink-3 pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    type="search"
+                    aria-label="Search transactions"
+                    placeholder="Description, merchant or note"
+                    className="h-10 rounded-lg pl-8 text-[12px]"
+                    maxLength={100}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </span>
+              </label>
               <label className="min-w-0">
                 <span className="text-ink-3 mb-1 block text-[11px]">
                   Account
@@ -382,6 +470,7 @@ export function SpendingView({
               <div className="mt-2 flex min-w-0 items-center gap-2 sm:hidden">
                 <p className="text-ink-3 min-w-0 flex-1 truncate text-[11px]">
                   {[
+                    query && `“${query}”`,
                     accounts.find((a) => a.id === accountId)?.name,
                     categories.find((c) => c.id === categoryId)?.name,
                   ]
@@ -442,6 +531,13 @@ export function SpendingView({
                 </Button>
               </div>
             ) : null}
+            {query && list.data?.length ? (
+              <p className="text-ink-3 mb-3 text-[13px]">
+                {list.data.length >= 500
+                  ? `The 500 newest matches for “${query}” from every month. Add a filter to narrow it down.`
+                  : `Matches for “${query}” from every month, newest first.`}
+              </p>
+            ) : null}
             {(list.data?.length ?? 0) > 500 ? (
               <p className="text-ink-2 mb-3 text-sm">
                 Select up to 500 entries at a time. Select all chooses the first
@@ -458,14 +554,18 @@ export function SpendingView({
                   <ReceiptText className="size-5" strokeWidth={1.5} />
                 </span>
                 <p className="text-sm font-semibold">
-                  {activeFilters
-                    ? "No matching transactions"
-                    : "Nothing here yet"}
+                  {query
+                    ? `Nothing matches “${query}”`
+                    : activeFilters
+                      ? "No matching transactions"
+                      : "Nothing here yet"}
                 </p>
                 <p className="text-ink-3 mt-1 max-w-64 text-[13px]">
-                  {activeFilters
-                    ? "Try another account or category."
-                    : "Add a transaction to start your monthly record."}
+                  {query
+                    ? "The search covers every month. Try a shorter word."
+                    : activeFilters
+                      ? "Try another account or category."
+                      : "Add a transaction to start your monthly record."}
                 </p>
                 {activeFilters ? (
                   <button

@@ -4,6 +4,9 @@ import { Suspense } from "react";
 
 import { CurrencySelect } from "~/components/settings/currency-select";
 import { PasskeysCard } from "~/components/settings/passkeys-card";
+import { PasswordCard } from "~/components/settings/password-card";
+import { ProfileCard } from "~/components/settings/profile-card";
+import { SessionsCard } from "~/components/settings/sessions-card";
 import { TwoFactorCard } from "~/components/settings/two-factor-card";
 import { Notice, PageHeader, Section } from "~/components/ui/panel";
 import { needsTwoFactorEnrollment, requireSession } from "~/server/auth";
@@ -39,6 +42,11 @@ export default async function SettingsPage({
 
       <div className="space-y-14">
         {!mustEnrol ? (
+          <Section title="Profile" description="How you appear to others.">
+            <ProfileCard name={session.user.name} email={session.user.email} />
+          </Section>
+        ) : null}
+        {!mustEnrol ? (
           <Section
             title="Shared workspaces"
             description="Create a family or fund workspace and choose which accounts to share."
@@ -67,12 +75,30 @@ export default async function SettingsPage({
           <TwoFactorCard enabled={!!session.user.twoFactorEnabled} />
         </Section>
 
+        {!mustEnrol ? (
+          <Section
+            title="Password"
+            description="Change the password you sign in with."
+          >
+            <PasswordCard />
+          </Section>
+        ) : null}
+
         <Section
           title="Passkeys"
           description="Sign in without a password using your device's biometrics or security key."
         >
           <PasskeysCard />
         </Section>
+
+        {!mustEnrol ? (
+          <Section
+            title="Signed-in devices"
+            description="Where your account is signed in. Sign out anything you don't recognise."
+          >
+            <SessionsCard />
+          </Section>
+        ) : null}
       </div>
     </HydrateClient>
   );

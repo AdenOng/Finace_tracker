@@ -17,18 +17,14 @@ import { FilterTabs } from "~/components/ui/tabs";
 import { useFlash } from "~/components/ui/use-flash";
 import { formatDate, formatDateTime, formatRelative } from "~/lib/format";
 import { formText } from "~/lib/form";
-import { describeUserAgent } from "~/lib/user-agent";
+import {
+  describeUserAgent,
+  sessionMethodLabels as methodLabels,
+} from "~/lib/user-agent";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type AdminUser = RouterOutputs["admin"]["users"]["list"][number];
 type UserFilter = "all" | "admins" | "no2fa" | "disabled";
-
-const methodLabels: Record<string, string> = {
-  password: "Password",
-  two_factor: "Password + two-step",
-  backup_code: "Backup code",
-  passkey: "Passkey",
-};
 
 function matches(u: AdminUser, filter: UserFilter, query: string) {
   if (filter === "admins" && u.role !== "admin") return false;

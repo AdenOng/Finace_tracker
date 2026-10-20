@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 
+import { csvCell, toCsv } from "../src/lib/csv";
 import { safeNextPath } from "../src/lib/navigation";
 import { formatMoney } from "../src/lib/format";
 import {
@@ -95,5 +96,18 @@ describe("money display", () => {
     expect(formatMoney("-12.50", "SGD")).toBe("−S$12.50");
     expect(formatMoney("12.50", "SGD", { signed: true })).toBe("+S$12.50");
     expect(() => formatMoney(Infinity, "SGD")).toThrow();
+  });
+});
+
+describe("CSV export", () => {
+  test("neutralises spreadsheet formulas but keeps negative amounts numeric", () => {
+    expect(csvCell('=HYPERLINK("x")')).toBe(`"'=HYPERLINK(""x"")"`);
+    expect(csvCell("+1 call me")).toBe("'+1 call me");
+    expect(csvCell("@SUM(A1)")).toBe("'@SUM(A1)");
+    expect(csvCell("-2+3")).toBe("'-2+3");
+    expect(csvCell("\tcmd")).toBe("'\tcmd");
+    expect(csvCell("-45.10")).toBe("-45.10");
+    expect(csvCell(null)).toBe("");
+    expect(toCsv([["a,b", "line\nbreak"]])).toBe(`"a,b","line\nbreak"`);
   });
 });

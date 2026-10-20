@@ -36,6 +36,7 @@ const actionLabels: Record<string, string> = {
   "user.two_factor_reset": "Reset two-step",
   "user.password_reset_created": "Created password reset link",
   "user.password_reset_used": "Reset password with link",
+  "user.password_reset_requested": "Asked for a password reset email",
   "invitation.created": "Invited",
   "invitation.revoked": "Revoked invitation",
   "provider.created": "Added AI provider",

@@ -6,6 +6,7 @@ import { Landing } from "~/components/landing/landing";
 import { getSession } from "~/server/auth";
 import { db } from "~/server/db";
 import { currency, institution, user } from "~/server/db/schema";
+import { isEmailConfigured } from "~/server/lib/mailer";
 
 export const metadata: Metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ export default async function SignInPage({
       currencyCount={currencyCount}
       // Arriving from a protected page: go straight to the form.
       openSignIn={!!next}
+      emailResets={isEmailConfigured()}
     />
   );
 }

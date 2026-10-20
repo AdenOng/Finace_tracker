@@ -1,0 +1,1 @@
+ALTER TABLE "extraction_job" ADD COLUMN "review_reminded_at" timestamp with time zone;

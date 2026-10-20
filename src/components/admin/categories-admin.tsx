@@ -18,6 +18,7 @@ import { Field, Input, Select, Textarea } from "~/components/ui/field";
 import { EmptyState, Notice, Section, Tag } from "~/components/ui/panel";
 import { useFlash } from "~/components/ui/use-flash";
 import { cn } from "~/lib/cn";
+import { downloadFile } from "~/lib/csv";
 import { formText } from "~/lib/form";
 import { api, type RouterInputs, type RouterOutputs } from "~/trpc/react";
 
@@ -49,17 +50,6 @@ const kindLabels: Record<Kind, string> = {
 
 function swallow(fn: () => Promise<unknown>) {
   return () => void fn().catch(() => undefined);
-}
-
-function download(name: string, content: string) {
-  const url = URL.createObjectURL(
-    new Blob([content], { type: "application/json" }),
-  );
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 export function CategoriesAdmin() {
@@ -151,9 +141,10 @@ export function CategoriesAdmin() {
         archived: !!r.archivedAt,
       })),
     };
-    download(
+    downloadFile(
       `finfolio-categories-${payload.exportedAt.slice(0, 10)}.json`,
       JSON.stringify(payload, null, 2),
+      "application/json",
     );
   }
 

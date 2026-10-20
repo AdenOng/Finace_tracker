@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "~/server/db";
 import {
@@ -24,11 +24,41 @@ import {
 import { stageExtraction } from "./stage";
 import { readUpload } from "./storage";
 
+/** A read still running after this long lost its worker (e.g. a restart) and may be retried. */
+export const STALE_AFTER_MS = 6 * 60_000;
+/** The upload request starts its read straight away; one still queued after this was lost. */
+const ORPHANED_AFTER_MS = 60_000;
+
 /** Long enough for a multi-page scanned statement on a slow model. */
 const EXTRACTION_TIMEOUT_MS = 280_000;
 /** With a fallback, both attempts together stay inside the 6-minute "stale" window. */
 const PRIMARY_WITH_FALLBACK_TIMEOUT_MS = 180_000;
 const FALLBACK_TIMEOUT_MS = 160_000;
+
+/** Queued (or retried) and never started, or started and never finished, within the window. */
+export const isStaleJob = (
+  job: { status: string; startedAt: Date | null; updatedAt: Date },
+  now = Date.now(),
+) =>
+  (job.status === "running" &&
+    !!job.startedAt &&
+    now - job.startedAt.getTime() > STALE_AFTER_MS) ||
+  (job.status === "queued" && now - job.updatedAt.getTime() > STALE_AFTER_MS);
+
+/** SQL twin of `isStaleJob`. */
+export function staleJobCondition(now = Date.now()) {
+  const before = new Date(now - STALE_AFTER_MS);
+  return or(
+    and(
+      eq(extractionJob.status, "running"),
+      lt(extractionJob.startedAt, before),
+    ),
+    and(
+      eq(extractionJob.status, "queued"),
+      lt(extractionJob.updatedAt, before),
+    ),
+  );
+}
 
 /** Thrown inside the staging transaction when this attempt was stopped or replaced mid-read. */
 class JobCancelledError extends Error {}
@@ -199,4 +229,40 @@ export async function runImportJob(jobId: string) {
       })
       .where(stillRunning);
   }
+}
+
+/**
+ * Puts imports back on track after a restart or crash. A read that never finished is marked
+ * failed so its owner can try again (it is not re-run automatically, which could spend tokens on
+ * a file that keeps timing out). A queued read whose request was lost before it started is run.
+ */
+export async function recoverImportJobs(now = Date.now()) {
+  const interrupted = await db
+    .update(extractionJob)
+    .set({
+      status: "failed",
+      error:
+        "Reading stopped part-way, probably because the server restarted. Read it again.",
+      finishedAt: new Date(now),
+    })
+    .where(
+      and(
+        eq(extractionJob.status, "running"),
+        lt(extractionJob.startedAt, new Date(now - STALE_AFTER_MS)),
+      ),
+    )
+    .returning({ id: extractionJob.id });
+  const orphaned = await db
+    .select({ id: extractionJob.id })
+    .from(extractionJob)
+    .where(
+      and(
+        eq(extractionJob.status, "queued"),
+        lt(extractionJob.updatedAt, new Date(now - ORPHANED_AFTER_MS)),
+      ),
+    )
+    .orderBy(extractionJob.updatedAt);
+  // One at a time, like uploads arriving one by one; each claims its job, so none runs twice.
+  for (const { id } of orphaned) await runImportJob(id);
+  return { interrupted: interrupted.length, started: orphaned.length };
 }

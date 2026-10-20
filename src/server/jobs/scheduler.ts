@@ -6,6 +6,9 @@ import { loadInstanceSettings } from "~/server/lib/instance-settings";
 import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
 import { checkProvider } from "~/server/modules/llm/routing";
 import { purgeOldDocuments } from "~/server/modules/imports/retention";
+import { sendReviewReminders } from "~/server/modules/imports/reminders";
+import { recoverImportJobs } from "~/server/modules/imports/runner";
+import { recordAllNetWorth } from "~/server/modules/portfolio/history";
 import {
   refreshExchangeRates,
   refreshQuotes,
@@ -29,6 +32,19 @@ const tasks: Task[] = [
     every: 30_000,
     firstAfter: 30_000,
     run: () => loadInstanceSettings(db),
+  },
+  {
+    // Uploads read their statement right after responding; a restart can lose that read.
+    name: "import recovery",
+    every: 5 * MINUTE,
+    firstAfter: MINUTE,
+    run: async () => {
+      const result = await recoverImportJobs();
+      if (result.interrupted || result.started)
+        console.log(
+          `[scheduler] imports: ${result.interrupted} interrupted, ${result.started} restarted`,
+        );
+    },
   },
   {
     name: "provider health",
@@ -58,6 +74,19 @@ const tasks: Task[] = [
     },
   },
   {
+    // Only with outgoing email; each waiting import is mentioned once.
+    name: "review reminders",
+    every: 24 * HOUR,
+    firstAfter: 10 * MINUTE,
+    run: async () => {
+      const result = await sendReviewReminders(db);
+      if (result.emails)
+        console.log(
+          `[scheduler] reminded ${result.emails} people about ${result.imports} imports`,
+        );
+    },
+  },
+  {
     name: "exchange rates",
     every: 12 * HOUR,
     firstAfter: 3 * MINUTE,
@@ -69,6 +98,13 @@ const tasks: Task[] = [
     every: HOUR,
     firstAfter: 4 * MINUTE,
     run: () => refreshQuotes(db),
+  },
+  {
+    // After rates and prices have refreshed; a later run the same day replaces that day's figure.
+    name: "net worth history",
+    every: 6 * HOUR,
+    firstAfter: 6 * MINUTE,
+    run: () => recordAllNetWorth(db),
   },
 ];
 

@@ -3,7 +3,6 @@ import { and, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { z } from "zod";
 
-import { env } from "~/env";
 import { adminProcedure, createTRPCRouter } from "~/server/api/trpc";
 import type { Database } from "~/server/db";
 import {
@@ -15,31 +14,24 @@ import {
 } from "~/server/db/schema";
 import { recordAudit } from "~/server/lib/audit";
 import { trySendMail } from "~/server/lib/mailer";
-import { runImportJob } from "~/server/modules/imports/runner";
+import {
+  REVIEW_WAITING_DAYS,
+  reviewReminderEmail,
+} from "~/server/modules/imports/reminders";
+import {
+  isStaleJob,
+  runImportJob,
+  staleJobCondition,
+} from "~/server/modules/imports/runner";
 
 const PAGE_SIZE = 50;
-/** Matches the user-facing imports router: a job running longer than this lost its worker. */
-const STALE_AFTER_MS = 6 * 60_000;
-/** Imports read but not reviewed for this long are flagged. */
-export const REVIEW_WAITING_DAYS = 7;
 
 const filter = z.enum([...jobStatus.enumValues, "stuck", "waiting", "all"]);
 
 function filterCondition(value: z.infer<typeof filter>) {
-  const staleBefore = new Date(Date.now() - STALE_AFTER_MS);
   const waitingBefore = new Date(Date.now() - REVIEW_WAITING_DAYS * 86_400_000);
   if (value === "all") return undefined;
-  if (value === "stuck")
-    return or(
-      and(
-        eq(extractionJob.status, "running"),
-        lt(extractionJob.startedAt, staleBefore),
-      ),
-      and(
-        eq(extractionJob.status, "queued"),
-        lt(extractionJob.createdAt, staleBefore),
-      ),
-    );
+  if (value === "stuck") return staleJobCondition();
   if (value === "waiting")
     return and(
       eq(extractionJob.status, "needs_review"),
@@ -54,7 +46,7 @@ async function loadJob(db: Database, id: string) {
       id: extractionJob.id,
       status: extractionJob.status,
       startedAt: extractionJob.startedAt,
-      createdAt: extractionJob.createdAt,
+      updatedAt: extractionJob.updatedAt,
       ownerId: extractionJob.ownerId,
       ownerEmail: user.email,
       ownerName: user.name,
@@ -66,17 +58,6 @@ async function loadJob(db: Database, id: string) {
   if (!job) throw new TRPCError({ code: "NOT_FOUND" });
   return job;
 }
-
-const isStale = (job: {
-  status: string;
-  startedAt: Date | null;
-  createdAt: Date;
-}) =>
-  (job.status === "running" &&
-    !!job.startedAt &&
-    Date.now() - job.startedAt.getTime() > STALE_AFTER_MS) ||
-  (job.status === "queued" &&
-    Date.now() - job.createdAt.getTime() > STALE_AFTER_MS);
 
 /**
  * Every user's import jobs, for troubleshooting. Metadata only: never the document's name or
@@ -111,6 +92,7 @@ export const adminJobsRouter = createTRPCRouter({
           id: extractionJob.id,
           status: extractionJob.status,
           createdAt: extractionJob.createdAt,
+          updatedAt: extractionJob.updatedAt,
           startedAt: extractionJob.startedAt,
           finishedAt: extractionJob.finishedAt,
           attempts: extractionJob.attempts,
@@ -146,7 +128,7 @@ export const adminJobsRouter = createTRPCRouter({
       const hasMore = rows.length > PAGE_SIZE;
       const items = (hasMore ? rows.slice(0, PAGE_SIZE) : rows).map((row) => ({
         ...row,
-        stale: isStale(row),
+        stale: isStaleJob(row),
         // Provider errors can echo fragments of the request; keep only the gist.
         error:
           row.error && row.error.length > 240
@@ -163,7 +145,7 @@ export const adminJobsRouter = createTRPCRouter({
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const job = await loadJob(ctx.db, input.id);
-      if (job.status !== "failed" && !isStale(job)) {
+      if (job.status !== "failed" && !isStaleJob(job)) {
         throw new TRPCError({
           code: "CONFLICT",
           message: "Only a failed or stuck import can be read again",
@@ -233,15 +215,14 @@ export const adminJobsRouter = createTRPCRouter({
         });
       const error = await trySendMail({
         to: job.ownerEmail,
-        subject: "A statement is waiting for your review in Finfolio",
-        text: [
-          `Hi ${job.ownerName},`,
-          "",
-          "Finfolio has read a statement you uploaded. Nothing is saved to your accounts until you review it:",
-          `${env.BETTER_AUTH_URL}/imports`,
-        ].join("\n"),
+        ...reviewReminderEmail(job.ownerName, 1),
       });
       if (error) throw new TRPCError({ code: "BAD_REQUEST", message: error });
+      // The daily reminder then leaves this import alone.
+      await ctx.db
+        .update(extractionJob)
+        .set({ reviewRemindedAt: new Date() })
+        .where(eq(extractionJob.id, job.id));
       await recordAudit(ctx.db, {
         actorId: ctx.session.user.id,
         action: "job.reminder_sent",

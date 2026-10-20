@@ -15,9 +15,11 @@ import { CashFlow } from "./cash-flow";
 function SignInDialog({
   open,
   onClose,
+  emailResets,
 }: {
   open: boolean;
   onClose: () => void;
+  emailResets: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
 
@@ -63,7 +65,7 @@ function SignInDialog({
             </AuthHeading>
           </div>
           <Suspense>
-            <SignInForm />
+            <SignInForm emailResets={emailResets} />
           </Suspense>
         </div>
       ) : null}
@@ -82,7 +84,7 @@ const steps = [
     title: "Record what changed",
     Glyph: ReadGlyph,
     body: () =>
-      "Enter balances and holdings, log spending by category, and check each statement line by line. Statement upload, read by an AI model you pick, is coming next.",
+      "Upload a statement or screenshot and an AI model you pick reads it; nothing is saved until you check it line by line. Balances, holdings and spending can be entered by hand too.",
   },
   {
     title: "Keep it to yourself",
@@ -96,10 +98,13 @@ export function Landing({
   institutionCount,
   currencyCount,
   openSignIn,
+  emailResets,
 }: {
   institutionCount: number;
   currencyCount: number;
   openSignIn: boolean;
+  /** Outgoing email is set up, so "Forgot password" can send a link. */
+  emailResets: boolean;
 }) {
   const [open, setOpen] = useState(openSignIn);
   const [month, setMonth] = useState(0);
@@ -203,7 +208,11 @@ export function Landing({
         </div>
       </footer>
 
-      <SignInDialog open={open} onClose={() => setOpen(false)} />
+      <SignInDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        emailResets={emailResets}
+      />
     </div>
   );
 }

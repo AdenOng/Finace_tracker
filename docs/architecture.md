@@ -32,7 +32,8 @@ dependencies. They are excluded from the Finfolio image and application checks.
   See [workspace design](workspaces.md) for permissions, lifecycle, and future fund extensions.
 - `src/server/modules/accounts/`: ownership checks; finance rows are only written to accounts
   the signed-in user owns (`writableBy`), even if a wider scope can read them.
-- `src/server/modules/portfolio/`: latest-snapshot loading, position valuation (quote →
+- `src/server/modules/portfolio/`: latest-snapshot loading, net worth (`net-worth.ts`) and its
+  daily history (`history.ts`), position valuation (quote →
   statement value → quantity × price) and FX conversion. Valuation is pure and decimal-based.
 - `src/server/modules/spending/`: reusable merchant matching and financial-write guards. Spending
   mutations and reconciliation commits lock owned accounts in id order inside a database
@@ -94,6 +95,6 @@ gitleaks git --pre-commit --staged --redact .
 gitleaks git --redact .
 ```
 
-These checks cover the current phase-one implementation. Live provider behavior, hardware
-passkey flows, the future financial import pipeline, and the archived Python/Vite dependency
+These checks cover the current implementation. Live provider behavior, hardware passkey flows,
+real statement extraction quality, outgoing email delivery, and the archived Python/Vite dependency
 trees need their own integration and security validation before deployment or reuse.

@@ -58,6 +58,8 @@ const { refreshQuotes } =
   await import("../src/server/modules/portfolio/market-health");
 const { cachedInstanceSettings, setCachedInstanceSettings } =
   await import("../src/server/lib/instance-settings-cache");
+const { entryTimeline, recordNetWorth } =
+  await import("../src/server/modules/portfolio/history");
 
 function contextFor(id: string) {
   return {
@@ -135,7 +137,7 @@ beforeEach(async () => {
   ratesRequest.mockReset();
   ratesRequest.mockResolvedValue([]);
   await engine.exec(
-    "TRUNCATE TABLE workspace, audit_log, financial_account, security, fx_rate, user_settings, merchant_rule CASCADE",
+    "TRUNCATE TABLE workspace, audit_log, financial_account, security, fx_rate, user_settings, merchant_rule, networth_snapshot CASCADE",
   );
 });
 afterAll(async () => {
@@ -152,6 +154,237 @@ const bank = {
   notes: "",
 };
 const broker = { ...bank, name: "Broker", type: "brokerage" as const };
+
+describe("net worth history", () => {
+  test("each entry date adds up every account's latest entry so far", () => {
+    const amount = (value: string, currency = "SGD") => ({
+      amount: value,
+      currency,
+    });
+    expect(
+      entryTimeline([
+        {
+          accountId: "a",
+          asOf: "2026-01-31",
+          totals: [amount("100")],
+          unpriced: 0,
+        },
+        {
+          accountId: "b",
+          asOf: "2026-02-28",
+          totals: [amount("5", "USD")],
+          unpriced: 1,
+        },
+        {
+          accountId: "a",
+          asOf: "2026-03-31",
+          totals: [amount("150")],
+          unpriced: 0,
+        },
+        // A second entry on the same day replaces the first.
+        {
+          accountId: "a",
+          asOf: "2026-03-31",
+          totals: [amount("160")],
+          unpriced: 0,
+        },
+      ]),
+    ).toEqual([
+      { date: "2026-01-31", amounts: [amount("100")], unpriced: 0 },
+      {
+        date: "2026-02-28",
+        amounts: [amount("100"), amount("5", "USD")],
+        unpriced: 1,
+      },
+      {
+        date: "2026-03-31",
+        amounts: [amount("160"), amount("5", "USD")],
+        unpriced: 1,
+      },
+    ]);
+  });
+
+  test("estimates days before recording began from entries, then uses recorded days", async () => {
+    const savings = await alice.accounts.create(bank);
+    const brokerage = await alice.accounts.create(broker);
+    await alice.portfolio.recordSnapshot({
+      accountId: savings.id,
+      asOf: "2026-08-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: brokerage.id,
+      asOf: "2026-09-01",
+      cash: [],
+      positions: [
+        {
+          symbol: "VT",
+          exchange: "ARCX",
+          name: "",
+          assetClass: "etf",
+          currency: "USD",
+          quantity: "10",
+          averageCost: null,
+          price: null,
+          value: "1000",
+        },
+      ],
+    });
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-09-01",
+      rate: "0.8",
+      source: "test",
+    });
+
+    expect((await alice.portfolio.netWorthHistory()).points).toEqual([
+      { date: "2026-08-01", total: "100", partial: false, estimated: true },
+      { date: "2026-09-01", total: "1350", partial: false, estimated: true },
+    ]);
+
+    expect(
+      await recordNetWorth(db as unknown as Database, "alice", "2026-10-10"),
+    ).toBe(true);
+    // A later run the same day replaces that day's figure.
+    expect(
+      await recordNetWorth(db as unknown as Database, "alice", "2026-10-10"),
+    ).toBe(true);
+    await alice.portfolio.recordSnapshot({
+      accountId: savings.id,
+      asOf: "2026-10-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "999" }],
+    });
+    // Recorded days already include what was known then; a later entry adds no estimate.
+    await alice.portfolio.recordSnapshot({
+      accountId: savings.id,
+      asOf: "2026-10-15",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "5" }],
+    });
+    const history = await alice.portfolio.netWorthHistory();
+    expect(history.currency).toBe("SGD");
+    // A backdated entry from before recording began still shapes the estimate.
+    expect(history.points).toEqual([
+      { date: "2026-08-01", total: "100", partial: false, estimated: true },
+      { date: "2026-09-01", total: "1350", partial: false, estimated: true },
+      { date: "2026-10-01", total: "2249", partial: false, estimated: true },
+      { date: "2026-10-10", total: "1350", partial: false, estimated: false },
+    ]);
+    expect(await db.$count(schema.networthSnapshot)).toBe(1);
+
+    // Nothing to record for someone without entries, and nobody sees anyone else's history.
+    expect(
+      await recordNetWorth(db as unknown as Database, "bob", "2026-10-10"),
+    ).toBe(false);
+    expect((await bob.portfolio.netWorthHistory()).points).toEqual([]);
+  });
+
+  test("CPF/SRS toggles normalize estimated and recorded history without changing saved figures", async () => {
+    const settings = settingsRouter.createCaller(contextFor("alice"));
+    const savings = await alice.accounts.create(bank);
+    const cpf = await alice.accounts.create({
+      ...bank,
+      name: "CPF",
+      type: "cpf",
+    });
+    const srs = await alice.accounts.create({
+      ...bank,
+      name: "SRS",
+      type: "srs",
+    });
+    for (const [account, amount, bucket] of [
+      [savings, "100", null],
+      [cpf, "600", "oa"],
+      [srs, "300", null],
+    ] as const) {
+      await alice.portfolio.recordSnapshot({
+        accountId: account.id,
+        asOf: "2026-09-01",
+        positions: [],
+        cash: [{ currency: "SGD", amount, bucket }],
+      });
+    }
+    await recordNetWorth(db as unknown as Database, "alice", "2026-10-17");
+    await settings.setCountCpfSrs({ count: false });
+    await recordNetWorth(db as unknown as Database, "alice", "2026-10-18");
+    const saved = await db.select().from(schema.networthSnapshot);
+
+    for (const count of [false, true, false]) {
+      await settings.setCountCpfSrs({ count });
+      const worth = await alice.portfolio.netWorth();
+      const history = await alice.portfolio.netWorthHistory();
+      const expected = count ? "1000" : "100";
+      expect(worth.total).toBe(expected);
+      expect(history.points).toHaveLength(3);
+      expect(history.points.map((p) => p.total)).toEqual([
+        expected,
+        expected,
+        expected,
+      ]);
+      expect(history.points.every((p) => !p.partial)).toBe(true);
+    }
+    expect(await db.select().from(schema.networthSnapshot)).toEqual(saved);
+
+    await settings.setDisplayCurrency({ code: "USD" });
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-10-19",
+      rate: "0.8",
+      source: "test",
+    });
+    expect(
+      (await alice.portfolio.netWorthHistory()).points.map((p) => p.total),
+    ).toEqual(["80", "80", "80"]);
+  });
+
+  test("including previously excluded SRS keeps recorded totals partial when rates are missing", async () => {
+    const settings = settingsRouter.createCaller(contextFor("alice"));
+    const savings = await alice.accounts.create(bank);
+    const srs = await alice.accounts.create({
+      ...bank,
+      name: "SRS",
+      type: "srs",
+    });
+    for (const [account, currency, amount] of [
+      [savings, "SGD", "100"],
+      [srs, "USD", "900"],
+    ] as const) {
+      await alice.portfolio.recordSnapshot({
+        accountId: account.id,
+        asOf: "2026-09-01",
+        positions: [],
+        cash: [
+          { currency, amount },
+          ...(account.id === srs.id ? [{ currency: "SGD", amount: "50" }] : []),
+        ],
+      });
+    }
+    await settings.setCountCpfSrs({ count: false });
+    await recordNetWorth(db as unknown as Database, "alice", "2026-10-18");
+    expect(
+      (await alice.portfolio.netWorthHistory()).points.every((p) => !p.partial),
+    ).toBe(true);
+    await settings.setCountCpfSrs({ count: true });
+    const expected = [
+      { date: "2026-09-01", total: "150", partial: true, estimated: true },
+      { date: "2026-10-18", total: "150", partial: true, estimated: false },
+    ];
+    expect((await alice.portfolio.netWorthHistory()).points).toEqual(expected);
+    // Existing records lack the new completeness flag; don't claim their added amounts are complete.
+    const [saved] = await db.select().from(schema.networthSnapshot);
+    const legacyBreakdown = { ...saved!.breakdown };
+    delete legacyBreakdown.cpfSrsPartial;
+    await db
+      .update(schema.networthSnapshot)
+      .set({ breakdown: legacyBreakdown })
+      .where(eq(schema.networthSnapshot.id, saved!.id));
+    expect((await alice.portfolio.netWorthHistory()).points).toEqual(expected);
+  });
+});
 
 describe("account access", () => {
   test("allows type changes only before any financial history exists", async () => {
@@ -1023,6 +1256,31 @@ describe("spending", () => {
     ]);
     expect(rows[0]?.currency).toBe("SGD");
 
+    // A search ignores the month and case, and treats % and _ as plain text.
+    const search = (text: string) =>
+      alice.spending.list({
+        month: "2026-01",
+        accountId: null,
+        categoryId: null,
+        search: text,
+      });
+    expect((await search("MARKET")).map((r) => r.description)).toEqual([
+      "Market",
+      "Supermarket",
+    ]);
+    expect((await search("last")).map((r) => r.postedDate)).toEqual([
+      "2026-09-30",
+    ]);
+    expect(await search("%")).toHaveLength(0);
+    expect(
+      await bob.spending.list({
+        month: "2026-10",
+        accountId: null,
+        categoryId: null,
+        search: "market",
+      }),
+    ).toHaveLength(0);
+
     const summary = await alice.spending.summary({ month: "2026-10" });
     expect(summary).toHaveLength(1);
     expect(summary[0]).toMatchObject({
@@ -1052,6 +1310,54 @@ describe("spending", () => {
         amount: "0.00",
       }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  test("converts a month's spending into the display currency and names currencies without a rate", async () => {
+    const account = await alice.accounts.create(bank);
+    const entry = (amount: string, currency: string | null) =>
+      alice.spending.create({
+        accountId: account.id,
+        postedDate: "2026-10-03",
+        description: `Card ${amount} ${currency ?? ""}`,
+        merchant: null,
+        amount,
+        currency,
+        categoryId: groceriesId,
+        isTransfer: false,
+        notes: null,
+      });
+    await entry("-40", null);
+    await entry("-10", "USD");
+    await entry("25", "USD");
+
+    let month = await alice.spending.converted({ month: "2026-10" });
+    expect(month).toMatchObject({
+      currency: "SGD",
+      spent: "40",
+      received: "0",
+      unconverted: ["USD"],
+    });
+
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-10-01",
+      rate: "0.8",
+      source: "test",
+    });
+    month = await alice.spending.converted({ month: "2026-10" });
+    expect(month).toMatchObject({
+      currency: "SGD",
+      spent: "52.5",
+      received: "31.25",
+      unconverted: [],
+      categories: [
+        { categoryId: groceriesId, spent: "52.5", received: "31.25" },
+      ],
+    });
+    expect((await bob.spending.converted({ month: "2026-10" })).spent).toBe(
+      "0",
+    );
   });
 
   test("transactions in an archived account stay editable but cannot be added", async () => {
@@ -2694,7 +3000,9 @@ describe("market prices", () => {
 
   test("the move since the previous close is hidden when any quoted holding lacks one", async () => {
     const request = spyOn(quotes, "quote").mockImplementation(async (symbol) =>
-      symbol === "D05.SI" ? quote("75") : { ...quote("8"), previousClose: null },
+      symbol === "D05.SI"
+        ? quote("75")
+        : { ...quote("8"), previousClose: null },
     );
     try {
       const account = await alice.accounts.create(broker);

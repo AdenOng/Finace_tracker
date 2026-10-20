@@ -44,7 +44,7 @@ import {
   type StagedPosition,
   type StagedTransaction,
 } from "~/server/modules/imports/rows";
-import { runImportJob } from "~/server/modules/imports/runner";
+import { isStaleJob, runImportJob } from "~/server/modules/imports/runner";
 import { removeUpload } from "~/server/modules/imports/storage";
 import {
   importLinePreview,
@@ -62,15 +62,13 @@ import {
 } from "~/server/modules/spending/guards";
 import { normalizeMerchantText } from "~/server/modules/spending/rules";
 
-/** A job still "running" after this long lost its worker (e.g. a restart) and may be retried. */
-const STALE_AFTER_MS = 6 * 60_000;
-
 const jobColumns = {
   id: extractionJob.id,
   status: extractionJob.status,
   error: extractionJob.error,
   model: extractionJob.model,
   createdAt: extractionJob.createdAt,
+  updatedAt: extractionJob.updatedAt,
   startedAt: extractionJob.startedAt,
   finishedAt: extractionJob.finishedAt,
   documentId: document.id,
@@ -86,11 +84,6 @@ const jobColumns = {
   institutionName: institution.name,
   institutionKey: institution.key,
 };
-
-const isStale = (job: { status: string; startedAt: Date | null }) =>
-  job.status === "running" &&
-  !!job.startedAt &&
-  Date.now() - job.startedAt.getTime() > STALE_AFTER_MS;
 
 /** Deterministic, so committing the same statement line twice is caught by the unique index. */
 function fingerprint(parts: (string | null)[], seen: Map<string, number>) {
@@ -139,7 +132,7 @@ export const importsRouter = createTRPCRouter({
       .where(writableBy(ctx.scope, extractionJob.ownerId))
       .orderBy(desc(extractionJob.createdAt))
       .limit(100);
-    return jobs.map((j) => ({ ...j, stale: isStale(j) }));
+    return jobs.map((j) => ({ ...j, stale: isStaleJob(j) }));
   }),
 
   get: protectedProcedure
@@ -236,7 +229,7 @@ export const importsRouter = createTRPCRouter({
         latestHoldingsAsOf: latest[0]?.asOf ?? null,
         importedHoldingsAsOf: saved[0]?.asOf ?? null,
         importedHoldingsAdjusted: saved[0]?.adjusted ?? false,
-        stale: isStale(job),
+        stale: isStaleJob(job),
         summary: out
           ? {
               documentType: out.documentType,
@@ -760,6 +753,7 @@ export const importsRouter = createTRPCRouter({
           id: extractionJob.id,
           status: extractionJob.status,
           startedAt: extractionJob.startedAt,
+          updatedAt: extractionJob.updatedAt,
         })
         .from(extractionJob)
         .where(
@@ -770,16 +764,23 @@ export const importsRouter = createTRPCRouter({
         )
         .limit(1);
       if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-      if (job.status !== "failed" && !isStale(job)) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Only a failed import can be read again",
-        });
-      }
-      await ctx.db
+      const conflict = new TRPCError({
+        code: "CONFLICT",
+        message: "Only a failed import can be read again",
+      });
+      if (job.status !== "failed" && !isStaleJob(job)) throw conflict;
+      // A stale read that finished in the meantime keeps its result.
+      const [requeued] = await ctx.db
         .update(extractionJob)
         .set({ status: "queued", error: null })
-        .where(eq(extractionJob.id, job.id));
+        .where(
+          and(
+            eq(extractionJob.id, job.id),
+            eq(extractionJob.status, job.status),
+          ),
+        )
+        .returning({ id: extractionJob.id });
+      if (!requeued) throw conflict;
       after(() => runImportJob(job.id));
       return { ok: true };
     }),

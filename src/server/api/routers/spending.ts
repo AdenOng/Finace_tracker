@@ -1,6 +1,17 @@
 import { randomUUID } from "node:crypto";
 import Decimal from "decimal.js";
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  type Column,
+  desc,
+  eq,
+  gte,
+  inArray,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -11,8 +22,15 @@ import {
   optionalText,
 } from "~/server/api/inputs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { category, financialAccount, transaction } from "~/server/db/schema";
+import type { Database } from "~/server/db";
 import {
+  category,
+  financialAccount,
+  transaction,
+  userSettings,
+} from "~/server/db/schema";
+import {
+  type AccessScope,
   readableAccount,
   resolveWorkspaceScope,
   writableBy,
@@ -31,10 +49,51 @@ import {
   loadMerchantRules,
   matchMerchantRule,
 } from "~/server/modules/spending/rules";
+import { ratesInto } from "~/server/modules/portfolio/holdings";
+import { convertAmounts } from "~/server/modules/portfolio/valuation";
+
+/** A search covers every month, so its results are capped; a month is listed in full. */
+const SEARCH_LIMIT = 500;
 
 /** First day of `month` and of the month after, as ISO dates. */
 function monthRange(month: string) {
   return { start: `${month}-01`, end: `${shiftMonth(month, 1)}-01` };
+}
+
+/** Money out and in per category and currency for a month, transfers excluded. */
+function monthSummary(
+  db: Pick<Database, "select">,
+  scope: AccessScope,
+  month: string,
+) {
+  const { start, end } = monthRange(month);
+  return db
+    .select({
+      categoryId: transaction.categoryId,
+      categoryName: category.name,
+      categoryColor: category.color,
+      currency: transaction.currency,
+      spent: sql<string>`coalesce(sum(-${transaction.amount}) filter (where ${transaction.amount} < 0), 0)::text`,
+      received: sql<string>`coalesce(sum(${transaction.amount}) filter (where ${transaction.amount} > 0), 0)::text`,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(transaction)
+    .leftJoin(category, eq(category.id, transaction.categoryId))
+    .where(
+      and(
+        readableAccount(scope, transaction.ownerId, transaction.accountId),
+        eq(transaction.isTransfer, false),
+        gte(transaction.postedDate, start),
+        lt(transaction.postedDate, end),
+      ),
+    )
+    .groupBy(
+      transaction.categoryId,
+      category.name,
+      category.color,
+      transaction.currency,
+    )
+    .orderBy(asc(transaction.currency), asc(category.name));
 }
 
 const transactionInput = z.object({
@@ -64,6 +123,8 @@ export const spendingRouter = createTRPCRouter({
         month: monthInput,
         accountId: z.uuid().nullable(),
         categoryId: z.uuid().nullable(),
+        /** Text in the description, merchant or notes; searches every month, newest first. */
+        search: z.string().trim().max(100).default(""),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -73,7 +134,10 @@ export const spendingRouter = createTRPCRouter({
         input.workspaceId,
       );
       const { start, end } = monthRange(input.month);
-      return ctx.db
+      // strpos rather than LIKE, so % and _ in the search are ordinary characters.
+      const contains = (column: Column) =>
+        sql`strpos(lower(coalesce(${column}, '')), lower(${input.search})) > 0`;
+      const rows = ctx.db
         .select({
           id: transaction.id,
           accountId: transaction.accountId,
@@ -102,8 +166,16 @@ export const spendingRouter = createTRPCRouter({
         .where(
           and(
             readableAccount(scope, transaction.ownerId, transaction.accountId),
-            gte(transaction.postedDate, start),
-            lt(transaction.postedDate, end),
+            input.search
+              ? or(
+                  contains(transaction.description),
+                  contains(transaction.merchant),
+                  contains(transaction.notes),
+                )
+              : and(
+                  gte(transaction.postedDate, start),
+                  lt(transaction.postedDate, end),
+                ),
             input.accountId
               ? eq(transaction.accountId, input.accountId)
               : undefined,
@@ -113,6 +185,7 @@ export const spendingRouter = createTRPCRouter({
           ),
         )
         .orderBy(desc(transaction.postedDate), desc(transaction.createdAt));
+      return input.search ? rows.limit(SEARCH_LIMIT) : rows;
     }),
 
   /** Money out and in per category and currency for a month, transfers excluded. */
@@ -124,34 +197,68 @@ export const spendingRouter = createTRPCRouter({
         ctx.scope,
         input.workspaceId,
       );
-      const { start, end } = monthRange(input.month);
-      return ctx.db
-        .select({
-          categoryId: transaction.categoryId,
-          categoryName: category.name,
-          categoryColor: category.color,
-          currency: transaction.currency,
-          spent: sql<string>`coalesce(sum(-${transaction.amount}) filter (where ${transaction.amount} < 0), 0)::text`,
-          received: sql<string>`coalesce(sum(${transaction.amount}) filter (where ${transaction.amount} > 0), 0)::text`,
-          count: sql<number>`count(*)::int`,
-        })
-        .from(transaction)
-        .leftJoin(category, eq(category.id, transaction.categoryId))
-        .where(
-          and(
-            readableAccount(scope, transaction.ownerId, transaction.accountId),
-            eq(transaction.isTransfer, false),
-            gte(transaction.postedDate, start),
-            lt(transaction.postedDate, end),
+      return monthSummary(ctx.db, scope, input.month);
+    }),
+
+  /**
+   * A month's money in and out converted into the display currency at the latest rates, so
+   * spending in several currencies adds up. Currencies without a rate are listed, not dropped.
+   */
+  converted: protectedProcedure
+    .input(z.object({ month: monthInput, workspaceId: z.uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      const scope = await resolveWorkspaceScope(
+        ctx.db,
+        ctx.scope,
+        input.workspaceId,
+      );
+      const [rows, settings] = await Promise.all([
+        monthSummary(ctx.db, scope, input.month),
+        ctx.db
+          .select({ currency: userSettings.displayCurrency })
+          .from(userSettings)
+          .where(eq(userSettings.userId, ctx.scope.userId))
+          .limit(1),
+      ]);
+      const target =
+        scope.workspace?.displayCurrency ?? settings[0]?.currency ?? "SGD";
+      const { rates, asOf } = await ratesInto(
+        ctx.db,
+        target,
+        rows.map((r) => r.currency),
+      );
+      const convert = (list: typeof rows, field: "spent" | "received") =>
+        convertAmounts(
+          list.map((r) => ({ amount: r[field], currency: r.currency })),
+          target,
+          rates,
+        );
+      const byCategory = new Map<string | null, typeof rows>();
+      for (const row of rows)
+        byCategory.set(row.categoryId, [
+          ...(byCategory.get(row.categoryId) ?? []),
+          row,
+        ]);
+      const spent = convert(rows, "spent");
+      const received = convert(rows, "received");
+      return {
+        currency: target,
+        fxAsOf: asOf,
+        spent: spent.total ?? "0",
+        received: received.total ?? "0",
+        unconverted: [
+          ...new Set(
+            [...spent.unconverted, ...received.unconverted].map(
+              (a) => a.currency,
+            ),
           ),
-        )
-        .groupBy(
-          transaction.categoryId,
-          category.name,
-          category.color,
-          transaction.currency,
-        )
-        .orderBy(asc(transaction.currency), asc(category.name));
+        ].sort(),
+        categories: [...byCategory].map(([categoryId, list]) => ({
+          categoryId,
+          spent: convert(list, "spent").total ?? "0",
+          received: convert(list, "received").total ?? "0",
+        })),
+      };
     }),
 
   create: protectedProcedure

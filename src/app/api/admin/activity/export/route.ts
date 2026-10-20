@@ -6,6 +6,7 @@ import {
   auditFilters,
   auditQuery,
 } from "~/server/api/routers/admin/audit";
+import { toCsv } from "~/lib/csv";
 import { requireAdminRequest } from "~/server/auth/route-guard";
 import { db } from "~/server/db";
 import { auditLog } from "~/server/db/schema";
@@ -13,18 +14,6 @@ import { auditLog } from "~/server/db/schema";
 export const runtime = "nodejs";
 
 const MAX_ROWS = 10_000;
-
-function csvCell(value: unknown) {
-  const text =
-    value === null || value === undefined
-      ? ""
-      : typeof value === "string"
-        ? value
-        : JSON.stringify(value);
-  // Leading =, +, - or @ would run as a formula in a spreadsheet.
-  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
-  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-}
 
 /** The activity log as CSV, with the same filters as the page. */
 export async function GET(request: Request) {
@@ -51,7 +40,7 @@ export async function GET(request: Request) {
       r.details,
     ]),
   ];
-  const body = lines.map((line) => line.map(csvCell).join(",")).join("\r\n");
+  const body = toCsv(lines);
   const stamp = new Date().toISOString().slice(0, 10);
   return new Response(body, {
     headers: {

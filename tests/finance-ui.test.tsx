@@ -54,6 +54,43 @@ const brokerTotal: RouterOutputs["portfolio"]["netWorth"]["accounts"][number] =
     unconverted: [],
   };
 
+test("net worth chart renders nearby large balances without hanging or invalid coordinates", () => {
+  // A child process bounds a regression that would otherwise block the whole test runner.
+  const result = Bun.spawnSync({
+    cmd: [
+      process.execPath,
+      "--eval",
+      `
+        import { createElement } from "react";
+        import { renderToStaticMarkup } from "react-dom/server";
+        import { NetWorthChart } from "./src/components/overview/net-worth-chart";
+        for (const totals of [
+          ["9007199254740992", "9007199254740994"],
+          ["1000000000000", "1000000000000.0001"],
+          ["-9007199254740994", "-9007199254740992"],
+          ["0", "0"],
+          ["100", "200"],
+        ]) {
+          const points = totals.map((total, i) => ({
+            date: i ? "2026-10-19" : "2026-10-18",
+            total, estimated: false, partial: false,
+          }));
+          console.log(renderToStaticMarkup(createElement(NetWorthChart, { points, currency: "SGD" })));
+        }
+      `,
+    ],
+    cwd: new URL("..", import.meta.url).pathname,
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 2000,
+  });
+  expect(result.exitCode).toBe(0);
+  const html = result.stdout.toString();
+  expect(html.match(/<figure/g)).toHaveLength(5);
+  expect(html).not.toMatch(/NaN|Infinity/);
+  expect(html).toContain("9,007,199,254,740,994.00");
+});
+
 test("broker rows show one converted holdings-and-cash total instead of currency balances", () => {
   const html = renderToStaticMarkup(
     <AccountRow account={brokerTotal} currency="SGD" />,
@@ -335,6 +372,7 @@ test("completed imports expose removal only for saved rows and keep removed evid
     error: null,
     model: null,
     createdAt: new Date(),
+    updatedAt: new Date(),
     startedAt: null,
     finishedAt: null,
     documentId: "99999999-9999-4999-8999-999999999999",

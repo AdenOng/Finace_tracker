@@ -10,15 +10,98 @@ import { Button } from "~/components/ui/button";
 import { Field, Input } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
 import { authClient } from "~/server/auth/client";
+import { errorMessage } from "~/lib/errors";
 import { formText } from "~/lib/form";
 import { safeNextPath } from "~/lib/navigation";
+import { api } from "~/trpc/react";
 
-export function SignInForm() {
+/** "Forgot password": emails a link when the instance can send email, otherwise points to the admin. */
+function ForgotPassword({
+  emailResets,
+  onBack,
+}: {
+  emailResets: boolean;
+  onBack: () => void;
+}) {
+  const request = api.passwordReset.request.useMutation();
+  const back = (
+    <button
+      type="button"
+      onClick={onBack}
+      className="text-[13px] font-semibold underline underline-offset-4"
+    >
+      Back to sign in
+    </button>
+  );
+
+  if (!emailResets)
+    return (
+      <div className="space-y-4">
+        <Notice>
+          Ask whoever runs this Finfolio for a password reset link. It works
+          once and signs you out everywhere else.
+        </Notice>
+        {back}
+      </div>
+    );
+  if (request.isSuccess)
+    return (
+      <div className="space-y-4">
+        <Notice tone="success">
+          If an account uses that address, a reset link is on its way. It works
+          once within the hour. Check your spam folder if it doesn&apos;t
+          arrive.
+        </Notice>
+        {back}
+      </div>
+    );
+  return (
+    <form
+      className="space-y-5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        request.mutate({
+          email: formText(new FormData(event.currentTarget), "email"),
+        });
+      }}
+    >
+      <p className="text-ink-2 text-sm">
+        Enter the email you sign in with and we&apos;ll send you a link to
+        choose a new password.
+      </p>
+      {request.error ? (
+        <Notice tone="error">{errorMessage(request.error)}</Notice>
+      ) : null}
+      <Field label="Email" htmlFor="reset-email">
+        <Input
+          id="reset-email"
+          name="email"
+          type="email"
+          autoComplete="username"
+          required
+          autoFocus
+        />
+      </Field>
+      <Button
+        type="submit"
+        size="lg"
+        className="w-full"
+        loading={request.isPending}
+      >
+        Email me a reset link
+      </Button>
+      {back}
+    </form>
+  );
+}
+
+export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const next = safeNextPath(useSearchParams().get("next"));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"password" | "passkey" | null>(null);
+  const [forgot, setForgot] = useState(false);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,6 +134,14 @@ export function SignInForm() {
     router.refresh();
   }
 
+  if (forgot)
+    return (
+      <ForgotPassword
+        emailResets={emailResets}
+        onBack={() => setForgot(false)}
+      />
+    );
+
   return (
     <div className="space-y-6">
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -65,7 +156,19 @@ export function SignInForm() {
             autoFocus
           />
         </Field>
-        <Field label="Password" htmlFor="password">
+        <Field
+          label="Password"
+          htmlFor="password"
+          hint={
+            <button
+              type="button"
+              onClick={() => setForgot(true)}
+              className="underline underline-offset-4"
+            >
+              Forgot password?
+            </button>
+          }
+        >
           <Input
             id="password"
             name="password"
