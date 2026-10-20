@@ -1,7 +1,18 @@
 import { createHash } from "node:crypto";
 
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  sql,
+} from "drizzle-orm";
 import { after } from "next/server";
 import { z } from "zod";
 
@@ -87,6 +98,29 @@ function fingerprint(parts: (string | null)[], seen: Map<string, number>) {
   const n = (seen.get(key) ?? 0) + 1;
   seen.set(key, n);
   return `statement:${createHash("sha256").update(`${key}\u0000${n}`).digest("hex")}`;
+}
+
+/**
+ * A trade names only a symbol, which can match listings on several exchanges or in several
+ * currencies. Listings held in `holdings` win, in the order given (the statement's own holdings
+ * first), then one in the trade's currency. If the best evidence still points at more than one
+ * listing, the trade is left unlinked.
+ */
+function tradedListing(
+  listings: { id: string; currency: string }[],
+  currency: string,
+  holdings: ReadonlySet<string>[],
+) {
+  for (const pool of [
+    ...holdings.flatMap((held) => [
+      listings.filter((l) => held.has(l.id) && l.currency === currency),
+      listings.filter((l) => held.has(l.id)),
+    ]),
+    listings.filter((l) => l.currency === currency),
+  ]) {
+    if (pool.length > 0) return pool.length === 1 ? pool[0]!.id : null;
+  }
+  return null;
 }
 
 /** Statement uploads: what the AI read, waiting for the owner to review and commit. */
@@ -557,6 +591,7 @@ export const importsRouter = createTRPCRouter({
           ? of("position", stagedSchemas.position)
           : [];
         const cash = of("cash_balance", stagedSchemas.cash_balance);
+        let imported: string | null = null;
         if (positions.length > 0 || cash.length > 0) {
           const parsed = snapshotInput.safeParse({
             accountId: account.id,
@@ -589,6 +624,7 @@ export const importsRouter = createTRPCRouter({
             parsed.data,
             { source: "statement", documentId: job.documentId },
           );
+          imported = snapshot.id;
           for (const r of [...positions, ...cash])
             committed.set(r.id, snapshot.id);
           counts.holdings = positions.length;
@@ -606,22 +642,65 @@ export const importsRouter = createTRPCRouter({
               ),
             ),
           ];
-          const known =
+          // A September statement imported after October's entry must not use October's listings.
+          const [known, [earlier]] =
             symbols.length > 0
-              ? await tx
-                  .select({ id: security.id, symbol: security.symbol })
-                  .from(security)
-                  .where(inArray(security.symbol, symbols))
-              : [];
+              ? await Promise.all([
+                  tx
+                    .select({
+                      id: security.id,
+                      symbol: security.symbol,
+                      currency: security.currency,
+                    })
+                    .from(security)
+                    .where(inArray(security.symbol, symbols)),
+                  tx
+                    .select({ id: accountSnapshot.id })
+                    .from(accountSnapshot)
+                    .where(
+                      and(
+                        eq(accountSnapshot.accountId, account.id),
+                        lte(accountSnapshot.asOf, input.asOf),
+                        imported ? ne(accountSnapshot.id, imported) : undefined,
+                        exists(
+                          tx
+                            .select({ id: position.id })
+                            .from(position)
+                            .where(eq(position.snapshotId, accountSnapshot.id)),
+                        ),
+                      ),
+                    )
+                    .orderBy(
+                      desc(accountSnapshot.asOf),
+                      desc(accountSnapshot.createdAt),
+                      desc(accountSnapshot.id),
+                    )
+                    .limit(1),
+                ])
+              : [[], []];
+          const heldIn = async (snapshotId: string | null | undefined) =>
+            new Set(
+              snapshotId
+                ? (
+                    await tx
+                      .select({ id: position.securityId })
+                      .from(position)
+                      .where(eq(position.snapshotId, snapshotId))
+                  ).map((p) => p.id)
+                : [],
+            );
+          const holdings = [await heldIn(imported), await heldIn(earlier?.id)];
           for (const { id, data } of activity) {
             const [row] = await tx
               .insert(investmentTransaction)
               .values({
                 ownerId: ctx.scope.userId,
                 accountId: account.id,
-                securityId:
-                  known.find((k) => k.symbol === data.symbol?.toUpperCase())
-                    ?.id ?? null,
+                securityId: tradedListing(
+                  known.filter((k) => k.symbol === data.symbol?.toUpperCase()),
+                  data.currency,
+                  holdings,
+                ),
                 type: data.type,
                 tradeDate: data.tradeDate,
                 settleDate: data.settleDate,

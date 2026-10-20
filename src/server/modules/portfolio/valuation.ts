@@ -37,6 +37,31 @@ export function valuePosition(input: {
   return null;
 }
 
+/** The per-unit price a statement recorded, from its price or its value. */
+export function statementUnitPrice(input: {
+  quantity: string;
+  statementPrice: string | null;
+  statementValue: string | null;
+}): string | null {
+  if (input.statementPrice !== null) return input.statementPrice;
+  const quantity = new Decimal(input.quantity);
+  if (input.statementValue === null || quantity.isZero()) return null;
+  return new Decimal(input.statementValue).dividedBy(quantity).toFixed();
+}
+
+/**
+ * Whether a market price is believable next to the recorded one. Ten times either way is far
+ * beyond normal moves between statements; it nearly always means the symbol matched a different
+ * instrument, such as Bitcoin entered as a stock picking up the "BTC" ETF.
+ */
+export function plausibleQuote(quote: string, recorded: string | null) {
+  if (recorded === null) return true;
+  const reference = new Decimal(recorded).abs();
+  if (reference.isZero()) return true;
+  const ratio = new Decimal(quote).dividedBy(reference);
+  return ratio.lessThanOrEqualTo(10) && ratio.greaterThanOrEqualTo(0.1);
+}
+
 export function multiply(a: string, b: string) {
   return toMoney(new Decimal(a).times(b));
 }

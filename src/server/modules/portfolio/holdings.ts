@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import Decimal from "decimal.js";
 import { and, desc, eq, exists, inArray, or, sql } from "drizzle-orm";
 
 import type { CpfBucket } from "~/lib/accounts";
@@ -19,7 +20,10 @@ import {
 import { exchangeRates } from "./exchange-rates";
 import {
   type Amount,
+  multiply,
+  plausibleQuote,
   ratesFromRows,
+  statementUnitPrice,
   sumByCurrency,
   valuePosition,
 } from "./valuation";
@@ -40,8 +44,13 @@ export type Holdings = {
     averageCost: string | null;
     statementPrice: string | null;
     statementValue: string | null;
+    /** Set only when a quote at least as recent as the entry values the holding. */
     quotedAt: Date | null;
+    /** A market price was found but is too far from the statement price to trust. */
+    implausibleQuote: boolean;
     value: Amount | null;
+    /** Move since the previous close, in the quote's currency. */
+    dayChange: Amount | null;
   }[];
   /** `bucket` is the CPF sub-account; null outside CPF. */
   cash: (Amount & { bucket: CpfBucket | null })[];
@@ -183,6 +192,7 @@ export async function latestHoldings(
             quotePrice: securityQuote.price,
             quoteCurrency: securityQuote.currency,
             quotedAt: securityQuote.quotedAt,
+            previousClose: securityQuote.previousClose,
           })
           .from(position)
           .innerJoin(security, eq(security.id, position.securityId))
@@ -206,16 +216,49 @@ export async function latestHoldings(
     snapshots.map((snapshot) => {
       const rows: Holdings["positions"] = positions
         .filter((p) => p.snapshotId === snapshot.id)
-        .map(({ quotePrice, quoteCurrency, snapshotId: _, ...p }) => ({
-          ...p,
-          value: valuePosition({
-            ...p,
-            quote:
-              quotePrice && quoteCurrency
-                ? { price: quotePrice, currency: quoteCurrency }
-                : null,
-          }),
-        }));
+        .map(
+          ({
+            quotePrice,
+            quoteCurrency,
+            quotedAt,
+            previousClose,
+            snapshotId: _,
+            ...p
+          }) => {
+            // A quote older than the entry would undo a newer statement price.
+            const recent =
+              quotePrice &&
+              quoteCurrency &&
+              quotedAt &&
+              quotedAt.toISOString().slice(0, 10) >= snapshot.asOf;
+            const implausible =
+              !!recent &&
+              quoteCurrency === p.currency &&
+              !plausibleQuote(quotePrice, statementUnitPrice(p));
+            const current = recent && !implausible;
+            return {
+              ...p,
+              quotedAt: current ? quotedAt : null,
+              implausibleQuote: implausible,
+              value: valuePosition({
+                ...p,
+                quote: current
+                  ? { price: quotePrice, currency: quoteCurrency }
+                  : null,
+              }),
+              dayChange:
+                current && previousClose
+                  ? {
+                      amount: multiply(
+                        p.quantity,
+                        new Decimal(quotePrice).minus(previousClose).toFixed(),
+                      ),
+                      currency: quoteCurrency,
+                    }
+                  : null,
+            };
+          },
+        );
       const balances = cash
         .filter((c) => c.snapshotId === snapshot.id)
         .map(({ currency, amount, bucket }) => ({ currency, amount, bucket }));

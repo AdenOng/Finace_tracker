@@ -232,6 +232,27 @@ export function MarketAdmin() {
     },
     onError: error,
   });
+  const prices = useFlash(15_000);
+  const refreshPrices = api.admin.data.refreshPrices.useMutation({
+    onMutate: prices.clear,
+    onSuccess: async (r) => {
+      const problems = [
+        r.failed.length && `no price found for ${r.failed.join(", ")}`,
+        r.mismatched.length &&
+          `${r.mismatched.join(", ")} quoted in a different currency than recorded`,
+      ].filter(Boolean);
+      const updated = `Updated ${r.updated} of ${r.checked} price${r.checked === 1 ? "" : "s"}.`;
+      if (problems.length)
+        prices.error(`${updated} Skipped: ${problems.join("; ")}.`);
+      else prices.success(updated);
+      await utils.admin.data.market.invalidate();
+    },
+    onError: prices.error,
+  });
+  const setPriceQuotes = api.admin.data.setPriceQuotes.useMutation({
+    onSuccess: () => utils.admin.data.market.invalidate(),
+    onError: prices.error,
+  });
   const today = new Date().toISOString().slice(0, 10);
   const staleBefore = new Date(Date.now() - 4 * 86_400_000)
     .toISOString()
@@ -299,8 +320,29 @@ export function MarketAdmin() {
 
       <Section
         title="Security prices"
-        description="Finfolio has no live price feed yet. A holding without a quote is valued at the price on its latest statement."
+        description="Stocks, ETFs and crypto are priced hourly from Yahoo Finance. Other holdings keep their statement price."
+        actions={
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={refreshPrices.isPending}
+            disabled={!market.priceQuotes}
+            onClick={() => refreshPrices.mutate()}
+          >
+            <RefreshCw className="size-3.5" />
+            Refresh now
+          </Button>
+        }
       >
+        <Checkbox
+          className="mb-5"
+          label="Fetch market prices"
+          description="Only ticker symbols are sent to Yahoo, never quantities or account details."
+          checked={market.priceQuotes}
+          disabled={setPriceQuotes.isPending}
+          onChange={(e) => setPriceQuotes.mutate({ enabled: e.target.checked })}
+        />
+        <FlashNotice flash={prices.flash} className="mb-4" />
         <dl className="mb-5 grid grid-cols-2 gap-6 sm:grid-cols-4">
           {[
             ["Securities", integer.format(market.quotes.securities)],
@@ -318,7 +360,11 @@ export function MarketAdmin() {
           ].map(([label, value]) => (
             <div key={label}>
               <dt className="text-ink-2 text-[13px] font-semibold">{label}</dt>
-              <dd className="figures font-display text-xl font-semibold">
+              {/* "Newest quote" is relative to now, which moves between render and hydration. */}
+              <dd
+                className="figures font-display text-xl font-semibold"
+                suppressHydrationWarning
+              >
                 {value}
               </dd>
             </div>

@@ -1,0 +1,1 @@
+ALTER TABLE "instance_settings" ADD COLUMN "price_quotes" boolean DEFAULT true NOT NULL;

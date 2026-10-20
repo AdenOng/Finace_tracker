@@ -20,6 +20,7 @@ import { api, TRPCReactProvider } from "../src/trpc/react";
 import type { Database } from "../src/server/db";
 import * as schema from "../src/server/db/schema";
 import { exchangeRates } from "../src/server/modules/portfolio/exchange-rates";
+import { quotes, type Quote } from "../src/server/modules/portfolio/quotes";
 import {
   convertAmounts,
   ratesFromRows,
@@ -53,6 +54,10 @@ const { resolveAccessScope, resolveWorkspaceScope } =
 const { latestHoldings } =
   await import("../src/server/modules/portfolio/holdings");
 const { createTRPCRouter } = await import("../src/server/api/trpc");
+const { refreshQuotes } =
+  await import("../src/server/modules/portfolio/market-health");
+const { cachedInstanceSettings, setCachedInstanceSettings } =
+  await import("../src/server/lib/instance-settings-cache");
 
 function contextFor(id: string) {
   return {
@@ -808,7 +813,7 @@ describe("portfolio", () => {
         positions: [{ ...position, currency: "USD" }],
         cash: [],
       }),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    ).rejects.toThrow("is in SGD in this account's 2026-10-01 entry");
   });
 
   test("CPF and SRS are reported apart and can be left out of net worth", async () => {
@@ -2532,6 +2537,386 @@ describe("consolidated portfolio", () => {
       brokers: [],
       positions: [],
       cashBalances: [],
+    });
+  });
+});
+
+describe("market prices", () => {
+  const quotedAt = new Date("2026-10-19T08:00:00Z");
+  const quote = (price: string, currency = "SGD"): Quote => ({
+    price,
+    previousClose: "74",
+    currency,
+    quotedAt,
+    date: "2026-10-19",
+    source: "yahoo",
+  });
+  const holding = {
+    exchange: "XSES",
+    name: "",
+    assetClass: "stock" as const,
+    currency: "SGD",
+    averageCost: null,
+    value: null,
+  };
+
+  test("refreshes held prices into net worth, skipping funds and other-currency listings", async () => {
+    const request = spyOn(quotes, "quote").mockImplementation(async (symbol) =>
+      symbol === "D05.SI" ? quote("75") : quote("9", "USD"),
+    );
+    try {
+      const account = await alice.accounts.create(broker);
+      const entry = {
+        accountId: account.id,
+        asOf: "2026-10-19",
+        positions: [
+          { ...holding, symbol: "D05", quantity: "10", price: "70" },
+          { ...holding, symbol: "MIS", quantity: "1", price: "8" },
+          {
+            ...holding,
+            symbol: "FUND",
+            exchange: "",
+            assetClass: "fund" as const,
+            quantity: "1",
+            price: "5",
+          },
+        ],
+        cash: [],
+      };
+      await alice.portfolio.addSnapshot(entry);
+      expect((await alice.portfolio.netWorth()).prices).toMatchObject({
+        feed: true,
+        holdings: 3,
+        quoted: 0,
+        oldest: null,
+      });
+
+      // Someone else's refresh never looks up what Alice holds.
+      expect(await bob.portfolio.refreshPrices()).toMatchObject({ checked: 0 });
+      expect(request).not.toHaveBeenCalled();
+
+      expect(await alice.portfolio.refreshPrices()).toEqual({
+        enabled: true,
+        checked: 2,
+        updated: 1,
+        unsupported: ["FUND"],
+        failed: [],
+        mismatched: ["MIS XSES"],
+      });
+      const worth = await alice.portfolio.netWorth();
+      expect(worth.total).toBe("763");
+      expect(worth.prices).toMatchObject({
+        holdings: 3,
+        quoted: 1,
+        oldest: quotedAt,
+        change: { total: "10", unconverted: [] },
+      });
+      const [close] = await db.select().from(schema.priceHistory);
+      expect(close).toMatchObject({ date: "2026-10-19", close: "75.00000000" });
+
+      // A statement newer than the quote wins until the next refresh.
+      await alice.portfolio.addSnapshot({
+        ...entry,
+        asOf: "2026-10-20",
+        positions: [entry.positions[0]!],
+      });
+      expect((await alice.portfolio.netWorth()).total).toBe("700");
+
+      // The scheduled refresh covers every open account's latest entry, but not archived ones.
+      request.mockClear();
+      expect(await refreshQuotes(db as unknown as Database)).toMatchObject({
+        checked: 1,
+        updated: 1,
+      });
+      await alice.accounts.remove(account);
+      request.mockClear();
+      expect(await refreshQuotes(db as unknown as Database)).toMatchObject({
+        checked: 0,
+      });
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("coins recorded in SGD are priced in USD and converted", async () => {
+    const request = spyOn(quotes, "quote").mockResolvedValue(
+      quote("100000", "USD"),
+    );
+    ratesRequest.mockResolvedValue([
+      {
+        date: "2026-10-19",
+        base: "SGD",
+        quote: "USD",
+        rate: "0.8",
+        source: "frankfurter",
+      },
+    ]);
+    try {
+      const account = await alice.accounts.create(broker);
+      await alice.portfolio.addSnapshot({
+        accountId: account.id,
+        asOf: "2026-10-19",
+        positions: [
+          {
+            ...holding,
+            symbol: "BTC",
+            exchange: "",
+            assetClass: "crypto",
+            quantity: "0.01",
+            averageCost: "100000",
+            price: "120000",
+          },
+        ],
+        cash: [],
+      });
+      expect(await alice.portfolio.refreshPrices()).toMatchObject({
+        updated: 1,
+        mismatched: [],
+      });
+      expect(request).toHaveBeenCalledWith("BTC-USD", { force: undefined });
+      // 0.01 × US$100,000 = US$1,000 = S$1,250 at 0.8 USD per SGD.
+      expect((await alice.portfolio.netWorth()).total).toBe("1250");
+
+      // Viewed in USD the value needs no rate, but the S$1,000 cost still does.
+      await db
+        .insert(schema.userSettings)
+        .values({ userId: "alice", displayCurrency: "USD" });
+      const [coin] = (await alice.portfolio.consolidated()).positions;
+      expect(coin).toMatchObject({
+        total: "1000",
+        gain: { cost: "800", amount: "200" },
+      });
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("the move since the previous close is hidden when any quoted holding lacks one", async () => {
+    const request = spyOn(quotes, "quote").mockImplementation(async (symbol) =>
+      symbol === "D05.SI" ? quote("75") : { ...quote("8"), previousClose: null },
+    );
+    try {
+      const account = await alice.accounts.create(broker);
+      await alice.portfolio.addSnapshot({
+        accountId: account.id,
+        asOf: "2026-10-19",
+        positions: [
+          { ...holding, symbol: "D05", quantity: "10", price: "70" },
+          { ...holding, symbol: "U11", quantity: "10", price: "8" },
+        ],
+        cash: [],
+      });
+      await alice.portfolio.refreshPrices();
+      expect((await alice.portfolio.netWorth()).prices).toMatchObject({
+        quoted: 2,
+        change: null,
+      });
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("an older response never replaces a newer stored quote, and the feed can be turned off", async () => {
+    const request = spyOn(quotes, "quote").mockResolvedValue(quote("75"));
+    const settings = cachedInstanceSettings();
+    try {
+      const account = await alice.accounts.create(broker);
+      await alice.portfolio.addSnapshot({
+        accountId: account.id,
+        asOf: "2026-10-01",
+        positions: [{ ...holding, symbol: "D05", quantity: "1", price: "70" }],
+        cash: [],
+      });
+      await alice.portfolio.refreshPrices();
+      request.mockResolvedValue({
+        ...quote("60"),
+        quotedAt: new Date("2026-10-18T08:00:00Z"),
+      });
+      await alice.portfolio.refreshPrices();
+      expect((await alice.portfolio.netWorth()).total).toBe("75");
+
+      setCachedInstanceSettings({ ...settings, priceQuotes: false });
+      request.mockClear();
+      expect(await alice.portfolio.refreshPrices()).toMatchObject({
+        enabled: false,
+        checked: 0,
+      });
+      expect(request).not.toHaveBeenCalled();
+      expect((await alice.portfolio.netWorth()).prices?.feed).toBe(false);
+    } finally {
+      setCachedInstanceSettings(settings);
+      request.mockRestore();
+    }
+  });
+
+  test("a market price far from the statement price is not used", async () => {
+    // Bitcoin entered as a stock maps to Yahoo's "BTC", which is an ETF.
+    const request = spyOn(quotes, "quote").mockImplementation(async (symbol) =>
+      symbol === "BTC" ? quote("36.14", "USD") : quote("81700", "USD"),
+    );
+    try {
+      const account = await alice.accounts.create(broker);
+      const coin = {
+        ...holding,
+        symbol: "BTC",
+        exchange: "",
+        currency: "USD",
+        quantity: "0.5",
+        price: "80000",
+      };
+      const entry = await alice.portfolio.addSnapshot({
+        accountId: account.id,
+        asOf: "2026-10-01",
+        positions: [coin],
+        cash: [],
+      });
+      await alice.portfolio.refreshPrices();
+      let holdings = (await alice.accounts.get(account)).holdings!;
+      expect(holdings.totals).toEqual([{ currency: "USD", amount: "40000" }]);
+      expect((await alice.portfolio.netWorth()).prices).toMatchObject({
+        quoted: 0,
+        implausible: ["BTC in Broker"],
+      });
+
+      // Correcting the type drops the wrong quote; the next refresh asks for the coin.
+      const { version } = await alice.portfolio.snapshot({
+        accountId: account.id,
+        snapshotId: entry.id,
+      });
+      await alice.portfolio.updateSnapshot({
+        snapshotId: entry.id,
+        version,
+        entry: {
+          accountId: account.id,
+          asOf: "2026-10-01",
+          positions: [{ ...coin, assetClass: "crypto" }],
+          cash: [],
+        },
+      });
+      expect(await db.select().from(schema.securityQuote)).toEqual([]);
+      await alice.portfolio.refreshPrices();
+      expect(request).toHaveBeenLastCalledWith("BTC-USD", {
+        force: undefined,
+      });
+      holdings = (await alice.accounts.get(account)).holdings!;
+      expect(holdings.totals).toEqual([{ currency: "USD", amount: "40850" }]);
+    } finally {
+      request.mockRestore();
+    }
+  });
+});
+
+describe("correcting holdings", () => {
+  const d05: Parameters<
+    typeof alice.portfolio.addSnapshot
+  >[0]["positions"][number] = {
+    symbol: "D05",
+    exchange: "XSES",
+    name: "",
+    assetClass: "stock",
+    currency: "SGD",
+    quantity: "100",
+    averageCost: null,
+    price: "74",
+    value: null,
+  };
+  const listings = async (symbol: string) =>
+    (
+      await db
+        .select()
+        .from(schema.security)
+        .where(eq(schema.security.symbol, symbol))
+    )
+      .map((s) => `${s.currency} ${s.assetClass} ${s.name ?? ""}`.trim())
+      .sort();
+
+  test("a holding entered in the wrong currency can be corrected and does not block anyone", async () => {
+    const account = await alice.accounts.create(broker);
+    const typo = await alice.portfolio.addSnapshot({
+      accountId: account.id,
+      asOf: "2026-10-01",
+      positions: [{ ...d05, currency: "USD" }],
+      cash: [],
+    });
+    const { version } = await alice.portfolio.snapshot({
+      accountId: account.id,
+      snapshotId: typo.id,
+    });
+    await alice.portfolio.updateSnapshot({
+      snapshotId: typo.id,
+      version,
+      entry: {
+        accountId: account.id,
+        asOf: "2026-10-01",
+        positions: [d05],
+        cash: [],
+      },
+    });
+    expect((await alice.accounts.get(account)).holdings?.totals).toEqual([
+      { currency: "SGD", amount: "7400" },
+    ]);
+    const bobAccount = await bob.accounts.create(broker);
+    await bob.portfolio.addSnapshot({
+      accountId: bobAccount.id,
+      asOf: "2026-10-01",
+      positions: [d05],
+      cash: [],
+    });
+    expect(await listings("D05")).toEqual(["SGD stock", "USD stock"]);
+  });
+
+  test("a corrected type or name sticks, unless someone else holds the instrument", async () => {
+    const account = await alice.accounts.create(broker);
+    const entry = {
+      accountId: account.id,
+      asOf: "2026-10-01",
+      positions: [{ ...d05, assetClass: "fund" } as typeof d05],
+      cash: [],
+    };
+    const created = await alice.portfolio.addSnapshot(entry);
+    const edit = async (positions: (typeof entry)["positions"]) =>
+      alice.portfolio.updateSnapshot({
+        snapshotId: created.id,
+        version: (
+          await alice.portfolio.snapshot({
+            accountId: account.id,
+            snapshotId: created.id,
+          })
+        ).version,
+        entry: { ...entry, positions },
+      });
+    await edit([{ ...d05, name: "DBS Group" }]);
+    expect(await listings("D05")).toEqual(["SGD stock DBS Group"]);
+
+    const bobAccount = await bob.accounts.create(broker);
+    await bob.portfolio.addSnapshot({
+      ...entry,
+      accountId: bobAccount.id,
+      positions: [d05],
+    });
+    await edit([{ ...d05, assetClass: "etf", name: "Something else" }]);
+    expect(await listings("D05")).toEqual(["SGD stock DBS Group"]);
+  });
+
+  test("entries cannot be dated in the future", async () => {
+    const account = await alice.accounts.create(broker);
+    const future = new Date(Date.now() + 3 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    await expect(
+      alice.portfolio.addSnapshot({
+        accountId: account.id,
+        asOf: future,
+        positions: [],
+        cash: [{ currency: "SGD", amount: "1" }],
+      }),
+    ).rejects.toThrow("The entry date can't be in the future");
+    await alice.portfolio.addSnapshot({
+      accountId: account.id,
+      asOf: new Date().toISOString().slice(0, 10),
+      positions: [],
+      cash: [{ currency: "SGD", amount: "1" }],
     });
   });
 });

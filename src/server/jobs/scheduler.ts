@@ -6,7 +6,10 @@ import { loadInstanceSettings } from "~/server/lib/instance-settings";
 import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
 import { checkProvider } from "~/server/modules/llm/routing";
 import { purgeOldDocuments } from "~/server/modules/imports/retention";
-import { refreshExchangeRates } from "~/server/modules/portfolio/market-health";
+import {
+  refreshExchangeRates,
+  refreshQuotes,
+} from "~/server/modules/portfolio/market-health";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -59,6 +62,13 @@ const tasks: Task[] = [
     every: 12 * HOUR,
     firstAfter: 3 * MINUTE,
     run: () => refreshExchangeRates(db),
+  },
+  {
+    // Not a live feed: an hourly price keeps net worth close to the market without hammering it.
+    name: "security prices",
+    every: HOUR,
+    firstAfter: 4 * MINUTE,
+    run: () => refreshQuotes(db),
   },
 ];
 

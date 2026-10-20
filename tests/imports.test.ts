@@ -467,6 +467,160 @@ describe("statement imports", () => {
   });
 });
 
+test("trades link to the listing the account holds, never a same-symbol listing in another currency", async () => {
+  const account = await alice.accounts.create({
+    name: "Trade broker",
+    type: "brokerage",
+    institutionId: null,
+    currency: "SGD",
+    last4: "",
+    notes: "",
+  });
+  // An old typo and two same-currency listings the statement cannot tell apart.
+  await db.insert(schema.security).values([
+    { symbol: "D05", exchange: "XSES", currency: "USD", assetClass: "stock" },
+    { symbol: "AMB", exchange: "XSES", currency: "SGD", assetClass: "stock" },
+    { symbol: "AMB", exchange: "", currency: "SGD", assetClass: "stock" },
+  ]);
+  const trade = (symbol: string) => ({
+    type: "buy" as const,
+    tradeDate: "2026-09-15",
+    settleDate: null,
+    symbol,
+    quantity: 10,
+    price: 39,
+    amount: -390,
+    fees: null,
+    currency: "SGD",
+    description: `Bought ${symbol}`,
+  });
+  const jobId = await stagedJob(
+    { id: account.id, type: "brokerage" },
+    {
+      ...base,
+      documentType: "brokerage_statement",
+      positions: [
+        {
+          symbol: "D05",
+          exchange: "XSES",
+          name: "DBS Group Holdings",
+          assetClass: "stock",
+          quantity: 10,
+          averageCost: 39,
+          marketPrice: 39.2,
+          marketValue: 392,
+          currency: "SGD",
+        },
+      ],
+      investmentTransactions: [trade("D05"), trade("AMB")],
+    },
+    "trade-listings",
+  );
+  await alice.imports.commit({ jobId, asOf: "2026-09-30" });
+  const linked = await db
+    .select({
+      description: schema.investmentTransaction.description,
+      currency: schema.security.currency,
+    })
+    .from(schema.investmentTransaction)
+    .leftJoin(
+      schema.security,
+      eq(schema.security.id, schema.investmentTransaction.securityId),
+    )
+    .where(eq(schema.investmentTransaction.accountId, account.id))
+    .orderBy(schema.investmentTransaction.description);
+  expect(linked).toEqual([
+    { description: "Bought AMB", currency: null },
+    { description: "Bought D05", currency: "SGD" },
+  ]);
+});
+
+test("a back-dated statement links trades to its own listings, not a newer entry's", async () => {
+  const portfolio = portfolioRouter.createCaller(contextFor("alice"));
+  const account = await alice.accounts.create({
+    name: "Back-dated broker",
+    type: "brokerage",
+    institutionId: null,
+    currency: "SGD",
+    last4: "",
+    notes: "",
+  });
+  const listed = (symbol: string, exchange: string) => ({
+    symbol,
+    exchange,
+    name: "",
+    assetClass: "stock" as const,
+    currency: "SGD",
+    quantity: "10",
+    averageCost: null,
+    price: "5",
+    value: null,
+  });
+  // July and October were entered by hand; October left the exchange blank.
+  for (const [asOf, exchange] of [
+    ["2026-07-31", "XSES"],
+    ["2026-10-15", ""],
+  ] as const)
+    await portfolio.addSnapshot({
+      accountId: account.id,
+      asOf,
+      positions: [listed("C38U", exchange), listed("O39", exchange)],
+      cash: [],
+    });
+  const trade = (symbol: string) => ({
+    type: "sell" as const,
+    tradeDate: "2026-08-14",
+    settleDate: null,
+    symbol,
+    quantity: -10,
+    price: 5,
+    amount: 50,
+    fees: null,
+    currency: "SGD",
+    description: `Sold ${symbol}`,
+  });
+  // August still holds C38U on SGX; O39 was sold, so only July says where it traded.
+  const jobId = await stagedJob(
+    { id: account.id, type: "brokerage" },
+    {
+      ...base,
+      documentType: "brokerage_statement",
+      positions: [
+        {
+          symbol: "C38U",
+          exchange: "XSES",
+          name: null,
+          assetClass: "stock",
+          quantity: 10,
+          averageCost: null,
+          marketPrice: 5,
+          marketValue: 50,
+          currency: "SGD",
+        },
+      ],
+      investmentTransactions: [trade("C38U"), trade("O39")],
+    },
+    "back-dated-trades",
+  );
+  await alice.imports.commit({ jobId, asOf: "2026-08-31" });
+  const linked = await db
+    .select({
+      description: schema.investmentTransaction.description,
+      exchange: schema.security.exchange,
+    })
+    .from(schema.investmentTransaction)
+    .leftJoin(
+      schema.security,
+      eq(schema.security.id, schema.investmentTransaction.securityId),
+    )
+    .where(eq(schema.investmentTransaction.accountId, account.id))
+    .orderBy(schema.investmentTransaction.description);
+  expect(linked).toEqual([
+    { description: "Sold C38U", exchange: "XSES" },
+    { description: "Sold O39", exchange: "XSES" },
+  ]);
+});
+
 async function removableBroker(name: string) {
   const account = await alice.accounts.create({
     name,

@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -18,8 +18,11 @@ import {
 import {
   accountSnapshot,
   cashBalance,
+  investmentTransaction,
   position,
+  priceHistory,
   security,
+  securityQuote,
 } from "~/server/db/schema";
 import type { AccessScope } from "~/server/lib/access";
 import type { FinanceDatabase } from "~/server/modules/spending/guards";
@@ -42,10 +45,20 @@ export const positionInput = z.object({
   value: moneyInput.nullable().optional(),
 });
 
+/**
+ * The newest date an entry may carry. A day ahead of UTC covers every time zone, so "today" is
+ * always accepted while a mistyped year (which would stay the current entry for good) is not.
+ */
+const latestEntryDate = () =>
+  new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
 export const snapshotInput = z
   .object({
     accountId: z.uuid(),
-    asOf: isoDateInput,
+    asOf: isoDateInput.refine(
+      (date) => date <= latestEntryDate(),
+      "The entry date can't be in the future",
+    ),
     positions: z
       .array(positionInput)
       .max(500)
@@ -81,6 +94,121 @@ export const snapshotInput = z
 export type SnapshotInput = z.infer<typeof snapshotInput>;
 
 /**
+ * A new entry that lists a holding in another currency than the account's current entry is almost
+ * always a typo, so it is refused with a pointer to the entry to fix. Edits are not checked: a
+ * typo copied into several entries is corrected one entry at a time.
+ */
+async function rejectCurrencyChanges(
+  tx: FinanceDatabase,
+  accountId: string,
+  input: SnapshotInput,
+  source: "manual" | "statement" | "api",
+) {
+  const [current] = await tx
+    .select({ id: accountSnapshot.id, asOf: accountSnapshot.asOf })
+    .from(accountSnapshot)
+    .where(
+      and(
+        eq(accountSnapshot.accountId, accountId),
+        // Re-saving the same date replaces that entry, so it is not the one to compare with.
+        or(
+          ne(accountSnapshot.asOf, input.asOf),
+          ne(accountSnapshot.source, source),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(accountSnapshot.asOf),
+      desc(accountSnapshot.createdAt),
+      desc(accountSnapshot.id),
+    )
+    .limit(1);
+  if (!current) return;
+  const held = await tx
+    .select({
+      symbol: security.symbol,
+      exchange: security.exchange,
+      currency: security.currency,
+    })
+    .from(position)
+    .innerJoin(security, eq(security.id, position.securityId))
+    .where(eq(position.snapshotId, current.id));
+  for (const p of input.positions) {
+    const other = held.find(
+      (h) =>
+        h.symbol === p.symbol &&
+        h.exchange === p.exchange &&
+        h.currency !== p.currency,
+    );
+    if (other)
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `${p.symbol}${p.exchange ? ` on ${p.exchange}` : ""} is in ${other.currency} in this account's ${current.asOf} entry, not ${p.currency}. Use the same currency, or edit that entry first if it is wrong.`,
+      });
+  }
+}
+
+type Listing = {
+  id: string;
+  name: string | null;
+  assetClass: (typeof assetClasses)[number];
+};
+
+/**
+ * Applies someone's corrected asset class or name to instruments only they hold, so fixing a typo
+ * in an entry actually sticks. Instruments shared with other people keep their catalogue labels.
+ * A new asset class can change which market symbol is used, so its old quote is dropped.
+ */
+async function correctListings(
+  tx: FinanceDatabase,
+  scope: AccessScope,
+  changes: Listing[],
+  known: { id: string; assetClass: string }[],
+) {
+  if (changes.length === 0) return;
+  const ids = changes.map((c) => c.id);
+  const [heldByOthers, tradedByOthers] = await Promise.all([
+    tx
+      .select({ id: position.securityId })
+      .from(position)
+      .innerJoin(accountSnapshot, eq(accountSnapshot.id, position.snapshotId))
+      .where(
+        and(
+          inArray(position.securityId, ids),
+          ne(accountSnapshot.ownerId, scope.userId),
+        ),
+      ),
+    tx
+      .select({ id: investmentTransaction.securityId })
+      .from(investmentTransaction)
+      .where(
+        and(
+          inArray(investmentTransaction.securityId, ids),
+          ne(investmentTransaction.ownerId, scope.userId),
+        ),
+      ),
+  ]);
+  const shared = new Set([...heldByOthers, ...tradedByOthers].map((r) => r.id));
+  for (const change of changes) {
+    if (shared.has(change.id)) continue;
+    await tx
+      .update(security)
+      .set({ name: change.name, assetClass: change.assetClass })
+      .where(eq(security.id, change.id));
+    if (
+      known.find((k) => k.id === change.id)?.assetClass !== change.assetClass
+    ) {
+      await tx
+        .delete(securityQuote)
+        .where(eq(securityQuote.securityId, change.id));
+      await tx
+        .delete(priceHistory)
+        .where(eq(priceHistory.securityId, change.id));
+    }
+  }
+}
+
+/**
  * Records what an account held on a date: positions (investment accounts) and cash balances.
  * Saving the same date from the same source again replaces the earlier entry. The caller locks
  * the account and checks it is writable first.
@@ -95,6 +223,8 @@ export async function writeSnapshot(
     documentId?: string | null;
     editId?: string;
     createOnly?: boolean;
+    /** Typed by the person, so their asset class and name correct the catalogue. */
+    manual?: boolean;
   },
 ) {
   if (input.positions.length > 0 && !holdsSecurities(account.type)) {
@@ -111,8 +241,11 @@ export async function writeSnapshot(
   }
 
   const securityIds = new Map<string, string>();
+  if (input.positions.length > 0 && !options.editId) {
+    await rejectCurrencyChanges(tx, account.id, input, options.source);
+  }
   if (input.positions.length > 0) {
-    // The instrument catalogue is shared: add unknown ones, never rewrite existing ones.
+    // The instrument catalogue is shared: add unknown ones; only manual corrections relabel them.
     await tx
       .insert(security)
       .values(
@@ -125,7 +258,7 @@ export async function writeSnapshot(
         })),
       )
       .onConflictDoNothing({
-        target: [security.symbol, security.exchange],
+        target: [security.symbol, security.exchange, security.currency],
       });
     const known = await tx
       .select({
@@ -133,6 +266,8 @@ export async function writeSnapshot(
         symbol: security.symbol,
         exchange: security.exchange,
         currency: security.currency,
+        name: security.name,
+        assetClass: security.assetClass,
       })
       .from(security)
       .where(
@@ -141,22 +276,32 @@ export async function writeSnapshot(
             and(
               eq(security.symbol, p.symbol),
               eq(security.exchange, p.exchange),
+              eq(security.currency, p.currency),
             ),
           ),
         ),
       );
+    const relabel: Listing[] = [];
     for (const p of input.positions) {
       const match = known.find(
-        (k) => k.symbol === p.symbol && k.exchange === p.exchange,
+        (k) =>
+          k.symbol === p.symbol &&
+          k.exchange === p.exchange &&
+          k.currency === p.currency,
       )!;
-      if (match.currency !== p.currency) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `${p.symbol}${p.exchange ? ` on ${p.exchange}` : ""} is priced in ${match.currency}, not ${p.currency}`,
-        });
-      }
       securityIds.set(`${p.symbol}\u0000${p.exchange}`, match.id);
+      if (
+        options.manual &&
+        (match.assetClass !== p.assetClass ||
+          (p.name !== null && p.name !== match.name))
+      )
+        relabel.push({
+          id: match.id,
+          name: p.name ?? match.name,
+          assetClass: p.assetClass,
+        });
     }
+    await correctListings(tx, scope, relabel, known);
   }
 
   const replaced = await tx

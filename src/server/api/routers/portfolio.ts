@@ -18,6 +18,7 @@ import {
   writableBy,
   type AccessScope,
 } from "~/server/lib/access";
+import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
 import { preset } from "~/server/lib/preset";
 import {
   type assetClasses,
@@ -47,6 +48,7 @@ import {
   convertAmounts,
 } from "~/server/modules/portfolio/valuation";
 import { consolidateHoldings } from "~/server/modules/portfolio/consolidated";
+import { refreshQuotes } from "~/server/modules/portfolio/market-health";
 
 const entryIdentity = z.object({
   accountId: z.uuid(),
@@ -130,7 +132,11 @@ export const portfolioRouter = createTRPCRouter({
       const { rates, asOf: fxAsOf } = await ratesInto(
         ctx.db,
         currency,
-        [...holdings.values()].flatMap((h) => h.totals.map((t) => t.currency)),
+        // Costs stay in the listing's currency even when a quote values it in another.
+        [...holdings.values()].flatMap((h) => [
+          ...h.totals.map((t) => t.currency),
+          ...h.positions.map((p) => p.currency),
+        ]),
       );
       return {
         ...consolidateHoldings(
@@ -229,6 +235,7 @@ export const portfolioRouter = createTRPCRouter({
         return writeSnapshot(tx, ctx.scope, account, input, {
           source: "manual",
           createOnly: true,
+          manual: true,
         });
       }),
     ),
@@ -256,6 +263,7 @@ export const portfolioRouter = createTRPCRouter({
           source: current.source,
           documentId: current.documentId,
           editId: current.id,
+          manual: true,
         });
       }),
     ),
@@ -406,17 +414,47 @@ export const portfolioRouter = createTRPCRouter({
         .map((h) => h.asOf)
         .sort()
         .at(-1);
+      const countedEntries = [...holdings].filter(
+        ([id]) => countCpfSrs || accountGroupOf(typeOf.get(id)!) !== "cpf_srs",
+      );
+      const countedHoldings = countedEntries.map(([, h]) => h);
+      const nameOf = new Map(accounts.map((a) => [a.id, a.name]));
+      const held = countedHoldings.flatMap((h) => h.positions);
+      const quoted = held.filter((p) => p.quotedAt);
+      const quoteTimes = quoted.map((p) => p.quotedAt!.getTime());
       return {
         currency: target,
         fxAsOf,
         ...convertAmounts(counted, target, rates),
         asOf: latest ?? null,
-        unpriced: [...holdings]
-          .filter(
-            ([id]) =>
-              countCpfSrs || accountGroupOf(typeOf.get(id)!) !== "cpf_srs",
-          )
-          .reduce((n, [, h]) => n + h.unpriced, 0),
+        unpriced: countedHoldings.reduce((n, h) => n + h.unpriced, 0),
+        /** How many holdings are valued at market prices rather than their statement price. */
+        prices: held.length
+          ? {
+              feed: cachedInstanceSettings().priceQuotes,
+              holdings: held.length,
+              quoted: quoted.length,
+              /** Holdings whose market price is too far from the statement to be the same thing. */
+              implausible: countedEntries
+                .flatMap(([id, h]) =>
+                  h.positions
+                    .filter((p) => p.implausibleQuote)
+                    .map((p) => `${p.symbol} in ${nameOf.get(id)}`),
+                )
+                .sort(),
+              oldest: quoteTimes.length
+                ? new Date(Math.min(...quoteTimes))
+                : null,
+              /** Null unless every quoted holding has a previous close to compare with. */
+              change: quoted.every((p) => p.dayChange)
+                ? convertAmounts(
+                    quoted.map((p) => p.dayChange!),
+                    target,
+                    rates,
+                  )
+                : null,
+            }
+          : null,
         countCpfSrs,
         cpfSrsEnabled,
         cpfSrs: convertAmounts(cpfSrs, target, rates),
@@ -450,6 +488,43 @@ export const portfolioRouter = createTRPCRouter({
       };
     }),
 
+  /** Fetches market prices for everything the visible accounts currently hold. */
+  refreshPrices: protectedProcedure
+    .input(z.object({ workspaceId: z.uuid().optional() }).optional())
+    .mutation(async ({ ctx, input }) => {
+      const scope = await resolveWorkspaceScope(
+        ctx.db,
+        ctx.scope,
+        input?.workspaceId,
+      );
+      const accounts = await ctx.db
+        .select({ id: financialAccount.id })
+        .from(financialAccount)
+        .where(
+          and(
+            readableAccount(
+              scope,
+              financialAccount.ownerId,
+              financialAccount.id,
+            ),
+            isNull(financialAccount.archivedAt),
+          ),
+        );
+      const holdings = await latestHoldings(
+        ctx.db,
+        scope,
+        accounts.map((a) => a.id),
+      );
+      const securityIds = [
+        ...new Set(
+          [...holdings.values()].flatMap((h) =>
+            h.positions.map((p) => p.securityId),
+          ),
+        ),
+      ];
+      return refreshQuotes(ctx.db, { securityIds });
+    }),
+
   /**
    * Records what an account held on a date: positions (investment accounts) and cash balances.
    * Re-entering the same date replaces the earlier manual entry.
@@ -466,6 +541,7 @@ export const portfolioRouter = createTRPCRouter({
         );
         return writeSnapshot(tx, ctx.scope, account, input, {
           source: "manual",
+          manual: true,
         });
       }),
     ),

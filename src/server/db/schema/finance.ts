@@ -90,7 +90,9 @@ export const security = pgTable(
       .notNull(),
     ...timestamps(),
   },
-  (t) => [unique("security_symbol_exchange_uq").on(t.symbol, t.exchange)],
+  // Currency is part of the listing, so a holding typed in the wrong currency becomes its own row
+  // instead of locking the real one for everyone.
+  (t) => [unique("security_listing_uq").on(t.symbol, t.exchange, t.currency)],
 );
 
 export const recordSource = pgEnum("record_source", [

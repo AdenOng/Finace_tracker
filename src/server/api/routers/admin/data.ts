@@ -25,6 +25,7 @@ import {
 import {
   marketHealth,
   refreshExchangeRates,
+  refreshQuotes,
 } from "~/server/modules/portfolio/market-health";
 
 /** A pack chosen in the console: a built-in id, or the JSON of a custom pack file. */
@@ -103,6 +104,31 @@ export const adminDataRouter = createTRPCRouter({
     });
     return result;
   }),
+
+  refreshPrices: adminProcedure.mutation(async ({ ctx }) => {
+    const result = await refreshQuotes(ctx.db, { force: true });
+    await recordAudit(ctx.db, {
+      actorId: ctx.session.user.id,
+      action: "settings.prices_refreshed",
+      targetType: "settings",
+      targetLabel: "Security prices",
+      details: { checked: result.checked, updated: result.updated },
+    });
+    return result;
+  }),
+
+  setPriceQuotes: adminProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await updateInstanceSettings(ctx.db, { priceQuotes: input.enabled });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "settings.price_quotes_updated",
+        targetType: "settings",
+        targetLabel: "Security prices",
+        details: { enabled: input.enabled },
+      });
+    }),
 
   storage: adminProcedure.query(async ({ ctx }) => {
     const days = cachedInstanceSettings().documentRetentionDays;

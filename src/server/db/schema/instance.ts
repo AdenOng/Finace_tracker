@@ -44,6 +44,8 @@ export const instanceSettings = pgTable(
     providerHealthChecks: boolean("provider_health_checks")
       .default(true)
       .notNull(),
+    /** Fetch market prices for held securities; sends ticker symbols (nothing else) to Yahoo. */
+    priceQuotes: boolean("price_quotes").default(true).notNull(),
     /** Overrides the preset pack's CPF & SRS feature; null follows the pack. */
     cpfSrsEnabled: boolean("cpf_srs_enabled"),
     updatedAt: timestamp("updated_at", { withTimezone: true })

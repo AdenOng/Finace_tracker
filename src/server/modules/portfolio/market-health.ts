@@ -6,6 +6,8 @@ import {
   count,
   desc,
   eq,
+  exists,
+  inArray,
   isNull,
   max,
   min,
@@ -15,15 +17,20 @@ import {
 
 import type { Database } from "~/server/db";
 import {
+  accountSnapshot,
   financialAccount,
   fxRate,
+  position,
   priceHistory,
   security,
   securityQuote,
   userSettings,
   workspace,
 } from "~/server/db/schema";
+import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
 import { exchangeRates } from "./exchange-rates";
+import { hasSnapshotEntries } from "./holdings";
+import { quotes, yahooSymbol } from "./quotes";
 
 /** Currencies people view totals in; rates are only ever fetched for these. */
 async function displayCurrencies(db: Pick<Database, "selectDistinct">) {
@@ -60,6 +67,129 @@ export async function refreshExchangeRates(
   return { currencies: targets, stored, failed };
 }
 
+const listingColumns = {
+  id: security.id,
+  symbol: security.symbol,
+  exchange: security.exchange,
+  assetClass: security.assetClass,
+  currency: security.currency,
+  providerSymbols: security.providerSymbols,
+};
+
+/** Securities in the latest entry of each open account: the ones valuations actually use. */
+function heldSecurities(db: Database) {
+  const latest = db
+    .selectDistinctOn([accountSnapshot.accountId], { id: accountSnapshot.id })
+    .from(accountSnapshot)
+    .innerJoin(
+      financialAccount,
+      eq(financialAccount.id, accountSnapshot.accountId),
+    )
+    .where(and(isNull(financialAccount.archivedAt), hasSnapshotEntries(db)))
+    .orderBy(
+      accountSnapshot.accountId,
+      desc(accountSnapshot.asOf),
+      desc(accountSnapshot.createdAt),
+      desc(accountSnapshot.id),
+    )
+    .as("latest");
+  return db
+    .selectDistinct(listingColumns)
+    .from(position)
+    .innerJoin(latest, eq(latest.id, position.snapshotId))
+    .innerJoin(security, eq(security.id, position.securityId));
+}
+
+/**
+ * Fetches the latest price of held securities (or just `securityIds`) and stores it with the day's
+ * close. A share quote is only kept when it is in the currency the holding was recorded in, so a
+ * ticker that resolves to a different listing cannot silently revalue a position.
+ */
+export async function refreshQuotes(
+  db: Database,
+  options: { securityIds?: string[]; force?: boolean } = {},
+) {
+  const result = {
+    enabled: cachedInstanceSettings().priceQuotes,
+    checked: 0,
+    updated: 0,
+    unsupported: [] as string[],
+    failed: [] as string[],
+    mismatched: [] as string[],
+  };
+  if (!result.enabled) return result;
+  const listings = options.securityIds
+    ? options.securityIds.length
+      ? await db
+          .select(listingColumns)
+          .from(security)
+          .where(inArray(security.id, options.securityIds))
+      : []
+    : await heldSecurities(db);
+  const queue = [...listings];
+  const worker = async () => {
+    for (let l = queue.shift(); l; l = queue.shift()) {
+      const label = l.exchange ? `${l.symbol} ${l.exchange}` : l.symbol;
+      const symbol = yahooSymbol(l);
+      if (!symbol) {
+        result.unsupported.push(label);
+        continue;
+      }
+      result.checked++;
+      const quote = await quotes.quote(symbol, { force: options.force });
+      if (!quote) {
+        result.failed.push(label);
+        continue;
+      }
+      if (quote.currency !== l.currency && l.assetClass !== "crypto") {
+        result.mismatched.push(label);
+        continue;
+      }
+      await db
+        .insert(securityQuote)
+        .values({
+          securityId: l.id,
+          price: quote.price,
+          previousClose: quote.previousClose,
+          currency: quote.currency,
+          source: quote.source,
+          quotedAt: quote.quotedAt,
+        })
+        .onConflictDoUpdate({
+          target: securityQuote.securityId,
+          set: {
+            price: sql`excluded.price`,
+            previousClose: sql`excluded.previous_close`,
+            currency: sql`excluded.currency`,
+            source: sql`excluded.source`,
+            quotedAt: sql`excluded.quoted_at`,
+          },
+          // A late or cached response never replaces a newer quote.
+          setWhere: sql`${securityQuote.quotedAt} <= excluded.quoted_at`,
+        });
+      // Refreshed during the session, so the last refresh of the day leaves the close.
+      await db
+        .insert(priceHistory)
+        .values({
+          securityId: l.id,
+          date: quote.date,
+          close: quote.price,
+          source: quote.source,
+        })
+        .onConflictDoUpdate({
+          target: [priceHistory.securityId, priceHistory.date],
+          set: { close: sql`excluded.close`, source: sql`excluded.source` },
+        });
+      result.updated++;
+    }
+  };
+  // A few requests at a time keeps a large catalogue quick without hammering the provider.
+  await Promise.all(Array.from({ length: 4 }, worker));
+  for (const list of [result.unsupported, result.failed, result.mismatched])
+    list.sort();
+  return result;
+}
+
 /**
  * How fresh the data behind valuations is: exchange rates per display currency, and which
  * securities have no quote (they fall back to the price on their last statement).
@@ -83,6 +213,13 @@ export async function marketHealth(db: Database) {
     .selectDistinct({ code: financialAccount.currency })
     .from(financialAccount)
     .where(isNull(financialAccount.archivedAt));
+  // Rows left behind by corrected typos are no one's holding; leave them out.
+  const held = exists(
+    db
+      .select({ id: position.id })
+      .from(position)
+      .where(eq(position.securityId, security.id)),
+  );
   const [quotes] = await db
     .select({
       securities: count(security.id),
@@ -91,7 +228,8 @@ export async function marketHealth(db: Database) {
       oldest: min(securityQuote.quotedAt),
     })
     .from(security)
-    .leftJoin(securityQuote, eq(securityQuote.securityId, security.id));
+    .leftJoin(securityQuote, eq(securityQuote.securityId, security.id))
+    .where(held);
   const unquoted = await db
     .select({
       id: security.id,
@@ -104,7 +242,7 @@ export async function marketHealth(db: Database) {
     })
     .from(security)
     .leftJoin(securityQuote, eq(securityQuote.securityId, security.id))
-    .where(and(isNull(securityQuote.securityId)))
+    .where(and(isNull(securityQuote.securityId), held))
     .orderBy(asc(security.symbol))
     .limit(50);
   const [history] = await db
@@ -116,6 +254,7 @@ export async function marketHealth(db: Database) {
     .orderBy(desc(fxRate.date))
     .limit(1);
   return {
+    priceQuotes: cachedInstanceSettings().priceQuotes,
     fx,
     fxSource: latestFx?.source ?? null,
     accountCurrencies: accountCurrencies.map((r) => r.code).sort(),

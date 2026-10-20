@@ -39,7 +39,8 @@ using the same database and encrypted provider credentials. The Compose project 
 | Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion | Done |
 | Import pipeline: upload → background job → review & dedupe → commit | Done |
 | Daily FX conversion, combined net worth and investment account totals | Done |
-| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), live prices, net-worth history | Later |
+| Hourly market prices for stocks, ETFs and crypto | Done |
+| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), net-worth history | Later |
 
 The full database schema for the later phases already exists (`src/server/db/schema`).
 
@@ -106,6 +107,23 @@ The delete button opens a review. Deleting an entry removes only its holdings an
 files and spending/trade records remain. If it was current, the latest remaining valid dated
 entry becomes current. Editing and deletion reject changes based on stale data. Entry management
 is available to the account owner in Personal view; archived accounts must be restored to edit.
+
+Fixing mistakes:
+
+- **Wrong symbol, exchange, currency or quantity:** edit the entry and change it. A holding is
+  identified by symbol, exchange and currency, so a typo becomes its own listing and never
+  blocks the correct one, for you or anyone else. A new entry that lists a holding in a different
+  currency than the account's current entry is refused with the date of the entry to check.
+- **Wrong type or name:** edit the entry. The correction applies to every one of your entries for
+  that holding; if someone else on the instance holds it too, the shared label is left alone.
+  Changing the type drops its market quote, since the type decides which market symbol is used.
+- **Wrong date:** entries cannot be dated in the future, so a mistyped year cannot become the
+  current entry for good. Edit the date, or delete the entry.
+- **Sold everything:** record a new entry with a cash balance (0 if empty). Deleting the latest
+  entry instead brings back the one before it.
+- **A market price that looks wrong:** a quote more than ten times away from the statement price
+  is ignored and the overview names the holding, which usually means its symbol, exchange or
+  type is off (Bitcoin entered as a stock picks up the "BTC" ETF).
 
 ### Removing individual imported rows
 
@@ -224,9 +242,10 @@ the `./backups` mount and the backup service its new loop.
 ### Housekeeping
 
 The app runs a few timers in-process: provider health checks every 6 hours (switch off on
-**Admin → AI providers**), exchange-rate refresh every 12 hours, and a daily clean-up of uploaded
-statement files when a retention period is set on **Admin → Data → Storage**. Only files whose
-imports are finished are deleted; the transactions they produced stay.
+**Admin → AI providers**), exchange-rate refresh every 12 hours, security prices every hour
+(switch off on **Admin → Data → Market data**), and a daily clean-up of uploaded statement files
+when a retention period is set on **Admin → Data → Storage**. Only files whose imports are
+finished are deleted; the transactions they produced stay.
 
 ## Architecture
 
@@ -291,6 +310,17 @@ src/
   opens the display-currency setting, which updates all portfolio totals together. The overview
   shows the rate date. Missing rates or prices explicitly mark totals as partial and hide an
   incomplete investment allocation. No API key or additional configuration is required.
+- **Market prices between statements.** Stocks, ETFs and crypto in each account's latest entry
+  are priced hourly from Yahoo Finance's public chart endpoint, so net worth follows the market
+  instead of waiting for the next statement. **Refresh prices** on the overview fetches them on
+  demand (cached for ten minutes). The overview shows how many holdings use market prices, when
+  they were quoted and the move since the previous close. A quote is only used when it is at
+  least as recent as the entry, so a newer statement always wins over a stale price. Share quotes
+  must be in the currency the holding was recorded in, which stops a ticker that maps to another
+  listing from revaluing it; coins are priced in USD and converted. Funds, bonds, options and
+  unrecognised exchanges keep their statement price unless an admin sets a Yahoo symbol in
+  `security.provider_symbols`. Only ticker symbols are sent; switch the feed off on
+  **Admin → Data → Market data**. No API key is required.
 - **CPF and SRS sit apart from investments.** CPF balances are entered per sub-account
   (Ordinary, Special, MediSave, Retirement); SRS accounts hold cash and securities like a
   brokerage. The overview shows them in their own sheet with an interest estimate and this

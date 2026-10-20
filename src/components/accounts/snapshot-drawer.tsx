@@ -255,6 +255,7 @@ export function SnapshotDrawer({
             id="snapshot-date"
             type="date"
             required
+            max={todayIso()}
             value={asOf}
             onChange={(e) => setAsOf(e.target.value)}
             className="w-48"

@@ -12,6 +12,7 @@ export const DEFAULT_INSTANCE_SETTINGS: InstanceSettings = {
   documentRetentionDays: null,
   fallbackProviderId: null,
   providerHealthChecks: true,
+  priceQuotes: true,
   cpfSrsEnabled: null,
   updatedAt: new Date(0),
 };

@@ -68,6 +68,8 @@ const actionLabels: Record<string, string> = {
   "settings.retention_updated": "Changed file retention",
   "settings.files_purged": "Cleaned up statement files",
   "settings.rates_refreshed": "Refreshed exchange rates",
+  "settings.prices_refreshed": "Refreshed security prices",
+  "settings.price_quotes_updated": "Changed security prices",
   "settings.cpf_srs_updated": "Changed CPF & SRS",
   "settings.health_checks_updated": "Changed provider checks",
   "settings.test_email_sent": "Sent a test email",

@@ -10,11 +10,17 @@ import { AccountRow } from "~/components/overview/account-row";
 import { HeroFigure } from "~/components/overview/hero-figure";
 import { CpfSrsSheet } from "~/components/overview/cpf-srs-sheet";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
+import { PriceRefresh } from "~/components/overview/price-refresh";
 import { SheetHeader } from "~/components/overview/sheet-header";
 import { accountGroupOf } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { currentMonth, shiftMonth } from "~/lib/dates";
-import { formatDate, formatMoney, formatMonth } from "~/lib/format";
+import {
+  formatDate,
+  formatMoney,
+  formatMonth,
+  formatRelative,
+} from "~/lib/format";
 import { isAdmin, requireEnrolledSession } from "~/server/auth";
 import { db } from "~/server/db";
 import { llmProvider } from "~/server/db/schema";
@@ -161,6 +167,12 @@ export default async function OverviewPage() {
     { done: banking.length > 0, key: "bank" },
   ];
   const doneCount = checklist.filter((c) => c.done).length;
+  // Only shown when every move converts; a partial figure would misstate the day.
+  const change = worth.prices?.change;
+  const priceChange =
+    change?.total && change.unconverted.length === 0
+      ? new Decimal(change.total)
+      : null;
   const share = (part: Decimal) =>
     worth.total && !new Decimal(worth.total).isZero()
       ? `${part.div(worth.total).times(100).toFixed(0)}%`
@@ -200,6 +212,36 @@ export default async function OverviewPage() {
             ) : (
               <p>Latest balances, up to {formatDate(worth.asOf!)}.</p>
             )}
+            {recorded && worth.prices ? (
+              <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>
+                  {worth.prices.oldest
+                    ? `${worth.prices.quoted === worth.prices.holdings ? "All" : `${worth.prices.quoted} of`} ${worth.prices.holdings} holding${worth.prices.holdings === 1 ? "" : "s"} at market prices, as of ${formatRelative(worth.prices.oldest)}.`
+                    : "Holdings are valued at their statement prices."}
+                </span>
+                {priceChange && !priceChange.isZero() ? (
+                  <span
+                    className={cn(
+                      "figures font-semibold",
+                      priceChange.isPositive() ? "text-gain" : "text-loss",
+                    )}
+                  >
+                    {formatMoney(priceChange.toFixed(2), currency, {
+                      signed: true,
+                    })}{" "}
+                    since the previous close
+                  </span>
+                ) : null}
+                {worth.prices.feed ? <PriceRefresh /> : null}
+              </p>
+            ) : null}
+            {recorded && worth.prices?.implausible.length ? (
+              <p className="text-warn">
+                The market price of {worth.prices.implausible.join(", ")} is far
+                from its statement price, so the statement price is used. Check
+                the symbol, exchange and type in that account&apos;s entry.
+              </p>
+            ) : null}
             {recorded && !forLaterTotal.isZero() ? (
               <p>
                 {worth.countCpfSrs
