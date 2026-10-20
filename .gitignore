@@ -75,6 +75,9 @@ exports/
 .tmp/
 tmp/
 logs/
+# App routes that share a name with the private folders above; these hold source code only.
+!/src/app/(app)/admin/data/
+!/src/app/api/admin/backups/
 
 # Private documents accidentally saved at the repository root
 /*.pdf

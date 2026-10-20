@@ -6,3 +6,4 @@ export * from "./market";
 export * from "./ai";
 export * from "./audit";
 export * from "./workspace";
+export * from "./instance";

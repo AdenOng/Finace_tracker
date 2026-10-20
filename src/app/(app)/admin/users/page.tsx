@@ -11,6 +11,7 @@ export default async function AdminUsersPage() {
   const session = await requireAdminSession();
   void api.admin.users.list.prefetch();
   void api.admin.users.invitations.prefetch();
+  void api.admin.security.settings.prefetch();
 
   return (
     <HydrateClient>

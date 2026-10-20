@@ -4,7 +4,9 @@ import { Plus, RotateCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Drawer } from "~/components/ui/dialog";
+import { FlashNotice } from "~/components/ui/flash-notice";
 import {
   Checkbox,
   Field,
@@ -15,6 +17,7 @@ import {
 import { EmptyState, Notice, Tag } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
 import { FilterTabs } from "~/components/ui/tabs";
+import { useFlash } from "~/components/ui/use-flash";
 import { api, type RouterOutputs } from "~/trpc/react";
 import { formText } from "~/lib/form";
 
@@ -55,27 +58,58 @@ const apiAdapters = [
 
 type Filter = "all" | Kind | "archived";
 
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+
+/** "Singapore" for "SG"; null for anything that is not a known region code. */
+function countryName(code: string) {
+  if (!/^[A-Za-z]{2}$/.test(code)) return null;
+  const name = regionNames.of(code.toUpperCase());
+  return name && name !== code.toUpperCase() ? name : null;
+}
+
+/** What Remove will do, so the button can say it before it is pressed. */
+function removalOutcome(i: Institution) {
+  if (i.isSystem) return "archive-default" as const;
+  if (i.accountCount + i.documentCount > 0) return "archive-in-use" as const;
+  return "delete" as const;
+}
+
 export function InstitutionsAdmin() {
   const utils = api.useUtils();
   const [rows] = api.admin.institutions.list.useSuspenseQuery();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Institution | "new" | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  const { flash, success, error, clear } = useFlash();
+  const defaults = api.admin.institutions.defaultsPreview.useQuery();
+  const missingDefaults =
+    (defaults.data?.missing.length ?? 0) +
+    (defaults.data?.archived.length ?? 0);
 
-  const invalidate = () => utils.admin.institutions.list.invalidate();
+  const invalidate = () =>
+    Promise.all([
+      utils.admin.institutions.list.invalidate(),
+      utils.admin.institutions.defaultsPreview.invalidate(),
+    ]);
   const restoreDefaults = api.admin.institutions.restoreDefaults.useMutation({
+    onMutate: clear,
     onSuccess: async (r) => {
-      setFlash(
+      success(
         r.inserted + r.unarchived === 0
           ? "All defaults are already present."
           : `Restored ${r.inserted + r.unarchived} default institution${r.inserted + r.unarchived === 1 ? "" : "s"}.`,
       );
       await invalidate();
     },
+    onError: error,
   });
   const restore = api.admin.institutions.restore.useMutation({
-    onSuccess: invalidate,
+    onMutate: clear,
+    onSuccess: async () => {
+      success("Restored. People can pick it again when adding an account.");
+      await invalidate();
+    },
+    onError: error,
   });
 
   const counts = useMemo(() => {
@@ -106,6 +140,7 @@ export function InstitutionsAdmin() {
         "card_issuer",
         "crypto_exchange",
         "depository",
+        "other",
       ] as const
     )
       .filter((k) => counts[k])
@@ -127,14 +162,28 @@ export function InstitutionsAdmin() {
           />
         </div>
         <div className="ml-auto flex gap-2">
-          <Button
+          <ConfirmButton
             variant="secondary"
-            onClick={() => restoreDefaults.mutate()}
+            disabled={missingDefaults === 0}
+            title={
+              missingDefaults === 0
+                ? "Every default institution is present"
+                : [
+                    ...(defaults.data?.missing ?? []).map((n) => `Add ${n}`),
+                    ...(defaults.data?.archived ?? []).map(
+                      (n) => `Restore ${n}`,
+                    ),
+                  ].join("\n")
+            }
+            confirmLabel={`Bring back ${missingDefaults}?`}
+            onConfirm={() => restoreDefaults.mutate()}
             loading={restoreDefaults.isPending}
           >
             <RotateCcw className="size-4" />
-            Restore defaults
-          </Button>
+            {missingDefaults
+              ? `Restore ${missingDefaults} default${missingDefaults === 1 ? "" : "s"}`
+              : "Defaults present"}
+          </ConfirmButton>
           <Button onClick={() => setEditing("new")}>
             <Plus className="size-4" />
             Add institution
@@ -142,11 +191,7 @@ export function InstitutionsAdmin() {
         </div>
       </div>
 
-      {flash ? (
-        <Notice tone="success" className="mb-6">
-          {flash}
-        </Notice>
-      ) : null}
+      <FlashNotice flash={flash} className="mb-6" />
 
       <FilterTabs
         label="Filter institutions"
@@ -197,7 +242,16 @@ export function InstitutionsAdmin() {
                   ) : null}
                 </Td>
                 <Td className="text-ink-2">{kindLabels[r.kind]}</Td>
-                <Td className="text-ink-2">{r.country ?? "—"}</Td>
+                <Td
+                  className="text-ink-2"
+                  title={
+                    r.country
+                      ? (countryName(r.country) ?? undefined)
+                      : undefined
+                  }
+                >
+                  {r.country ?? "—"}
+                </Td>
                 <Td>
                   <div className="flex flex-wrap gap-1">
                     {r.ingestMethods.map((m) => (
@@ -213,6 +267,9 @@ export function InstitutionsAdmin() {
                     <Button
                       variant="secondary"
                       size="sm"
+                      loading={
+                        restore.isPending && restore.variables?.id === r.id
+                      }
                       onClick={() => restore.mutate({ id: r.id })}
                     >
                       Restore
@@ -236,10 +293,13 @@ export function InstitutionsAdmin() {
       <InstitutionDrawer
         key={editing === "new" ? "new" : (editing?.id ?? "closed")}
         institution={editing}
+        mergeTargets={rows.filter(
+          (r) => !r.archivedAt && (editing === "new" || r.id !== editing?.id),
+        )}
         onClose={() => setEditing(null)}
         onSaved={async (message) => {
           setEditing(null);
-          setFlash(message);
+          success(message);
           await invalidate();
         }}
       />
@@ -249,18 +309,30 @@ export function InstitutionsAdmin() {
 
 function InstitutionDrawer({
   institution,
+  mergeTargets,
   onClose,
   onSaved,
 }: {
   institution: Institution | "new" | null;
+  mergeTargets: Institution[];
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
   const existing = institution && institution !== "new" ? institution : null;
+  const [methods, setMethods] = useState<Method[]>(
+    existing?.ingestMethods ?? ["statement_ocr"],
+  );
+  const [adapter, setAdapter] = useState(existing?.apiAdapter ?? "");
+  const [country, setCountry] = useState(existing?.country ?? "");
+  const [mergeInto, setMergeInto] = useState("");
   const create = api.admin.institutions.create.useMutation();
   const update = api.admin.institutions.update.useMutation();
   const remove = api.admin.institutions.remove.useMutation();
-  const error = create.error ?? update.error ?? remove.error;
+  const merge = api.admin.institutions.merge.useMutation();
+  const error = create.error ?? update.error ?? remove.error ?? merge.error;
+  const outcome = existing ? removalOutcome(existing) : null;
+  const apiOn = methods.includes("api");
+  const countryLabel = country ? countryName(country) : null;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -270,8 +342,8 @@ function InstitutionDrawer({
       kind: formText(form, "kind") as Kind,
       country: formText(form, "country"),
       website: formText(form, "website"),
-      ingestMethods: form.getAll("ingestMethods").map(String) as Method[],
-      apiAdapter: formText(form, "apiAdapter"),
+      ingestMethods: methods,
+      apiAdapter: apiOn ? adapter : "",
       extractionHints: formText(form, "extractionHints"),
     };
     if (existing) {
@@ -308,14 +380,15 @@ function InstitutionDrawer({
       footer={
         <>
           {existing && !existing.archivedAt ? (
-            <Button
+            <ConfirmButton
               variant="danger"
               className="mr-auto"
-              onClick={() => void onRemove().catch(() => undefined)}
+              confirmLabel={outcome === "delete" ? "Delete it?" : "Archive it?"}
+              onConfirm={() => void onRemove().catch(() => undefined)}
               loading={remove.isPending}
             >
-              Remove
-            </Button>
+              {outcome === "delete" ? "Delete" : "Archive"}
+            </ConfirmButton>
           ) : null}
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -336,6 +409,15 @@ function InstitutionDrawer({
         className="space-y-5"
       >
         {error ? <Notice tone="error">{error.message}</Notice> : null}
+        {existing && !existing.archivedAt ? (
+          <p className="text-ink-3 text-[13px]">
+            {outcome === "delete"
+              ? "Not used by any account or upload, so removing it deletes it."
+              : outcome === "archive-default"
+                ? "A default from the preset pack: removing it archives it, so the next start-up does not add it back."
+                : `Used by ${existing.accountCount} account${existing.accountCount === 1 ? "" : "s"}${existing.documentCount ? ` and ${existing.documentCount} upload${existing.documentCount === 1 ? "" : "s"}` : ""}: removing it archives it and keeps their history.`}
+          </p>
+        ) : null}
         <Field label="Name" htmlFor="inst-name">
           <Input
             id="inst-name"
@@ -358,12 +440,25 @@ function InstitutionDrawer({
               ))}
             </Select>
           </Field>
-          <Field label="Country" htmlFor="inst-country" hint="Two-letter code">
+          <Field
+            label="Country"
+            htmlFor="inst-country"
+            hint={
+              country
+                ? (countryLabel ?? "Not a country code")
+                : "Two-letter code, e.g. SG"
+            }
+            error={
+              country && !countryLabel ? "Use a two-letter country code" : null
+            }
+          >
             <Input
               id="inst-country"
               name="country"
               maxLength={2}
-              defaultValue={existing?.country ?? ""}
+              value={country}
+              onChange={(e) => setCountry(e.target.value.toUpperCase())}
+              aria-invalid={!!country && !countryLabel}
               placeholder="SG"
               className="uppercase"
             />
@@ -385,26 +480,37 @@ function InstitutionDrawer({
           {(Object.keys(methodLabels) as Method[]).map((m) => (
             <Checkbox
               key={m}
-              name="ingestMethods"
-              value={m}
               label={methodLabels[m]}
-              defaultChecked={
-                existing
-                  ? existing.ingestMethods.includes(m)
-                  : m === "statement_ocr"
+              checked={methods.includes(m)}
+              onChange={(e) =>
+                setMethods((current) =>
+                  e.target.checked
+                    ? [...current, m]
+                    : current.filter((x) => x !== m),
+                )
               }
             />
           ))}
+          {methods.length === 0 ? (
+            <p className="text-loss text-[13px]">Pick at least one.</p>
+          ) : null}
         </fieldset>
         <Field
           label="API adapter"
           htmlFor="inst-adapter"
-          hint="Which sync integration to use when API sync is enabled."
+          hint={
+            apiOn
+              ? "Which sync integration to use."
+              : "Choosing an adapter turns on API sync."
+          }
         >
           <Select
             id="inst-adapter"
-            name="apiAdapter"
-            defaultValue={existing?.apiAdapter ?? ""}
+            value={apiOn ? adapter : ""}
+            onChange={(e) => {
+              setAdapter(e.target.value);
+              if (e.target.value && !apiOn) setMethods((m) => [...m, "api"]);
+            }}
           >
             {apiAdapters.map((a) => (
               <option key={a.value} value={a.value}>
@@ -425,6 +531,51 @@ function InstitutionDrawer({
             defaultValue={existing?.extractionHints ?? ""}
           />
         </Field>
+        {existing && !existing.archivedAt && mergeTargets.length ? (
+          <fieldset className="border-line space-y-3 border-t pt-5">
+            <legend className="text-[13px] font-semibold">
+              Merge a duplicate
+            </legend>
+            <p className="text-ink-3 -mt-1 text-[13px]">
+              Moves this institution&apos;s {existing.accountCount} account
+              {existing.accountCount === 1 ? "" : "s"} and uploads into another,
+              then removes this one.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Select
+                aria-label="Merge into"
+                className="max-w-xs flex-1"
+                value={mergeInto}
+                onChange={(e) => setMergeInto(e.target.value)}
+              >
+                <option value="">Merge into…</option>
+                {mergeTargets.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+              <ConfirmButton
+                variant="secondary"
+                disabled={!mergeInto}
+                loading={merge.isPending}
+                confirmLabel="Merge now?"
+                onConfirm={() =>
+                  void merge
+                    .mutateAsync({ sourceId: existing.id, targetId: mergeInto })
+                    .then((r) =>
+                      onSaved(
+                        `Merged ${existing.name} into ${mergeTargets.find((t) => t.id === mergeInto)?.name}; ${r.accountsMoved} account${r.accountsMoved === 1 ? "" : "s"} moved.`,
+                      ),
+                    )
+                    .catch(() => undefined)
+                }
+              >
+                Merge
+              </ConfirmButton>
+            </div>
+          </fieldset>
+        ) : null}
       </form>
     </Drawer>
   );

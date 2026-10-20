@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Admin status" };
 export default async function AdminIndex() {
   await requireAdminSession();
   void api.admin.overview.stats.prefetch();
-  void api.admin.overview.failedJobs.prefetch();
+  void api.admin.overview.attention.prefetch();
   return (
     <HydrateClient>
       <PageHeader

@@ -28,6 +28,7 @@ using the same database and encrypted provider credentials. The Compose project 
 | --- | --- |
 | Auth: invite-only sign-up, first user is admin, TOTP two-step, passkeys, rate limits | Done |
 | Admin console: status overview, users and invitations, account recovery (sessions, two-step reset, password reset links), brokers & banks, categories, AI providers, activity log | Done |
+| Admin operations: security policy and sign-in history, import jobs, AI usage, cost and limits, provider health and fallback, backups, market data, storage retention, data packs, system info, optional email | Done |
 | LLM layer: opencode / OpenAI-compatible / Anthropic adapters, structured output | Done |
 | Extraction: PDF text layer, scanned-PDF rasterising, admin playground | Done |
 | Accounts: bank, card, brokerage, wallet, CPF and SRS accounts; archive instead of delete when in use | Done |
@@ -164,7 +165,8 @@ bun run dev                   # migrations + default data are applied on boot
 
 Open http://localhost:3000. The first visit goes to `/setup` and creates the admin account.
 With `REQUIRE_TWO_FACTOR=true` (the default) everyone must enrol an authenticator app before the
-rest of the app unlocks.
+rest of the app unlocks. Set it to `false` to choose instead under **Admin → Security** (everyone,
+admins only, or not required).
 
 ## Running everything in Docker
 
@@ -178,16 +180,53 @@ docker compose up -d --build  # db, opencode, app, nightly backup
 | `db` | Postgres 17, volume `pgdata` |
 | `opencode` | `opencode serve`, headless, all tools disabled, basic-auth protected. Mounts your host `auth.json` |
 | `app` | Next.js standalone server. Runs migrations and seeding on start |
-| `backup` | `pg_dump` once a day into `./backups`, kept 14 days |
+| `backup` | `pg_dump` once a day into `./backups`, kept `BACKUP_RETENTION_DAYS` (14). Also on request from **Admin → Data** |
 | `cloudflared` | Optional (`--profile tunnel`). If you already run a tunnel, point it at `http://<host>:3000` |
 
 Set `BETTER_AUTH_URL` to the public Cloudflare hostname in production so cookies and passkeys
 work. Putting Cloudflare Access in front of `/admin` is a cheap extra layer.
 
-There is no outgoing email. If someone forgets their password or loses their authenticator, an
-admin opens **Admin → Users → Manage** to create a single-use password reset link (valid 24 hours,
-served at `/reset/<token>`) or reset their two-step setup. Both sign the person out everywhere and
-are recorded in **Admin → Activity log**.
+If someone forgets their password or loses their authenticator, an admin opens
+**Admin → Users → Manage** to create a single-use password reset link (valid 24 hours, served at
+`/reset/<token>`) or reset their two-step setup. Both sign the person out everywhere and are
+recorded in **Admin → Activity log**.
+
+### Optional email
+
+Without email, invite and reset links are shown to the admin to hand over. To send them instead,
+and to warn people about sign-ins from a new device or remind them about statements waiting for
+review, add an SMTP server to `.env` and restart:
+
+```bash
+SMTP_URL=smtps://user:password@smtp.example.com:465
+SMTP_FROM="Finfolio <finfolio@example.com>"
+```
+
+**Admin → System → Send me a test email** checks the settings.
+
+### Backups and restore
+
+The `backup` service writes `finfolio-YYYYMMDD-HHMMSS.dump` files to `./backups`, which the app
+also mounts (`BACKUP_DIR`). **Admin → Data** lists them, downloads them (each download is logged)
+and can ask for one now; the service picks the request up within a minute. To restore:
+
+```bash
+docker compose stop app
+docker compose exec -T db pg_restore --clean --if-exists -U finfolio -d finfolio \
+  < backups/finfolio-YYYYMMDD-HHMMSS.dump
+docker compose start app
+```
+
+Dumps do not contain `APP_ENCRYPTION_KEY`; keep your `.env` with them or stored API keys cannot be
+decrypted. After updating `docker-compose.yml`, run `docker compose up -d` once so the app gets
+the `./backups` mount and the backup service its new loop.
+
+### Housekeeping
+
+The app runs a few timers in-process: provider health checks every 6 hours (switch off on
+**Admin → AI providers**), exchange-rate refresh every 12 hours, and a daily clean-up of uploaded
+statement files when a retention period is set on **Admin → Data → Storage**. Only files whose
+imports are finished are deleted; the transactions they produced stay.
 
 ## Architecture
 

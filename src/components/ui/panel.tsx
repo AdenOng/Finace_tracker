@@ -40,12 +40,18 @@ export function Section({
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
   className?: string;
 }) {
+  const hasBody = children !== undefined && children !== null;
   return (
     <section className={cn("card min-w-0 p-5 sm:p-6", className)}>
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-3",
+          hasBody && "mb-5",
+        )}
+      >
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>
           {description ? (

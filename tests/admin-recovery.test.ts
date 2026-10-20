@@ -292,17 +292,23 @@ describe("overview and audit log", () => {
         storageKey: "synthetic-key",
       })
       .returning();
-    await db.insert(schema.extractionJob).values({
-      ownerId: "member",
-      documentId: doc!.id,
-      status: "failed",
-      result: { secret: "synthetic-private-balance" },
-      error: "x".repeat(500),
+    const [failedJob] = await db
+      .insert(schema.extractionJob)
+      .values({
+        ownerId: "member",
+        documentId: doc!.id,
+        status: "failed",
+        result: { secret: "synthetic-private-balance" },
+        error: "x".repeat(500),
+      })
+      .returning();
+    await db.insert(schema.llmUsage).values({
+      jobId: failedJob!.id,
       inputTokens: 100,
       outputTokens: 20,
     });
 
-    const failed = await admin.overview.failedJobs();
+    const { items: failed } = await admin.jobs.list({ filter: "failed" });
     expect(failed).toHaveLength(1);
     expect(failed[0]?.ownerName).toBe("Example Member");
     expect(failed[0]?.error?.length).toBeLessThan(250);

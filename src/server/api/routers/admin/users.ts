@@ -14,15 +14,20 @@ import { PASSWORD_RESET_TTL_HOURS } from "~/server/auth/password-reset";
 import type { Database } from "~/server/db";
 import {
   invitation,
+  passkey,
   passwordReset,
   session,
+  signInEvent,
   twoFactor,
   user,
 } from "~/server/db/schema";
 import { recordAudit } from "~/server/lib/audit";
+import { outer } from "~/server/lib/sql";
+import { trySendMail } from "~/server/lib/mailer";
 
 const role = z.enum(["user", "admin"]);
 const userIdInput = z.object({ userId: z.string() });
+const EXPIRED_INVITES_SHOWN_DAYS = 30;
 
 /** Loads another user for a recovery action; admins use Settings for their own account. */
 async function loadOtherUser(db: Database, actorId: string, userId: string) {
@@ -33,7 +38,7 @@ async function loadOtherUser(db: Database, actorId: string, userId: string) {
     });
   }
   const [row] = await db
-    .select({ id: user.id, email: user.email })
+    .select({ id: user.id, email: user.email, name: user.name })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
@@ -51,9 +56,10 @@ export const adminUsersRouter = createTRPCRouter({
         role: user.role,
         banned: user.banned,
         twoFactorEnabled: user.twoFactorEnabled,
+        passkeys: sql<number>`(select count(*)::int from ${passkey} where ${passkey.userId} = ${outer(user.id)})`,
         createdAt: user.createdAt,
         lastActiveAt:
-          sql<Date | null>`(select max(${session.updatedAt}) from ${session} where ${session.userId} = ${user.id})`.mapWith(
+          sql<Date | null>`(select max(${session.updatedAt}) from ${session} where ${session.userId} = ${outer(user.id)})`.mapWith(
             (value: string | null) => (value ? new Date(value) : null),
           ),
       })
@@ -120,7 +126,10 @@ export const adminUsersRouter = createTRPCRouter({
       });
     }),
 
-  /** Active sessions for one user. Session tokens are never returned. */
+  /**
+   * Active sessions for one user, with how each was signed in to (when recorded). Session tokens
+   * are never returned.
+   */
   sessions: adminProcedure.input(userIdInput).query(({ ctx, input }) =>
     ctx.db
       .select({
@@ -130,6 +139,9 @@ export const adminUsersRouter = createTRPCRouter({
         expiresAt: session.expiresAt,
         ipAddress: session.ipAddress,
         userAgent: session.userAgent,
+        method: sql<
+          string | null
+        >`(select ${signInEvent.method} from ${signInEvent} where ${signInEvent.sessionId} = ${outer(session.id)} and ${signInEvent.success} limit 1)`,
       })
       .from(session)
       .where(
@@ -167,6 +179,31 @@ export const adminUsersRouter = createTRPCRouter({
       return { revoked };
     }),
 
+  revokeSession: adminProcedure
+    .input(z.object({ userId: z.string(), sessionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const target = await loadOtherUser(
+        ctx.db,
+        ctx.session.user.id,
+        input.userId,
+      );
+      const [row] = await ctx.db
+        .delete(session)
+        .where(
+          and(eq(session.id, input.sessionId), eq(session.userId, target.id)),
+        )
+        .returning({ id: session.id, userAgent: session.userAgent });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "user.session_revoked",
+        targetType: "user",
+        targetId: target.id,
+        targetLabel: target.email,
+        details: { sessions: 1 },
+      });
+    }),
+
   /**
    * Removes a user's two-step setup so they can enrol again, e.g. after losing their phone. They
    * are signed out; on REQUIRE_TWO_FACTOR instances they must re-enrol before using the app.
@@ -198,7 +235,7 @@ export const adminUsersRouter = createTRPCRouter({
 
   /** Returns a single-use reset link once; only its hash is stored. Older links stop working. */
   createPasswordReset: adminProcedure
-    .input(userIdInput)
+    .input(userIdInput.extend({ sendEmail: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {
       const target = await loadOtherUser(
         ctx.db,
@@ -235,11 +272,32 @@ export const adminUsersRouter = createTRPCRouter({
           targetLabel: target.email,
         });
       });
-      return { url: `${env.BETTER_AUTH_URL}/reset/${token}`, expiresAt };
+      const url = `${env.BETTER_AUTH_URL}/reset/${token}`;
+      const emailError = input.sendEmail
+        ? await trySendMail({
+            to: target.email,
+            subject: "Reset your Finfolio password",
+            text: [
+              "An admin created a password reset link for your Finfolio account.",
+              "",
+              url,
+              "",
+              `It works once and expires in ${PASSWORD_RESET_TTL_HOURS} hours. Using it signs you out everywhere.`,
+            ].join("\n"),
+          })
+        : null;
+      return {
+        url,
+        expiresAt,
+        emailed: input.sendEmail && !emailError,
+        emailError,
+      };
     }),
 
-  invitations: adminProcedure.query(({ ctx }) =>
-    ctx.db
+  /** Pending invitations, plus ones that expired recently so they can be sent again. */
+  invitations: adminProcedure.query(async ({ ctx }) => {
+    const now = new Date();
+    const rows = await ctx.db
       .select({
         id: invitation.id,
         email: invitation.email,
@@ -252,18 +310,30 @@ export const adminUsersRouter = createTRPCRouter({
         and(
           isNull(invitation.acceptedAt),
           isNull(invitation.revokedAt),
-          gt(invitation.expiresAt, new Date()),
+          gt(
+            invitation.expiresAt,
+            new Date(now.getTime() - EXPIRED_INVITES_SHOWN_DAYS * 86_400_000),
+          ),
+          // Someone who signed up another way no longer needs the invite.
+          sql`not exists (select 1 from ${user} where lower(${user.email}) = lower(${invitation.email}))`,
         ),
       )
-      .orderBy(desc(invitation.createdAt)),
-  ),
+      .orderBy(desc(invitation.createdAt));
+    return rows.map((r) => ({ ...r, expired: r.expiresAt <= now }));
+  }),
 
   /**
    * Returns the invite link once; only its hash is stored, so it cannot be shown again. Inviting
    * the same email again replaces any pending link.
    */
   invite: adminProcedure
-    .input(z.object({ email: z.email().toLowerCase(), role }))
+    .input(
+      z.object({
+        email: z.email().toLowerCase(),
+        role,
+        sendEmail: z.boolean().default(false),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const exists = await ctx.db.$count(user, eq(user.email, input.email));
       if (exists) {
@@ -303,7 +373,21 @@ export const adminUsersRouter = createTRPCRouter({
           details: { role: input.role, replaced: replaced.length },
         });
       });
-      return { url: `${env.BETTER_AUTH_URL}/invite/${token}` };
+      const url = `${env.BETTER_AUTH_URL}/invite/${token}`;
+      const emailError = input.sendEmail
+        ? await trySendMail({
+            to: input.email,
+            subject: `${ctx.session.user.name} invited you to Finfolio`,
+            text: [
+              `${ctx.session.user.name} invited you to Finfolio, where you can track your accounts and spending privately.`,
+              "",
+              `Create your account: ${url}`,
+              "",
+              `The link works once and expires in ${INVITE_TTL_DAYS} days.`,
+            ].join("\n"),
+          })
+        : null;
+      return { url, emailed: input.sendEmail && !emailError, emailError };
     }),
 
   revokeInvite: adminProcedure

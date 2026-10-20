@@ -45,12 +45,16 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-finfolio}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-finfolio}
       OPENCODE_URL: http://opencode:4096
+      # Admin → Data lists and downloads dumps from here and asks the backup service for new ones.
+      BACKUP_DIR: /app/backups
     volumes:
       - uploads:/app/data
+      - ./backups:/app/backups
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
 
-  # Nightly logical backup, 14 days retained, written to ./backups on the host.
+  # Nightly logical backup into ./backups, kept for BACKUP_RETENTION_DAYS (14). Also runs within a
+  # minute when Admin → Data asks for one (control/run-now), and reports back through control/.
   backup:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -60,16 +64,42 @@ services:
     environment:
       <<: *db-env
       PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # The app container runs as uid 1000 and must be able to read the dumps it offers for download.
+      BACKUP_UID: ${BACKUP_UID:-1000}
     volumes:
       - ./backups:/backups
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        mkdir -p /backups/control && chmod 777 /backups/control
+        # A dump interrupted by a restart never finished; do not report it as in progress.
+        rm -f /backups/control/in-progress
+        last=0
         while true; do
-          ts=$$(date +%Y%m%d-%H%M%S)
-          pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "/backups/finfolio-$$ts.dump" && echo "backup $$ts ok"
-          find /backups -name 'finfolio-*.dump' -mtime +14 -delete
-          sleep 86400
+          now=$$(date +%s)
+          date -u +%Y-%m-%dT%H:%M:%SZ > /backups/control/heartbeat
+          if [ -f /backups/control/run-now ] || [ $$((now - last)) -ge 86400 ]; then
+            # Marked before the request is cleared, so the app always sees one or the other.
+            date -u +%Y-%m-%dT%H:%M:%SZ > /backups/control/in-progress
+            rm -f /backups/control/run-now
+            ts=$$(date +%Y%m%d-%H%M%S)
+            out="/backups/finfolio-$$ts.dump"
+            if pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "$$out.partial" 2> /backups/control/last-error; then
+              mv "$$out.partial" "$$out"
+              chown "$$BACKUP_UID:$$BACKUP_UID" "$$out" && chmod 600 "$$out"
+              echo "ok $$(date -u +%Y-%m-%dT%H:%M:%SZ) finfolio-$$ts.dump" > /backups/control/last-run
+              echo "backup $$ts ok"
+            else
+              rm -f "$$out.partial"
+              echo "failed $$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /backups/control/last-run
+              echo "backup $$ts failed"
+            fi
+            rm -f /backups/control/in-progress
+            last=$$now
+            find /backups -name 'finfolio-*.dump' -mtime +"$$BACKUP_RETENTION_DAYS" -delete
+          fi
+          sleep 60
         done
 
   # Optional: only started with `docker compose --profile tunnel up`. If a tunnel already runs

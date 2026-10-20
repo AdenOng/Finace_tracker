@@ -53,6 +53,8 @@ export const document = pgTable(
     kind: documentKind("kind").default("other").notNull(),
     periodStart: date("period_start"),
     periodEnd: date("period_end"),
+    /** Set when the stored file was deleted by the retention policy; the row stays for dedupe. */
+    filePurgedAt: timestamp("file_purged_at", { withTimezone: true }),
     ...timestamps(),
   },
   (t) => [unique("document_owner_sha_uq").on(t.ownerId, t.sha256)],

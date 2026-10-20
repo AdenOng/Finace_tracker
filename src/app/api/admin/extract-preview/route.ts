@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { env } from "~/env";
-import { auth } from "~/server/auth/config";
-import { needsTwoFactorEnrollment } from "~/server/auth/enrollment";
+import { requireAdminRequest } from "~/server/auth/route-guard";
 import { db } from "~/server/db";
 import {
   extractDocument,
@@ -24,18 +22,8 @@ export const maxDuration = 300;
  * anything. Lets an admin compare models/prompts before trusting them with the real pipeline.
  */
 export async function POST(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (
-    session?.user.role !== "admin" ||
-    needsTwoFactorEnrollment(session.user)
-  ) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(env.BETTER_AUTH_URL).origin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const { denied } = await requireAdminRequest(request);
+  if (denied) return denied;
 
   try {
     const { file, providerId, model, institutionId } =

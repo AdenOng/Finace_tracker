@@ -10,6 +10,7 @@ export const metadata: Metadata = { title: "Brokers & banks" };
 export default async function AdminInstitutionsPage() {
   await requireAdminSession();
   void api.admin.institutions.list.prefetch();
+  void api.admin.institutions.defaultsPreview.prefetch();
   return (
     <HydrateClient>
       <PageHeader

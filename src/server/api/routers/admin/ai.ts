@@ -1,18 +1,36 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { adminProcedure, createTRPCRouter } from "~/server/api/trpc";
 import type { Database } from "~/server/db";
-import { llmProvider, llmProviderKind } from "~/server/db/schema";
+import { llmProvider, llmProviderKind, llmUsage } from "~/server/db/schema";
 import { createLlmAdapter, toProviderConfig } from "~/server/modules/llm";
 import { describeLlmError } from "~/server/modules/llm/errors";
 import {
   findSharedProvider,
   sharedProviderFilter,
 } from "~/server/modules/llm/providers";
+import {
+  checkProvider,
+  monthlyTokenUsage,
+  monthStart,
+} from "~/server/modules/llm/routing";
 import { recordAudit } from "~/server/lib/audit";
+import {
+  cachedInstanceSettings,
+  updateInstanceSettings,
+} from "~/server/lib/instance-settings";
 import { decryptSecret, encryptSecret, maskSecret } from "~/server/lib/secrets";
+
+const DAY_MS = 86_400_000;
+
+const price = z
+  .string()
+  .trim()
+  .regex(/^\d{1,8}(\.\d{1,4})?$/, "Use a price like 0.15")
+  .nullable()
+  .or(z.literal("").transform(() => null));
 
 const providerInput = z.object({
   name: z.string().trim().min(1).max(80),
@@ -26,6 +44,10 @@ const providerInput = z.object({
   defaultModel: z.string().trim().min(1),
   supportsVision: z.boolean(),
   isEnabled: z.boolean(),
+  inputCostPerMTok: price.optional(),
+  outputCostPerMTok: price.optional(),
+  monthlyTokenLimit: z.number().int().positive().nullable().optional(),
+  pauseAtLimit: z.boolean().optional(),
 });
 
 async function loadProvider(db: Database, id: string) {
@@ -41,6 +63,11 @@ export const adminAiRouter = createTRPCRouter({
       .from(llmProvider)
       .where(isNull(llmProvider.ownerId))
       .orderBy(asc(llmProvider.createdAt));
+    const usage = await monthlyTokenUsage(
+      ctx.db,
+      rows.map((r) => r.id),
+    );
+    const fallbackId = cachedInstanceSettings().fallbackProviderId;
     return rows.map(({ apiKeyEncrypted, ...row }) => {
       let apiKeyPreview: string | null = null;
       if (apiKeyEncrypted) {
@@ -50,7 +77,16 @@ export const adminAiRouter = createTRPCRouter({
           apiKeyPreview = "unreadable — re-enter key";
         }
       }
-      return { ...row, apiKeyPreview };
+      const tokensThisMonth = usage.get(row.id) ?? 0;
+      return {
+        ...row,
+        apiKeyPreview,
+        isFallback: row.id === fallbackId,
+        tokensThisMonth,
+        limitReached:
+          row.monthlyTokenLimit !== null &&
+          tokensThisMonth >= row.monthlyTokenLimit,
+      };
     });
   }),
 
@@ -153,6 +189,9 @@ export const adminAiRouter = createTRPCRouter({
             promoted = next;
           }
         }
+        if (cachedInstanceSettings().fallbackProviderId === row.id) {
+          await updateInstanceSettings(tx, { fallbackProviderId: null });
+        }
         await recordAudit(tx, {
           actorId: ctx.session.user.id,
           action: "provider.removed",
@@ -164,6 +203,108 @@ export const adminAiRouter = createTRPCRouter({
         return { promoted };
       }),
     ),
+
+  /** The provider imports fall back to when the default fails or is over its limit. */
+  setFallback: adminProcedure
+    .input(z.object({ id: z.uuid().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      const target = input.id ? await loadProvider(ctx.db, input.id) : null;
+      if (target?.isDefault) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "The default provider cannot also be its own fallback",
+        });
+      }
+      if (target && !target.isEnabled) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Enable this provider before making it the fallback",
+        });
+      }
+      await updateInstanceSettings(ctx.db, { fallbackProviderId: input.id });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: target ? "provider.set_fallback" : "provider.fallback_cleared",
+        targetType: "provider",
+        targetId: target?.id,
+        targetLabel: target?.name ?? null,
+      });
+    }),
+
+  healthChecks: adminProcedure.query(
+    () => cachedInstanceSettings().providerHealthChecks,
+  ),
+
+  setHealthChecks: adminProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await updateInstanceSettings(ctx.db, {
+        providerHealthChecks: input.enabled,
+      });
+      await recordAudit(ctx.db, {
+        actorId: ctx.session.user.id,
+        action: "settings.health_checks_updated",
+        targetType: "settings",
+        targetLabel: "Scheduled provider checks",
+        details: { enabled: input.enabled },
+      });
+    }),
+
+  /** Daily tokens per provider and model, plus this month's totals and estimated cost. */
+  usage: adminProcedure
+    .input(z.object({ days: z.number().int().min(7).max(90).default(30) }))
+    .query(async ({ ctx, input }) => {
+      const since = new Date(Date.now() - (input.days - 1) * DAY_MS);
+      since.setUTCHours(0, 0, 0, 0);
+      const daily = await ctx.db
+        .select({
+          day: sql<string>`to_char(date_trunc('day', ${llmUsage.createdAt} at time zone 'UTC'), 'YYYY-MM-DD')`,
+          providerId: llmUsage.providerId,
+          model: llmUsage.model,
+          jobs: sql<number>`count(*)::int`,
+          inputTokens:
+            sql<number>`coalesce(sum(${llmUsage.inputTokens}), 0)::bigint`.mapWith(
+              Number,
+            ),
+          outputTokens:
+            sql<number>`coalesce(sum(${llmUsage.outputTokens}), 0)::bigint`.mapWith(
+              Number,
+            ),
+        })
+        .from(llmUsage)
+        .where(gte(llmUsage.createdAt, since))
+        .groupBy(sql`1`, llmUsage.providerId, llmUsage.model)
+        .orderBy(sql`1`);
+      const month = await ctx.db
+        .select({
+          providerId: llmUsage.providerId,
+          model: llmUsage.model,
+          jobs: sql<number>`count(*)::int`,
+          inputTokens:
+            sql<number>`coalesce(sum(${llmUsage.inputTokens}), 0)::bigint`.mapWith(
+              Number,
+            ),
+          outputTokens:
+            sql<number>`coalesce(sum(${llmUsage.outputTokens}), 0)::bigint`.mapWith(
+              Number,
+            ),
+        })
+        .from(llmUsage)
+        .where(gte(llmUsage.createdAt, monthStart()))
+        .groupBy(llmUsage.providerId, llmUsage.model);
+      const providers = await ctx.db
+        .select({
+          id: llmProvider.id,
+          name: llmProvider.name,
+          inputCostPerMTok: llmProvider.inputCostPerMTok,
+          outputCostPerMTok: llmProvider.outputCostPerMTok,
+          monthlyTokenLimit: llmProvider.monthlyTokenLimit,
+          pauseAtLimit: llmProvider.pauseAtLimit,
+        })
+        .from(llmProvider)
+        .where(isNull(llmProvider.ownerId));
+      return { since, days: input.days, daily, month, providers };
+    }),
 
   setDefault: adminProcedure
     .input(z.object({ id: z.uuid() }))
@@ -189,14 +330,29 @@ export const adminAiRouter = createTRPCRouter({
       });
     }),
 
+  /**
+   * Lists models for a provider as configured in the form, saved or not. A blank key on a saved
+   * provider uses the stored one.
+   */
   models: adminProcedure
-    .input(z.object({ id: z.uuid() }))
-    .query(async ({ ctx, input }) => {
-      const row = await loadProvider(ctx.db, input.id);
+    .input(
+      z.object({
+        id: z.uuid().optional(),
+        kind: z.enum(llmProviderKind.enumValues),
+        baseUrl: providerInput.shape.baseUrl,
+        apiKey: z.string().trim().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const saved = input.id ? await loadProvider(ctx.db, input.id) : null;
+      const config = toProviderConfig({
+        ...(saved ?? { apiKeyEncrypted: null, defaultModel: "" }),
+        kind: input.kind,
+        baseUrl: input.baseUrl,
+      } as typeof llmProvider.$inferSelect);
+      if (input.apiKey) config.apiKey = input.apiKey;
       try {
-        const models = await createLlmAdapter(
-          toProviderConfig(row),
-        ).listModels();
+        const models = await createLlmAdapter(config).listModels();
         return { ok: true as const, models };
       } catch (error) {
         return {
@@ -207,36 +363,11 @@ export const adminAiRouter = createTRPCRouter({
       }
     }),
 
-  /** Round-trips a tiny structured request to prove the key, model and JSON mode all work. */
+  /** Round-trips a tiny structured request; the result is kept as the provider's health. */
   test: adminProcedure
     .input(z.object({ id: z.uuid(), model: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const row = await loadProvider(ctx.db, input.id);
-      const started = Date.now();
-      try {
-        const result = await createLlmAdapter(
-          toProviderConfig(row),
-        ).generateStructured({
-          system:
-            "You are a connectivity check. Reply only with the requested JSON.",
-          prompt: 'Return {"ok": true, "sum": 17 + 25}.',
-          schema: z.object({ ok: z.boolean(), sum: z.number() }),
-          schemaName: "connectivity_check",
-          model: input.model,
-          signal: AbortSignal.timeout(90_000),
-        });
-        return {
-          ok: result.output.ok && result.output.sum === 42,
-          model: result.model,
-          latencyMs: Date.now() - started,
-          output: result.output,
-        };
-      } catch (error) {
-        return {
-          ok: false,
-          error: describeLlmError(error),
-          latencyMs: Date.now() - started,
-        };
-      }
+      return checkProvider(ctx.db, row, input.model);
     }),
 });

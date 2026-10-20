@@ -6,5 +6,7 @@ export async function register() {
   ) {
     const { bootstrapDatabase } = await import("./server/db/bootstrap");
     await bootstrapDatabase();
+    const { startScheduler } = await import("./server/jobs/scheduler");
+    startScheduler();
   }
 }

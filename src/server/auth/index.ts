@@ -4,16 +4,15 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
-import { auth } from "./config";
 import { needsTwoFactorEnrollment } from "./enrollment";
+import { getSessionFor } from "./session-policy";
 
 export { auth, APP_NAME, type Session } from "./config";
 export { needsTwoFactorEnrollment } from "./enrollment";
+export { getSessionFor } from "./session-policy";
 
 /** Session for the current request (deduplicated per render). */
-export const getSession = cache(async () =>
-  auth.api.getSession({ headers: await headers() }),
-);
+export const getSession = cache(async () => getSessionFor(await headers()));
 
 export function isAdmin(user: { role?: string | null }) {
   return user.role === "admin";

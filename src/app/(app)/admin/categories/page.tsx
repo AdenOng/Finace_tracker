@@ -10,6 +10,7 @@ export const metadata: Metadata = { title: "Categories" };
 export default async function AdminCategoriesPage() {
   await requireAdminSession();
   void api.admin.categories.list.prefetch();
+  void api.admin.categories.defaultsPreview.prefetch();
   return (
     <HydrateClient>
       <PageHeader

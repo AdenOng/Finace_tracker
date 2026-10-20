@@ -110,3 +110,41 @@ const monthFormatter = new Intl.DateTimeFormat("en-SG", {
 export function formatMonth(month: string) {
   return monthFormatter.format(new Date(`${month}-01T00:00:00Z`));
 }
+
+const byteUnits = ["B", "KB", "MB", "GB", "TB"];
+
+/** File and database sizes: "12.4 MB". */
+export function formatBytes(bytes: number) {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < byteUnits.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${byteUnits[unit]}`;
+}
+
+const relativeFormatter = new Intl.RelativeTimeFormat("en", {
+  numeric: "auto",
+});
+
+/** "5 minutes ago", "yesterday", "in 3 days". */
+export function formatRelative(value: Date | string, now = Date.now()) {
+  const seconds = Math.round(
+    ((typeof value === "string" ? new Date(value) : value).getTime() - now) /
+      1000,
+  );
+  const steps: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["second", 60],
+    ["minute", 60],
+    ["hour", 24],
+    ["day", 30],
+    ["month", 12],
+  ];
+  let amount = seconds;
+  for (const [unit, size] of steps) {
+    if (Math.abs(amount) < size) return relativeFormatter.format(amount, unit);
+    amount = Math.round(amount / size);
+  }
+  return relativeFormatter.format(amount, "year");
+}

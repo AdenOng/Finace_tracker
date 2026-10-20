@@ -5,15 +5,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeftRight,
   Bot,
+  Database,
   Gauge,
   History,
   Building2,
+  FileStack,
   FileUp,
   LayoutGrid,
   Layers,
   LogOut,
   type LucideIcon,
+  Server,
   Settings,
+  ShieldCheck,
   Tags,
   Users,
   Wallet,
@@ -50,9 +54,13 @@ const mainNav: NavItem[] = [
 const adminNav: NavItem[] = [
   { href: "/admin", label: "Status", icon: Gauge, exact: true },
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/security", label: "Security", icon: ShieldCheck },
+  { href: "/admin/imports", label: "Import jobs", icon: FileStack },
+  { href: "/admin/ai", label: "AI providers", icon: Bot },
   { href: "/admin/institutions", label: "Brokers & banks", icon: Building2 },
   { href: "/admin/categories", label: "Categories", icon: Tags },
-  { href: "/admin/ai", label: "AI providers", icon: Bot },
+  { href: "/admin/data", label: "Data", icon: Database },
+  { href: "/admin/system", label: "System", icon: Server },
   { href: "/admin/activity", label: "Activity log", icon: History },
 ];
 
@@ -137,7 +145,7 @@ export function AppShell({
             <NavLink key={item.href} item={item} pathname={pathname} />
           ))}
           {admin.length > 0 ? (
-            <div className="space-y-0.5 pt-8">
+            <div className="space-y-0.5 pt-6 pb-2">
               <p className="eyebrow px-3 pb-2">Admin</p>
               {admin.map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />

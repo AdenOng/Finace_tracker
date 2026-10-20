@@ -133,7 +133,9 @@ describe("admin provider ownership", () => {
     await expect(ai.remove({ id })).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
-    await expect(ai.models({ id })).rejects.toMatchObject({
+    await expect(
+      ai.models({ id, kind: "openai_compatible", baseUrl: null }),
+    ).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
     await expect(ai.test({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });

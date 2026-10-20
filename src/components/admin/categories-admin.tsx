@@ -1,72 +1,182 @@
 "use client";
 
-import { Plus, RotateCcw } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  Download,
+  GripVertical,
+  Plus,
+  RotateCcw,
+  Search,
+  Upload,
+} from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Drawer } from "~/components/ui/dialog";
+import { FlashNotice } from "~/components/ui/flash-notice";
 import { Field, Input, Select, Textarea } from "~/components/ui/field";
-import { Notice, Section, Tag } from "~/components/ui/panel";
+import { EmptyState, Notice, Section, Tag } from "~/components/ui/panel";
+import { useFlash } from "~/components/ui/use-flash";
 import { cn } from "~/lib/cn";
-import { api, type RouterOutputs } from "~/trpc/react";
 import { formText } from "~/lib/form";
+import { api, type RouterInputs, type RouterOutputs } from "~/trpc/react";
 
 type Category = RouterOutputs["admin"]["categories"]["list"][number];
 type Kind = Category["kind"];
+type ImportRow =
+  RouterInputs["admin"]["categories"]["importJson"]["rows"][number];
 
-const swatches = [
-  "#D9622B",
-  "#5E8C31",
-  "#2F6FB0",
-  "#B03A7A",
-  "#6B5BB5",
-  "#8A4FD8",
-  "#7A5230",
-  "#1F9C8A",
-  "#C9406A",
-  "#2591B8",
-  "#D4A017",
-  "#7E7E7E",
+const swatches: { hex: string; name: string }[] = [
+  { hex: "#D9622B", name: "Orange" },
+  { hex: "#5E8C31", name: "Green" },
+  { hex: "#2F6FB0", name: "Blue" },
+  { hex: "#B03A7A", name: "Magenta" },
+  { hex: "#6B5BB5", name: "Indigo" },
+  { hex: "#8A4FD8", name: "Violet" },
+  { hex: "#7A5230", name: "Brown" },
+  { hex: "#1F9C8A", name: "Teal" },
+  { hex: "#C9406A", name: "Rose" },
+  { hex: "#2591B8", name: "Sky" },
+  { hex: "#D4A017", name: "Mustard" },
+  { hex: "#7E7E7E", name: "Grey" },
 ];
+
+const kindLabels: Record<Kind, string> = {
+  expense: "Spending",
+  income: "Income",
+  transfer: "Transfer",
+};
 
 function swallow(fn: () => Promise<unknown>) {
   return () => void fn().catch(() => undefined);
 }
 
+function download(name: string, content: string) {
+  const url = URL.createObjectURL(
+    new Blob([content], { type: "application/json" }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function CategoriesAdmin() {
   const utils = api.useUtils();
   const [rows] = api.admin.categories.list.useSuspenseQuery();
+  const defaults = api.admin.categories.defaultsPreview.useQuery();
   const [editing, setEditing] = useState<Category | "new" | null>(null);
-  const [archiving, setArchiving] = useState<Category | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState<{
+    category: Category;
+    mode: "archive" | "merge";
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [query, setQuery] = useState("");
+  const { flash, success, error, clear } = useFlash();
 
-  const invalidate = () => utils.admin.categories.list.invalidate();
+  const invalidate = () =>
+    Promise.all([
+      utils.admin.categories.list.invalidate(),
+      utils.admin.categories.defaultsPreview.invalidate(),
+    ]);
   const restore = api.admin.categories.restore.useMutation({
-    onSuccess: invalidate,
+    onMutate: clear,
+    onSuccess: async (r) => {
+      success(
+        r.restored > 1
+          ? "Restored, along with its parent category."
+          : "Category restored.",
+      );
+      await invalidate();
+    },
+    onError: error,
   });
   const restoreDefaults = api.admin.categories.restoreDefaults.useMutation({
+    onMutate: clear,
     onSuccess: async (r) => {
       const n = r.inserted + r.unarchived;
-      setFlash(
+      success(
         n === 0
           ? "All default categories are already present."
           : `Restored ${n} default categor${n === 1 ? "y" : "ies"}.`,
       );
       await invalidate();
     },
+    onError: error,
+  });
+  const reorder = api.admin.categories.reorder.useMutation({
+    onSettled: invalidate,
+    onError: error,
   });
 
-  const { active, archived, childrenOf } = useMemo(() => {
+  const { active, archived, childrenOf, byId } = useMemo(() => {
     const active = rows.filter((r) => !r.archivedAt);
     const childrenOf = new Map<string, Category[]>();
     for (const r of active) {
       if (r.parentId)
         childrenOf.set(r.parentId, [...(childrenOf.get(r.parentId) ?? []), r]);
     }
-    return { active, archived: rows.filter((r) => r.archivedAt), childrenOf };
+    return {
+      active,
+      archived: rows.filter((r) => r.archivedAt),
+      childrenOf,
+      byId: new Map(rows.map((r) => [r.id, r])),
+    };
   }, [rows]);
 
   const topLevel = active.filter((r) => !r.parentId);
+  const q = query.trim().toLowerCase();
+  const matches = (c: Category) =>
+    !q ||
+    c.name.toLowerCase().includes(q) ||
+    (c.aiHint?.toLowerCase().includes(q) ?? false);
+
+  const missingDefaults =
+    (defaults.data?.missing.length ?? 0) +
+    (defaults.data?.archived.length ?? 0);
+
+  function exportJson() {
+    const keyOf = new Map(rows.map((r) => [r.id, r.key]));
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      categories: rows.map((r) => ({
+        key: r.key,
+        name: r.name,
+        kind: r.kind,
+        parentKey: r.parentId ? (keyOf.get(r.parentId) ?? null) : null,
+        color: r.color,
+        aiHint: r.aiHint,
+        archived: !!r.archivedAt,
+      })),
+    };
+    download(
+      `finfolio-categories-${payload.exportedAt.slice(0, 10)}.json`,
+      JSON.stringify(payload, null, 2),
+    );
+  }
+
+  function move(siblings: Category[], from: number, to: number) {
+    if (to < 0 || to >= siblings.length || from === to) return;
+    const ids = siblings.map((s) => s.id);
+    const [moved] = ids.splice(from, 1);
+    ids.splice(to, 0, moved!);
+    // Show the new order straight away; the server confirms it.
+    utils.admin.categories.list.setData(undefined, (old) =>
+      old
+        ?.map((c) => {
+          const index = ids.indexOf(c.id);
+          return index === -1 ? c : { ...c, sortOrder: (index + 1) * 10 };
+        })
+        .sort(
+          (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+        ),
+    );
+    clear();
+    reorder.mutate({ ids });
+  }
+
   const groups: { kind: Kind; title: string; description: string }[] = [
     {
       kind: "expense",
@@ -88,21 +198,53 @@ export function CategoriesAdmin() {
 
   return (
     <>
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-ink-2 max-w-xl text-sm">
-          The AI may only answer with one of these keys, and reads each
-          description to decide. Users can re-categorise any transaction
-          afterwards.
-        </p>
-        <div className="flex gap-2">
-          <Button
+      <p className="text-ink-2 mb-5 max-w-2xl text-sm">
+        The AI may only answer with one of these categories, and reads each
+        description to decide. People can re-categorise any transaction
+        afterwards. Drag the handle to reorder.
+      </p>
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div className="relative w-full max-w-xs">
+          <Search className="text-ink-3 pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+          <Input
+            aria-label="Search categories"
+            placeholder="Search name or description"
+            className="pl-9"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="ml-auto flex flex-wrap gap-2">
+          <Button variant="ghost" onClick={exportJson}>
+            <Download className="size-4" />
+            Export
+          </Button>
+          <Button variant="ghost" onClick={() => setImporting(true)}>
+            <Upload className="size-4" />
+            Import
+          </Button>
+          <ConfirmButton
             variant="secondary"
-            onClick={() => restoreDefaults.mutate()}
+            disabled={missingDefaults === 0}
+            title={
+              missingDefaults === 0
+                ? "Every default category is present"
+                : [
+                    ...(defaults.data?.missing ?? []).map((n) => `Add ${n}`),
+                    ...(defaults.data?.archived ?? []).map(
+                      (n) => `Restore ${n}`,
+                    ),
+                  ].join("\n")
+            }
+            confirmLabel={`Bring back ${missingDefaults}?`}
             loading={restoreDefaults.isPending}
+            onConfirm={() => restoreDefaults.mutate()}
           >
             <RotateCcw className="size-4" />
-            Restore defaults
-          </Button>
+            {missingDefaults
+              ? `Restore ${missingDefaults} default${missingDefaults === 1 ? "" : "s"}`
+              : "Defaults present"}
+          </ConfirmButton>
           <Button onClick={() => setEditing("new")}>
             <Plus className="size-4" />
             Add category
@@ -110,76 +252,103 @@ export function CategoriesAdmin() {
         </div>
       </div>
 
-      {flash ? (
-        <Notice tone="success" className="mb-8">
-          {flash}
-        </Notice>
-      ) : null}
+      <FlashNotice flash={flash} className="mb-6" />
 
-      <div className="space-y-12">
+      <div className="space-y-6">
         {groups.map((group) => {
           const parents = topLevel.filter((r) => r.kind === group.kind);
-          if (parents.length === 0) return null;
+          const visible = parents.filter(
+            (p) => matches(p) || (childrenOf.get(p.id) ?? []).some(matches),
+          );
+          if (parents.length === 0 || visible.length === 0) return null;
           return (
             <Section
               key={group.kind}
               title={group.title}
               description={group.description}
             >
-              <ul>
-                {parents.map((parent) => (
-                  <li
-                    key={parent.id}
-                    className="border-line border-b last:border-b-0"
-                  >
+              <SortableList
+                items={visible}
+                disabled={!!q}
+                onMove={(from, to) => move(parents, from, to)}
+                render={(parent) => (
+                  <>
                     <CategoryRow
                       category={parent}
                       onEdit={setEditing}
-                      onArchive={setArchiving}
+                      onArchive={(c, mode) =>
+                        setArchiving({ category: c, mode })
+                      }
                     />
                     {childrenOf.get(parent.id)?.length ? (
-                      <ul className="border-line mb-2 ml-7 border-l-2">
-                        {childrenOf.get(parent.id)!.map((child) => (
-                          <li key={child.id}>
+                      <div className="border-line mb-2 ml-7 border-l-2">
+                        <SortableList
+                          items={childrenOf
+                            .get(parent.id)!
+                            .filter((c) => !q || matches(c) || matches(parent))}
+                          disabled={!!q}
+                          onMove={(from, to) =>
+                            move(childrenOf.get(parent.id)!, from, to)
+                          }
+                          render={(child) => (
                             <CategoryRow
                               category={child}
                               child
                               fallbackColor={parent.color}
                               onEdit={setEditing}
-                              onArchive={setArchiving}
+                              onArchive={(c, mode) =>
+                                setArchiving({ category: c, mode })
+                              }
                             />
-                          </li>
-                        ))}
-                      </ul>
+                          )}
+                        />
+                      </div>
                     ) : null}
-                  </li>
-                ))}
-              </ul>
+                  </>
+                )}
+              />
             </Section>
           );
         })}
+        {q && !active.some(matches) ? (
+          <EmptyState title="No matches">Try another word.</EmptyState>
+        ) : null}
 
         {archived.length ? (
           <Section
             title="Archived"
-            description="Hidden from users and the AI. Restore to bring one back."
+            description="Hidden from people and the AI. Restore to bring one back."
           >
             <ul className="flex flex-wrap gap-2">
-              {archived.map((c) => (
-                <li
-                  key={c.id}
-                  className="border-line flex items-center gap-2 border py-1 pr-1 pl-3 text-sm"
-                >
-                  {c.name}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => restore.mutate({ id: c.id })}
+              {archived.map((c) => {
+                const parent = c.parentId ? byId.get(c.parentId) : undefined;
+                return (
+                  <li
+                    key={c.id}
+                    className="border-line rounded-ctl flex items-center gap-2 border py-1 pr-1 pl-3 text-sm"
                   >
-                    Restore
-                  </Button>
-                </li>
-              ))}
+                    <span>
+                      {parent ? (
+                        <span className="text-ink-3">{parent.name} › </span>
+                      ) : null}
+                      {c.name}
+                      <span className="text-ink-3 ml-1.5 text-[12px]">
+                        {kindLabels[c.kind]}
+                      </span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      loading={
+                        restore.isPending && restore.variables?.id === c.id
+                      }
+                      onClick={() => restore.mutate({ id: c.id })}
+                    >
+                      Restore
+                    </Button>
+                  </li>
+                );
+              })}
             </ul>
           </Section>
         ) : null}
@@ -189,25 +358,117 @@ export function CategoriesAdmin() {
         key={editing === "new" ? "new" : (editing?.id ?? "closed")}
         category={editing}
         parents={topLevel}
+        // Archived subcategories count too: the server keeps their parent top-level as well.
+        hasChildren={
+          editing !== null &&
+          editing !== "new" &&
+          rows.some((r) => r.parentId === editing.id)
+        }
         onClose={() => setEditing(null)}
         onSaved={async (message) => {
           setEditing(null);
-          setFlash(message);
+          success(message);
           await invalidate();
         }}
       />
       <ArchiveDrawer
-        key={archiving?.id ?? "none"}
-        category={archiving}
+        key={`${archiving?.category.id ?? "none"}-${archiving?.mode}`}
+        category={archiving?.category ?? null}
+        mode={archiving?.mode ?? "archive"}
         options={active}
         onClose={() => setArchiving(null)}
         onDone={async (message) => {
           setArchiving(null);
-          setFlash(message);
+          success(message);
+          await invalidate();
+        }}
+      />
+      <ImportDrawer
+        open={importing}
+        onClose={() => setImporting(false)}
+        onDone={async (message) => {
+          setImporting(false);
+          success(message);
           await invalidate();
         }}
       />
     </>
+  );
+}
+
+/**
+ * A list that can be reordered by dragging a row's handle, or with the arrow keys while the handle
+ * has focus.
+ */
+function SortableList<T extends { id: string; name: string }>({
+  items,
+  render,
+  onMove,
+  disabled,
+}: {
+  items: T[];
+  render: (item: T) => React.ReactNode;
+  onMove: (from: number, to: number) => void;
+  disabled?: boolean;
+}) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  return (
+    <ul>
+      {items.map((item, index) => (
+        <li
+          key={item.id}
+          onDragOver={(e) => {
+            if (dragIndex === null) return;
+            e.preventDefault();
+            setOverIndex(index);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (dragIndex !== null) onMove(dragIndex, index);
+            setDragIndex(null);
+            setOverIndex(null);
+          }}
+          className={cn(
+            "border-line flex items-start gap-1 border-b last:border-b-0",
+            dragIndex === index && "opacity-40",
+            overIndex === index &&
+              dragIndex !== null &&
+              dragIndex !== index &&
+              (dragIndex < index
+                ? "shadow-[inset_0_-2px_0_var(--color-brand)]"
+                : "shadow-[inset_0_2px_0_var(--color-brand)]"),
+          )}
+        >
+          {disabled ? null : (
+            <button
+              type="button"
+              draggable
+              aria-label={`Move ${item.name}. Use the up and down arrow keys.`}
+              title="Drag to reorder"
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = "move";
+                setDragIndex(index);
+              }}
+              onDragEnd={() => {
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                  e.preventDefault();
+                  onMove(index, index + (e.key === "ArrowUp" ? -1 : 1));
+                }
+              }}
+              className="text-ink-3 hover:text-ink rounded-ctl mt-2 grid size-7 shrink-0 cursor-grab place-items-center active:cursor-grabbing"
+            >
+              <GripVertical className="size-4" />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">{render(item)}</div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -222,17 +483,16 @@ function CategoryRow({
   child?: boolean;
   fallbackColor?: string | null;
   onEdit: (c: Category) => void;
-  onArchive: (c: Category) => void;
+  onArchive: (c: Category, mode: "archive" | "merge") => void;
 }) {
+  const count = `${category.transactionCount} txn${category.transactionCount === 1 ? "" : "s"}`;
   return (
-    <div
-      className={cn(
-        "group flex items-center gap-3 py-2.5",
-        child ? "pl-4" : "",
-      )}
-    >
+    <div className={cn("flex items-center gap-3 py-2.5", child ? "pl-2" : "")}>
       <span
-        className={cn("shrink-0", child ? "size-2.5" : "size-3.5")}
+        className={cn(
+          "shrink-0 rounded-[3px]",
+          child ? "size-2.5" : "size-3.5",
+        )}
         style={{
           background: category.color ?? fallbackColor ?? "#9aa3a0",
           opacity: child && !category.color ? 0.55 : 1,
@@ -246,24 +506,34 @@ function CategoryRow({
               Custom
             </Tag>
           ) : null}
+          <span className="figures text-ink-3 ml-2 text-[12px] font-normal sm:hidden">
+            {count}
+          </span>
         </p>
         {category.aiHint ? (
           <p className="text-ink-3 truncate text-[13px]">{category.aiHint}</p>
         ) : null}
       </div>
-      <span className="figures text-ink-3 hidden text-[13px] sm:block">
-        {category.transactionCount} txn
-        {category.transactionCount === 1 ? "" : "s"}
+      <span className="figures text-ink-3 hidden text-[13px] whitespace-nowrap sm:block">
+        {count}
       </span>
-      <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+      <div className="flex shrink-0 gap-0.5">
         <Button variant="ghost" size="sm" onClick={() => onEdit(category)}>
           Edit
         </Button>
         <Button
           variant="ghost"
           size="sm"
+          className="text-ink-2"
+          onClick={() => onArchive(category, "merge")}
+        >
+          Merge
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           className="text-loss"
-          onClick={() => onArchive(category)}
+          onClick={() => onArchive(category, "archive")}
         >
           Archive
         </Button>
@@ -275,30 +545,30 @@ function CategoryRow({
 function CategoryDrawer({
   category,
   parents,
+  hasChildren,
   onClose,
   onSaved,
 }: {
   category: Category | "new" | null;
   parents: Category[];
+  hasChildren: boolean;
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
   const existing = category && category !== "new" ? category : null;
-  const [color, setColor] = useState(existing?.color ?? swatches[0]!);
+  const [color, setColor] = useState(existing?.color ?? swatches[0]!.hex);
+  const [parentId, setParentId] = useState(existing?.parentId ?? "");
+  const [kind, setKind] = useState<Kind>(existing?.kind ?? "expense");
   const create = api.admin.categories.create.useMutation();
   const update = api.admin.categories.update.useMutation();
   const error = create.error ?? update.error;
-  const hasChildren = existing
-    ? parents.some((p) => p.id === existing.id) && !existing.parentId
-    : false;
+  const parent = parents.find((p) => p.id === parentId);
 
   async function save(form: FormData) {
-    const parentId = formText(form, "parentId") || null;
-    const parent = parents.find((p) => p.id === parentId);
     const values = {
       name: formText(form, "name"),
-      kind: (parent?.kind ?? formText(form, "kind")) as Kind,
-      parentId,
+      kind: parent?.kind ?? kind,
+      parentId: parentId || null,
       color,
       aiHint: formText(form, "aiHint"),
     };
@@ -365,8 +635,8 @@ function CategoryDrawer({
           >
             <Select
               id="cat-parent"
-              name="parentId"
-              defaultValue={existing?.parentId ?? ""}
+              value={parentId}
+              onChange={(e) => setParentId(e.target.value)}
               disabled={hasChildren}
             >
               <option value="">None (top level)</option>
@@ -382,12 +652,17 @@ function CategoryDrawer({
           <Field
             label="Type"
             htmlFor="cat-kind"
-            hint="Subcategories inherit their parent's type."
+            hint={
+              parent
+                ? `Set by ${parent.name}: subcategories share their parent's type.`
+                : undefined
+            }
           >
             <Select
               id="cat-kind"
-              name="kind"
-              defaultValue={existing?.kind ?? "expense"}
+              value={parent?.kind ?? kind}
+              disabled={!!parent}
+              onChange={(e) => setKind(e.target.value as Kind)}
             >
               <option value="expense">Spending</option>
               <option value="income">Income</option>
@@ -400,18 +675,20 @@ function CategoryDrawer({
           <div className="flex flex-wrap gap-2">
             {swatches.map((s) => (
               <button
-                key={s}
+                key={s.hex}
                 type="button"
-                aria-label={`Colour ${s}`}
-                aria-pressed={color === s}
-                onClick={() => setColor(s)}
+                aria-label={s.name}
+                title={s.name}
+                aria-pressed={color === s.hex}
+                onClick={() => setColor(s.hex)}
                 className={cn(
-                  "size-8 border-2",
-                  color === s ? "border-ink" : "border-transparent",
+                  "rounded-ctl size-8 border-2",
+                  color === s.hex ? "border-ink" : "border-transparent",
                 )}
                 style={{
-                  background: s,
-                  boxShadow: color === s ? "inset 0 0 0 2px #fff" : undefined,
+                  background: s.hex,
+                  boxShadow:
+                    color === s.hex ? "inset 0 0 0 2px #fff" : undefined,
                 }}
               />
             ))}
@@ -436,51 +713,59 @@ function CategoryDrawer({
 
 function ArchiveDrawer({
   category,
+  mode,
   options,
   onClose,
   onDone,
 }: {
   category: Category | null;
+  mode: "archive" | "merge";
   options: Category[];
   onClose: () => void;
   onDone: (message: string) => Promise<void>;
 }) {
   const archive = api.admin.categories.archive.useMutation();
+  const children = category
+    ? options.filter((o) => o.parentId === category.id)
+    : [];
   const excluded = new Set(
-    category
-      ? [
-          category.id,
-          ...options.filter((o) => o.parentId === category.id).map((o) => o.id),
-        ]
-      : [],
+    category ? [category.id, ...children.map((o) => o.id)] : [],
   );
   const targets = options.filter((o) => !excluded.has(o.id));
   const affected = category
     ? category.transactionCount +
-      options
-        .filter((o) => o.parentId === category.id)
-        .reduce((total, o) => total + o.transactionCount, 0)
+      children.reduce((total, o) => total + o.transactionCount, 0)
     : 0;
-  const fallback = targets.find((t) => t.key === "other")?.id ?? "";
+  const fallback =
+    mode === "merge" ? "" : (targets.find((t) => t.key === "other")?.id ?? "");
+  const merge = mode === "merge";
 
   return (
     <Drawer
       open={category !== null}
       onClose={onClose}
-      title={`Archive ${category?.name ?? ""}`}
-      description="Archived categories disappear for users and the AI. You can restore them later."
+      title={
+        merge
+          ? `Merge ${category?.name ?? ""}`
+          : `Archive ${category?.name ?? ""}`
+      }
+      description={
+        merge
+          ? "Moves its transactions and merchant rules into another category, then archives it. Use it to fold duplicates together."
+          : "Archived categories disappear for people and the AI. You can restore them later."
+      }
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button
-            variant="danger"
+            variant={merge ? "primary" : "danger"}
             type="submit"
             form="archive-form"
             loading={archive.isPending}
           >
-            Archive
+            {merge ? "Merge" : "Archive"}
           </Button>
         </>
       }
@@ -498,8 +783,11 @@ function ArchiveDrawer({
               id: category.id,
               reassignToId,
             });
+            const target = targets.find((t) => t.id === reassignToId);
             await onDone(
-              `Archived ${r.archived} categor${r.archived === 1 ? "y" : "ies"}; ${r.transactionsMoved} transaction${r.transactionsMoved === 1 ? "" : "s"} moved.`,
+              merge && target
+                ? `Merged ${category.name} into ${target.name}; ${r.transactionsMoved} transaction${r.transactionsMoved === 1 ? "" : "s"} moved.`
+                : `Archived ${r.archived} categor${r.archived === 1 ? "y" : "ies"}; ${r.transactionsMoved} transaction${r.transactionsMoved === 1 ? "" : "s"} moved.`,
             );
           })();
         }}
@@ -507,20 +795,35 @@ function ArchiveDrawer({
         {archive.error ? (
           <Notice tone="error">{archive.error.message}</Notice>
         ) : null}
-        {category && options.some((o) => o.parentId === category.id) ? (
-          <Notice tone="warn">Its subcategories will be archived too.</Notice>
+        {children.length ? (
+          <Notice tone="warn">
+            Its {children.length} subcategor
+            {children.length === 1 ? "y is" : "ies are"} archived too, and their
+            transactions move with it.
+          </Notice>
         ) : null}
         {affected > 0 ? (
           <Notice tone="warn">
             This recategorises {affected} transaction
             {affected === 1 ? "" : "s"} across all users. Merchant rules move
-            with them, or are deleted if you leave them uncategorised. The
-            change is recorded in the activity log.
+            with them
+            {merge ? "" : ", or are deleted if you leave them uncategorised"}.
+            The change is recorded in the activity log.
           </Notice>
         ) : null}
-        <Field label="Move existing transactions to" htmlFor="reassign">
-          <Select id="reassign" name="reassignToId" defaultValue={fallback}>
-            <option value="">Leave uncategorised</option>
+        <Field
+          label={merge ? "Merge into" : "Move existing transactions to"}
+          htmlFor="reassign"
+        >
+          <Select
+            id="reassign"
+            name="reassignToId"
+            defaultValue={fallback}
+            required={merge}
+          >
+            <option value="" disabled={merge}>
+              {merge ? "Choose a category" : "Leave uncategorised"}
+            </option>
             {targets.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.parentId ? "— " : ""}
@@ -530,6 +833,118 @@ function ArchiveDrawer({
           </Select>
         </Field>
       </form>
+    </Drawer>
+  );
+}
+
+function ImportDrawer({
+  open,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDone: (message: string) => Promise<void>;
+}) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [rows, setRows] = useState<ImportRow[] | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const preview = api.admin.categories.importJson.useMutation();
+  const apply = api.admin.categories.importJson.useMutation();
+
+  async function read(file: File) {
+    setParseError(null);
+    setRows(null);
+    preview.reset();
+    try {
+      const raw = JSON.parse(await file.text()) as unknown;
+      const list = Array.isArray(raw)
+        ? raw
+        : (raw as { categories?: unknown }).categories;
+      if (!Array.isArray(list) || list.length === 0)
+        throw new Error("No categories found in that file.");
+      const parsed = list as ImportRow[];
+      setRows(parsed);
+      preview.mutate({ rows: parsed, dryRun: true });
+    } catch (e) {
+      setParseError(
+        e instanceof SyntaxError
+          ? "That file is not valid JSON."
+          : e instanceof Error
+            ? e.message
+            : "Could not read that file.",
+      );
+    }
+  }
+
+  return (
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title="Import categories"
+      description="Use a file from Export. Categories are matched by key: new keys are added, existing ones updated. Nothing is deleted."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!rows || !preview.data}
+            loading={apply.isPending}
+            onClick={() =>
+              rows &&
+              void apply
+                .mutateAsync({ rows, dryRun: false })
+                .then((r) =>
+                  onDone(
+                    `Imported: ${r.created} added, ${r.updated} updated, ${r.unchanged} unchanged.`,
+                  ),
+                )
+                .catch(() => undefined)
+            }
+          >
+            Apply import
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <Button variant="secondary" onClick={() => fileInput.current?.click()}>
+          <Upload className="size-4" />
+          Choose a JSON file
+        </Button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void read(file);
+          }}
+        />
+        {parseError ? <Notice tone="error">{parseError}</Notice> : null}
+        {preview.error ? (
+          <Notice tone="error">{preview.error.message}</Notice>
+        ) : null}
+        {apply.error ? (
+          <Notice tone="error">{apply.error.message}</Notice>
+        ) : null}
+        {preview.isPending ? (
+          <p className="text-ink-3 text-sm">Checking the file…</p>
+        ) : null}
+        {preview.data ? (
+          <Notice tone="info">
+            <strong>{rows?.length} categories in the file.</strong> Applying
+            adds {preview.data.created}, updates {preview.data.updated} and
+            leaves {preview.data.unchanged} as they are.
+            {preview.data.archivedWithParent
+              ? ` ${preview.data.archivedWithParent} subcategor${preview.data.archivedWithParent === 1 ? "y is" : "ies are"} archived along with an archived parent.`
+              : ""}{" "}
+            Archiving through an import never moves transactions.
+          </Notice>
+        ) : null}
+      </div>
     </Drawer>
   );
 }

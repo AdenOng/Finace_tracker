@@ -31,11 +31,16 @@ export class ExchangeRateClient {
     private now: () => number = Date.now,
   ) {}
 
-  async latest(base: string): Promise<ExchangeRate[]> {
+  /** `force` skips the hour-long cache, e.g. for an admin's "refresh now". */
+  async latest(
+    base: string,
+    options: { force?: boolean } = {},
+  ): Promise<ExchangeRate[]> {
     if (!/^[A-Z]{3}$/.test(base)) return [];
     const cached = this.cache.get(base);
     if (cached?.pending) return cached.pending;
-    if (cached && cached.expires > this.now()) return cached.rows;
+    if (cached && !options.force && cached.expires > this.now())
+      return cached.rows;
 
     const entry = { expires: 0, rows: cached?.rows ?? [] } as {
       expires: number;

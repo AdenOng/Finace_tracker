@@ -3,16 +3,18 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 
 import { env } from "~/env";
 import { loadPresetPack } from "~/presets";
+import { loadInstanceSettings } from "~/server/lib/instance-settings";
 import { db } from "./index";
 import { seedCatalog, seedDefaultLlmProvider } from "./seed/catalog";
 
 /**
- * Runs on server start (src/instrumentation.ts): apply pending migrations, then insert any missing
- * defaults. Both steps are idempotent, so every container restart is safe.
+ * Runs on server start (src/instrumentation.ts): apply pending migrations, load admin settings,
+ * then insert any missing defaults. Every step is idempotent, so every container restart is safe.
  */
 export async function bootstrapDatabase() {
   const started = Date.now();
   await migrate(db, { migrationsFolder: path.join(process.cwd(), "drizzle") });
+  await loadInstanceSettings(db);
   const pack = await loadPresetPack({
     presetId: env.DATA_PRESET,
     presetFile: env.PRESET_FILE,

@@ -16,8 +16,10 @@ import {
   findPendingWorkspaceInvitation,
   WORKSPACE_INVITE_HEADER,
 } from "~/server/modules/workspaces/invitations";
+import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
 import { claimInitialAdmin } from "./bootstrap";
 import { findPendingInvitation, INVITE_TOKEN_HEADER } from "./invitations";
+import { recordSignIns } from "./sign-in-events";
 
 export const APP_NAME = "Finfolio";
 
@@ -55,6 +57,7 @@ export const auth = betterAuth({
       "/two-factor/verify-totp": { window: 60, max: 5 },
     },
   },
+  hooks: { after: recordSignIns },
   databaseHooks: {
     user: {
       create: {
@@ -70,6 +73,12 @@ export const auth = betterAuth({
           }
           const workspaceToken = ctx?.headers?.get(WORKSPACE_INVITE_HEADER);
           if (workspaceToken) {
+            if (!cachedInstanceSettings().workspaceInviteSignups) {
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "New accounts need an invitation from an admin. Ask them to invite you first.",
+              });
+            }
             const invite = await findPendingWorkspaceInvitation(
               db,
               workspaceToken,

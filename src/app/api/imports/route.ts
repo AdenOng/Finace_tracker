@@ -2,8 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { after, NextResponse } from "next/server";
 
 import { env } from "~/env";
-import { auth } from "~/server/auth/config";
 import { needsTwoFactorEnrollment } from "~/server/auth/enrollment";
+import { getSessionFor } from "~/server/auth/session-policy";
 import { db } from "~/server/db";
 import { document, extractionJob, financialAccount } from "~/server/db/schema";
 import { writableBy, resolveAccessScope } from "~/server/lib/access";
@@ -23,7 +23,7 @@ export const maxDuration = 300;
  * and read in the background; the response returns at once with the job id to follow.
  */
 export async function POST(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
+  const session = await getSessionFor(request.headers);
   if (!session || needsTwoFactorEnrollment(session.user)) {
     return NextResponse.json({ error: "Sign in first" }, { status: 401 });
   }
@@ -61,9 +61,7 @@ export async function POST(request: Request) {
       .select({ id: extractionJob.id })
       .from(document)
       .innerJoin(extractionJob, eq(extractionJob.documentId, document.id))
-      .where(
-        and(eq(document.ownerId, scope.userId), eq(document.sha256, hash)),
-      )
+      .where(and(eq(document.ownerId, scope.userId), eq(document.sha256, hash)))
       .limit(1);
     if (seen) {
       return NextResponse.json(

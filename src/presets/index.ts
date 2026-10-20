@@ -24,6 +24,17 @@ const builtInPacks: Record<string, PresetPack> = {
 
 export const builtInPackIds = Object.keys(builtInPacks);
 
+/** A built-in pack by id, validated like a custom file. */
+export function builtInPack(id: string): ParsedPresetPack | null {
+  const pack = builtInPacks[id];
+  return pack ? presetPackSchema.parse(pack) : null;
+}
+
+/** Validates a pack uploaded through the admin console. */
+export function parsePresetPack(raw: unknown): ParsedPresetPack {
+  return presetPackSchema.parse(raw);
+}
+
 /**
  * Resolve the active pack: a JSON file (PRESET_FILE) wins over a built-in id (DATA_PRESET).
  * Packs are validated so a malformed custom file fails loudly at seed time.

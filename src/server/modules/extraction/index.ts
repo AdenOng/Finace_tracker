@@ -4,12 +4,16 @@ import type { Database } from "~/server/db";
 import { category, institution } from "~/server/db/schema";
 import { preset } from "~/server/lib/preset";
 import { getDefaultLlm, type LlmAdapter } from "../llm";
-import { prepareDocumentInput, UnreadableDocumentError } from "./prepare-input";
+import { NeedsVisionError, prepareDocumentInput } from "./prepare-input";
 import { buildExtractionPrompt, EXTRACTION_SYSTEM_PROMPT } from "./prompt";
 import { buildStatementSchema } from "./schemas";
 
 export * from "./schemas";
-export { SUPPORTED_MIME_TYPES, UnreadableDocumentError } from "./prepare-input";
+export {
+  NeedsVisionError,
+  SUPPORTED_MIME_TYPES,
+  UnreadableDocumentError,
+} from "./prepare-input";
 
 export async function loadActiveCategories(db: Database) {
   return db
@@ -72,7 +76,7 @@ export async function extractDocument(
     llm = { adapter, supportsVision: provider.supportsVision };
   }
   if (prepared.files.length > 0 && !llm.supportsVision) {
-    throw new UnreadableDocumentError(
+    throw new NeedsVisionError(
       "This document is an image or has scanned pages without a text layer, and the selected model is text-only. Pick a provider that can read images.",
     );
   }

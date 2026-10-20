@@ -10,8 +10,10 @@ import {
   institutionKind,
   ingestMethod,
 } from "~/server/db/schema";
-import { reseedFromActivePack } from "~/server/db/seed/defaults";
+import { presetDiff, reseedFromActivePack } from "~/server/db/seed/defaults";
+import { activePresetPack } from "~/server/lib/preset";
 import { recordAudit } from "~/server/lib/audit";
+import { outer } from "~/server/lib/sql";
 
 const institutionInput = z.object({
   name: z.string().trim().min(1).max(120),
@@ -20,7 +22,7 @@ const institutionInput = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .length(2)
+    .regex(/^[A-Z]{2}$/, "Use a two-letter country code, e.g. SG")
     .nullable()
     .or(z.literal("").transform(() => null)),
   website: z
@@ -65,7 +67,8 @@ export const adminInstitutionsRouter = createTRPCRouter({
         extractionHints: institution.extractionHints,
         isSystem: institution.isSystem,
         archivedAt: institution.archivedAt,
-        accountCount: sql<number>`(select count(*)::int from ${financialAccount} where ${financialAccount.institutionId} = ${institution.id})`,
+        accountCount: sql<number>`(select count(*)::int from ${financialAccount} where ${financialAccount.institutionId} = ${outer(institution.id)})`,
+        documentCount: sql<number>`(select count(*)::int from ${document} where ${document.institutionId} = ${outer(institution.id)})`,
       })
       .from(institution)
       .orderBy(
@@ -195,6 +198,82 @@ export const adminInstitutionsRouter = createTRPCRouter({
         targetLabel: row.name,
       });
     }),
+
+  /**
+   * Folds a duplicate into another institution: accounts and uploads move to `targetId`, then the
+   * duplicate is deleted (or archived if it is a default, so the next seed does not re-add it).
+   */
+  merge: adminProcedure
+    .input(z.object({ sourceId: z.uuid(), targetId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.sourceId === input.targetId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Pick a different institution to merge into",
+        });
+      }
+      return ctx.db.transaction(async (tx) => {
+        const rows = await tx
+          .select({
+            id: institution.id,
+            name: institution.name,
+            isSystem: institution.isSystem,
+            archivedAt: institution.archivedAt,
+          })
+          .from(institution)
+          .where(
+            sql`${institution.id} in (${input.sourceId}, ${input.targetId})`,
+          );
+        const source = rows.find((r) => r.id === input.sourceId);
+        const target = rows.find((r) => r.id === input.targetId);
+        if (!source || !target) throw new TRPCError({ code: "NOT_FOUND" });
+        if (target.archivedAt) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Restore the institution you are merging into first",
+          });
+        }
+        const accounts = await tx
+          .update(financialAccount)
+          .set({ institutionId: target.id })
+          .where(eq(financialAccount.institutionId, source.id))
+          .returning({ id: financialAccount.id });
+        const documents = await tx
+          .update(document)
+          .set({ institutionId: target.id })
+          .where(eq(document.institutionId, source.id))
+          .returning({ id: document.id });
+        if (source.isSystem) {
+          await tx
+            .update(institution)
+            .set({ archivedAt: new Date() })
+            .where(eq(institution.id, source.id));
+        } else {
+          await tx.delete(institution).where(eq(institution.id, source.id));
+        }
+        await recordAudit(tx, {
+          actorId: ctx.session.user.id,
+          action: "institution.merged",
+          targetType: "institution",
+          targetId: target.id,
+          targetLabel: target.name,
+          details: {
+            from: source.name,
+            accountsMoved: accounts.length,
+            uploadsMoved: documents.length,
+          },
+        });
+        return {
+          accountsMoved: accounts.length,
+          sourceArchived: source.isSystem,
+        };
+      });
+    }),
+
+  defaultsPreview: adminProcedure.query(async ({ ctx }) => {
+    const diff = await presetDiff(ctx.db, await activePresetPack());
+    return diff.institutions;
+  }),
 
   /** Brings back every default from the preset pack: re-inserts missing ones, un-archives archived ones. */
   restoreDefaults: adminProcedure.mutation(async ({ ctx }) => {

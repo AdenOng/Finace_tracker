@@ -10,7 +10,11 @@ export type AuditEntry = {
     | "provider"
     | "category"
     | "institution"
-    | "workspace";
+    | "workspace"
+    | "settings"
+    | "job"
+    | "backup"
+    | "preset";
   targetId?: string | null;
   targetLabel?: string | null;
   /** Identifiers and counts only — never secrets, tokens or financial data. */

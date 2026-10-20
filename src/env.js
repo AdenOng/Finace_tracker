@@ -41,6 +41,14 @@ export const env = createEnv({
     OPENCODE_DEFAULT_MODEL: z.string().default("opencode-go/glm-5.3-flash"),
 
     UPLOAD_DIR: z.string().default("./data/uploads"),
+
+    // Optional outgoing email for invites, reset links and new-device alerts.
+    SMTP_URL: z.string().optional(),
+    SMTP_FROM: z.string().optional(),
+
+    // Where the backup service writes database dumps (see docker-compose.yml).
+    BACKUP_DIR: z.string().default("./backups"),
+    BACKUP_RETENTION_DAYS: z.coerce.number().int().positive().default(14),
   },
 
   client: {},
@@ -59,6 +67,10 @@ export const env = createEnv({
     OPENCODE_SERVER_PASSWORD: process.env.OPENCODE_SERVER_PASSWORD,
     OPENCODE_DEFAULT_MODEL: process.env.OPENCODE_DEFAULT_MODEL,
     UPLOAD_DIR: process.env.UPLOAD_DIR,
+    SMTP_URL: process.env.SMTP_URL,
+    SMTP_FROM: process.env.SMTP_FROM,
+    BACKUP_DIR: process.env.BACKUP_DIR,
+    BACKUP_RETENTION_DAYS: process.env.BACKUP_RETENTION_DAYS,
   },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

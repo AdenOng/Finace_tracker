@@ -8,15 +8,13 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError, z } from "zod";
 
-import { auth } from "~/server/auth/config";
 import { needsTwoFactorEnrollment } from "~/server/auth/enrollment";
+import { getSessionFor } from "~/server/auth/session-policy";
 import { db } from "~/server/db";
 import { resolveAccessScope } from "~/server/lib/access";
 
 export const createTRPCContext = async (opts: { headers: Headers }) => {
-  const session = await auth.api.getSession({
-    headers: opts.headers,
-  });
+  const session = await getSessionFor(opts.headers);
   return {
     db,
     session,
@@ -75,7 +73,7 @@ export const enrollingProcedure = t.procedure
     });
   });
 
-/** Signed in and, on instances with REQUIRE_TWO_FACTOR, enrolled in 2FA. */
+/** Signed in and, when the two-step policy covers this user, enrolled in 2FA. */
 export const protectedProcedure = enrollingProcedure.use(({ ctx, next }) => {
   if (needsTwoFactorEnrollment(ctx.session.user)) {
     throw new TRPCError({

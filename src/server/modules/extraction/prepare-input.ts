@@ -26,6 +26,9 @@ export type PreparedInput = {
 
 export class UnreadableDocumentError extends Error {}
 
+/** The file needs a model that reads images; another provider may still manage it. */
+export class NeedsVisionError extends UnreadableDocumentError {}
+
 /**
  * Most vision models accept images but not PDFs, so scanned PDF pages are rendered to PNG here
  * rather than passed through as files. Coverage is judged per page: a mixed PDF sends its text
