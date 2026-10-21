@@ -17,7 +17,9 @@ export function Amounts({
   return (
     <span className={cn("figures inline-flex flex-col", className)}>
       {totals.map((t) => (
-        <span key={t.currency}>{formatMoney(t.amount, t.currency)}</span>
+        <span key={t.currency}>
+          <span className="sensitive">{formatMoney(t.amount, t.currency)}</span>
+        </span>
       ))}
     </span>
   );

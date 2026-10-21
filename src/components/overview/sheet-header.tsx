@@ -1,6 +1,8 @@
 import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 
+import { AmountsToggle } from "~/components/finance/privacy";
+
 /** Top of a dashboard sheet: eyebrow, a link out and the headline figure over a rule. */
 export function SheetHeader({
   eyebrow,
@@ -27,11 +29,12 @@ export function SheetHeader({
             {linkLabel}
             <ArrowUpRight className="size-3.5" />
           </Link>
+          <AmountsToggle />
           {settings}
         </div>
       </div>
       <p className="font-poster figures mt-1.5 text-[clamp(26px,7vw,34px)] leading-none font-extrabold">
-        {title}
+        <span className="sensitive">{title}</span>
       </p>
     </div>
   );

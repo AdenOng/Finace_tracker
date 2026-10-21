@@ -130,7 +130,9 @@ export function NetWorthChart({
                 change.isPositive() ? "text-gain" : "text-loss",
               )}
             >
-              {formatMoney(change.toFixed(2), currency, { signed: true })}
+              <span className="sensitive">
+                {formatMoney(change.toFixed(2), currency, { signed: true })}
+              </span>
             </span>
           ) : (
             <span className="text-ink-2">No change</span>
@@ -175,7 +177,7 @@ export function NetWorthChart({
               className="absolute right-0 -translate-y-1/2"
               style={{ top: `${y(tick)}%` }}
             >
-              {compact.format(tick)}
+              <span className="sensitive">{compact.format(tick)}</span>
             </span>
           ))}
         </div>
@@ -259,7 +261,9 @@ export function NetWorthChart({
             >
               <p className="text-ink-2">{formatDate(focus.date)}</p>
               <p className="figures mt-0.5 text-[14px] font-semibold">
-                {formatMoney(focus.total, currency)}
+                <span className="sensitive">
+                  {formatMoney(focus.total, currency)}
+                </span>
               </p>
               {focus.estimated || focus.partial ? (
                 <p className="text-ink-3 mt-0.5">
@@ -327,7 +331,9 @@ export function NetWorthChart({
                     ) : null}
                   </td>
                   <td className="py-1 text-right">
-                    {formatMoney(p.total, currency)}
+                    <span className="sensitive">
+                      {formatMoney(p.total, currency)}
+                    </span>
                     {p.partial ? (
                       <span className="text-ink-3"> · partial</span>
                     ) : null}

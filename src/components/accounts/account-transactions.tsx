@@ -47,6 +47,8 @@ export function AccountTransactions({
 
   return (
     <Section
+      amounts="account-transactions"
+      amountsFor={accountId}
       title="Transactions"
       description="What came in and went out. Transfers between your own accounts are shown but not counted."
       actions={
@@ -85,11 +87,17 @@ export function AccountTransactions({
         {currency ? (
           <p className="figures font-mono text-[13px]">
             <span className="text-gain">
-              In {formatMoney(total(1).toFixed(2), currency)}
+              In{" "}
+              <span className="sensitive">
+                {formatMoney(total(1).toFixed(2), currency)}
+              </span>
             </span>
             <span className="text-ink-3 mx-2">·</span>
             <span className="text-loss">
-              Out {formatMoney(total(-1).toFixed(2), currency)}
+              Out{" "}
+              <span className="sensitive">
+                {formatMoney(total(-1).toFixed(2), currency)}
+              </span>
             </span>
           </p>
         ) : null}
@@ -133,7 +141,9 @@ export function AccountTransactions({
                         : undefined,
                   )}
                 >
-                  {formatMoney(r.amount, r.currency, { signed: true })}
+                  <span className="sensitive">
+                    {formatMoney(r.amount, r.currency, { signed: true })}
+                  </span>
                 </span>
               </li>
             );

@@ -175,6 +175,8 @@ export function AccountDetail({
 
       <div className="space-y-4">
         <Section
+          amounts="account-value"
+          amountsFor={account.id}
           title={investments ? "Value" : "Balance"}
           description={
             holdings
@@ -216,7 +218,11 @@ export function AccountDetail({
         </Section>
 
         {cpfSplit ? (
-          <Section title="By account">
+          <Section
+            amounts="account-split"
+            amountsFor={account.id}
+            title="By account"
+          >
             <ul className="max-w-md">
               {cpfSplit.map((c) => (
                 <li
@@ -226,7 +232,7 @@ export function AccountDetail({
                   <span>
                     {c.bucket ? cpfBucketLabels[c.bucket] : "Not split"}
                   </span>
-                  <span className="figures font-mono">
+                  <span className="figures sensitive font-mono">
                     {formatMoney(c.amount, c.currency)}
                   </span>
                 </li>
@@ -236,7 +242,11 @@ export function AccountDetail({
         ) : null}
 
         {investments && holdings ? (
-          <Section title="Holdings">
+          <Section
+            amounts="account-holdings"
+            amountsFor={account.id}
+            title="Holdings"
+          >
             {holdings.positions.length === 0 ? (
               <p className="text-ink-2 text-sm">Only cash is held.</p>
             ) : (
@@ -274,7 +284,9 @@ export function AccountDetail({
                         {assetClassLabels[p.assetClass]}
                       </Td>
                       <Td className="figures text-right">
-                        {formatQuantity(p.quantity)}
+                        <span className="sensitive">
+                          {formatQuantity(p.quantity)}
+                        </span>
                       </Td>
                       <Td className="figures text-right">
                         {p.statementPrice
@@ -288,7 +300,9 @@ export function AccountDetail({
                       </Td>
                       <Td className="figures text-right font-semibold">
                         {p.value ? (
-                          formatMoney(p.value.amount, p.value.currency)
+                          <span className="sensitive">
+                            {formatMoney(p.value.amount, p.value.currency)}
+                          </span>
                         ) : (
                           <Tag tone="warn">No price</Tag>
                         )}
@@ -314,7 +328,7 @@ export function AccountDetail({
         ) : null}
 
         {investments && holdings && holdings.cash.length > 0 ? (
-          <Section title="Cash">
+          <Section amounts="account-cash" amountsFor={account.id} title="Cash">
             <Amounts totals={holdings.cash} className="text-lg" />
           </Section>
         ) : null}

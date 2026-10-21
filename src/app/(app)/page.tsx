@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
 import { Allocation } from "~/components/overview/allocation";
 import { AccountRow } from "~/components/overview/account-row";
 import { HeroFigure } from "~/components/overview/hero-figure";
@@ -197,16 +198,22 @@ export default async function OverviewPage() {
   return (
     <HydrateClient>
       {/* Net worth */}
-      <section className="card relative overflow-hidden">
+      <AmountsScope
+        scope="overview-net-worth"
+        className="card relative overflow-hidden"
+      >
         <div className="ink-strip h-1.5" />
         <div className="p-5 sm:p-10">
           <div className="flex items-center justify-between gap-4">
             <p className="eyebrow">Net worth · {firstName}</p>
-            <Suspense
-              fallback={<div className="bg-wash rounded-ctl h-8 w-20" />}
-            >
-              <PortfolioSettings currency={currency} id="overview-currency" />
-            </Suspense>
+            <div className="flex items-center gap-1">
+              <AmountsToggle />
+              <Suspense
+                fallback={<div className="bg-wash rounded-ctl h-8 w-20" />}
+              >
+                <PortfolioSettings currency={currency} id="overview-currency" />
+              </Suspense>
+            </div>
           </div>
           {worth.unconverted.length > 0 || worth.unpriced > 0 ? (
             <p className="text-warn mt-3 text-sm font-semibold">
@@ -242,9 +249,11 @@ export default async function OverviewPage() {
                       priceChange.isPositive() ? "text-gain" : "text-loss",
                     )}
                   >
-                    {formatMoney(priceChange.toFixed(2), currency, {
-                      signed: true,
-                    })}{" "}
+                    <span className="sensitive">
+                      {formatMoney(priceChange.toFixed(2), currency, {
+                        signed: true,
+                      })}
+                    </span>{" "}
                     since the previous close
                   </span>
                 ) : null}
@@ -260,9 +269,29 @@ export default async function OverviewPage() {
             ) : null}
             {recorded && !forLaterTotal.isZero() ? (
               <p>
-                {worth.countCpfSrs
-                  ? `${formatMoney(investTotal.plus(bankTotal).toFixed(2), currency)} you can reach today. ${formatMoney(forLaterTotal.toFixed(2), currency)} is in CPF and SRS.`
-                  : `Leaves out ${formatMoney(forLaterTotal.toFixed(2), currency)} in CPF and SRS.`}
+                {worth.countCpfSrs ? (
+                  <>
+                    <span className="sensitive">
+                      {formatMoney(
+                        investTotal.plus(bankTotal).toFixed(2),
+                        currency,
+                      )}
+                    </span>{" "}
+                    you can reach today.{" "}
+                    <span className="sensitive">
+                      {formatMoney(forLaterTotal.toFixed(2), currency)}
+                    </span>{" "}
+                    is in CPF and SRS.
+                  </>
+                ) : (
+                  <>
+                    Leaves out{" "}
+                    <span className="sensitive">
+                      {formatMoney(forLaterTotal.toFixed(2), currency)}
+                    </span>{" "}
+                    in CPF and SRS.
+                  </>
+                )}
               </p>
             ) : null}
             {worth.fxAsOf ? (
@@ -274,9 +303,11 @@ export default async function OverviewPage() {
             {worth.unconverted.length > 0 ? (
               <p className="text-warn">
                 Not included, no exchange rate to {currency} yet:{" "}
-                {worth.unconverted
-                  .map((a) => formatMoney(a.amount, a.currency))
-                  .join(", ")}
+                <span className="sensitive">
+                  {worth.unconverted
+                    .map((a) => formatMoney(a.amount, a.currency))
+                    .join(", ")}
+                </span>
                 .
               </p>
             ) : null}
@@ -311,9 +342,17 @@ export default async function OverviewPage() {
               href: "#banking",
               label: "Bank & cards",
               value: bankTotal,
-              note: owed.isZero()
-                ? `${banking.length} account${banking.length === 1 ? "" : "s"} · ${share(bankTotal)}`
-                : `After ${formatMoney(owed.toFixed(2), currency)} card debt`,
+              note: owed.isZero() ? (
+                `${banking.length} account${banking.length === 1 ? "" : "s"} · ${share(bankTotal)}`
+              ) : (
+                <>
+                  After{" "}
+                  <span className="sensitive">
+                    {formatMoney(owed.toFixed(2), currency)}
+                  </span>{" "}
+                  card debt
+                </>
+              ),
             },
             ...(forLater.length > 0
               ? [
@@ -340,13 +379,15 @@ export default async function OverviewPage() {
             >
               <p className="eyebrow">{part.label}</p>
               <p className="font-poster figures mt-1 truncate text-[20px] leading-tight font-bold sm:text-[28px]">
-                {formatMoney(part.value.toFixed(2), currency)}
+                <span className="sensitive">
+                  {formatMoney(part.value.toFixed(2), currency)}
+                </span>
               </p>
               <p className="text-ink-3 text-[12px]">{part.note}</p>
             </a>
           ))}
         </div>
-      </section>
+      </AmountsScope>
 
       {doneCount < checklist.length ? (
         <section className="card mt-4 flex flex-wrap items-center gap-x-8 gap-y-3 px-6 py-4 sm:px-10">
@@ -382,7 +423,8 @@ export default async function OverviewPage() {
 
       <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         {/* Investments */}
-        <section
+        <AmountsScope
+          scope="overview-investments"
           id="investments"
           className="card min-w-0 scroll-mt-6 p-5 sm:p-8"
         >
@@ -426,10 +468,14 @@ export default async function OverviewPage() {
               ))}
             </ul>
           )}
-        </section>
+        </AmountsScope>
 
         {/* Bank and cards */}
-        <section id="banking" className="card min-w-0 scroll-mt-6 p-5 sm:p-8">
+        <AmountsScope
+          scope="overview-spending"
+          id="banking"
+          className="card min-w-0 scroll-mt-6 p-5 sm:p-8"
+        >
           <SheetHeader
             eyebrow={`Spending · ${formatMonth(month)}`}
             title={formatMoney(moneyOut.toFixed(2), currency)}
@@ -454,14 +500,21 @@ export default async function OverviewPage() {
                     f.tone,
                   )}
                 >
-                  {formatMoney(f.value.toFixed(2), currency)}
+                  <span className="sensitive">
+                    {formatMoney(f.value.toFixed(2), currency)}
+                  </span>
                 </dd>
               </div>
             ))}
           </dl>
           {lastOut.isZero() ? null : (
             <p className="text-ink-3 mt-2 text-[12px]">
-              {formatMoney(moneyOut.minus(lastOut).abs().toFixed(2), currency)}{" "}
+              <span className="sensitive">
+                {formatMoney(
+                  moneyOut.minus(lastOut).abs().toFixed(2),
+                  currency,
+                )}
+              </span>{" "}
               {moneyOut.lessThan(lastOut) ? "less" : "more"} than{" "}
               {formatMonth(shiftMonth(month, -1))}. Transfers between your own
               accounts aren&apos;t counted.
@@ -489,11 +542,13 @@ export default async function OverviewPage() {
                         style={{
                           width: `${c.spent.div(largest).times(100).toFixed(1)}%`,
                         }}
-                        title={`${c.name} · ${formatMoney(c.spent.toFixed(2), currency)}`}
+                        title={c.name}
                       />
                     </span>
                     <span className="figures w-24 text-right font-mono text-[12px]">
-                      {formatMoney(c.spent.toFixed(2), currency)}
+                      <span className="sensitive">
+                        {formatMoney(c.spent.toFixed(2), currency)}
+                      </span>
                     </span>
                   </li>
                 ))}
@@ -514,7 +569,9 @@ export default async function OverviewPage() {
           <div className="border-ink/80 mt-8 flex items-baseline justify-between border-b-2 pb-2">
             <p className="eyebrow">Bank & cards</p>
             <p className="figures font-mono text-[13px] font-semibold">
-              {formatMoney(bankTotal.toFixed(2), currency)}
+              <span className="sensitive">
+                {formatMoney(bankTotal.toFixed(2), currency)}
+              </span>
             </p>
           </div>
           {banking.length === 0 ? (
@@ -533,7 +590,7 @@ export default async function OverviewPage() {
               ))}
             </ul>
           )}
-        </section>
+        </AmountsScope>
       </div>
 
       {worth.cpfSrsEnabled || forLater.length > 0 ? (

@@ -53,9 +53,13 @@ export function AccountRow({
             <span className="text-warn text-[13px]">Awaiting prices</span>
           ) : account.unconverted.length > 0 ? (
             <span className="text-warn block text-[13px]">
-              {account.total === null
-                ? "Rate unavailable"
-                : formatMoney(account.total, currency)}
+              {account.total === null ? (
+                "Rate unavailable"
+              ) : (
+                <span className="sensitive">
+                  {formatMoney(account.total, currency)}
+                </span>
+              )}
               <span className="block text-[11px]">
                 Partial · FX unavailable
               </span>
@@ -67,7 +71,9 @@ export function AccountRow({
                 owed && "text-loss",
               )}
             >
-              {formatMoney(account.total ?? 0, currency)}
+              <span className="sensitive">
+                {formatMoney(account.total ?? 0, currency)}
+              </span>
             </span>
           )}
           {account.unpriced > 0 && account.totals.length > 0 ? (

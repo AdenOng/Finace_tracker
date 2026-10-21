@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
+import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
 import { cn } from "~/lib/cn";
+import type { AmountScope } from "~/lib/privacy";
 
 /** Page title block: serif headline, optional actions on the right. */
 export function PageHeader({
@@ -29,23 +31,36 @@ export function PageHeader({
   );
 }
 
-/** Content section on a raised card surface. */
+/** Content section on a raised card surface. With `amounts`, its money can be hidden on its own. */
 export function Section({
   title,
   description,
   actions,
+  amounts,
+  amountsFor,
   children,
   className,
 }: {
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
+  amounts?: AmountScope;
+  /** The account or workspace shown, when the same card appears once per record. */
+  amountsFor?: string;
   children?: ReactNode;
   className?: string;
 }) {
   const hasBody = children !== undefined && children !== null;
-  return (
-    <section className={cn("card min-w-0 p-5 sm:p-6", className)}>
+  const tools = amounts ? (
+    <>
+      {actions}
+      <AmountsToggle />
+    </>
+  ) : (
+    actions
+  );
+  const body = (
+    <>
       <div
         className={cn(
           "flex flex-wrap items-start justify-between gap-3",
@@ -58,14 +73,22 @@ export function Section({
             <p className="text-ink-2 mt-0.5 text-sm">{description}</p>
           ) : null}
         </div>
-        {actions ? (
+        {tools ? (
           <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
-            {actions}
+            {tools}
           </div>
         ) : null}
       </div>
       {children}
-    </section>
+    </>
+  );
+  const classes = cn("card min-w-0 p-5 sm:p-6", className);
+  return amounts ? (
+    <AmountsScope scope={amounts} entity={amountsFor} className={classes}>
+      {body}
+    </AmountsScope>
+  ) : (
+    <section className={classes}>{body}</section>
   );
 }
 

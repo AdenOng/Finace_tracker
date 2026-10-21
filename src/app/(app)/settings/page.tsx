@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { CurrencySelect } from "~/components/settings/currency-select";
+import { HideAmounts } from "~/components/settings/hide-amounts";
 import { PasskeysCard } from "~/components/settings/passkeys-card";
 import { PasswordCard } from "~/components/settings/password-card";
 import { ProfileCard } from "~/components/settings/profile-card";
@@ -67,6 +68,15 @@ export default async function SettingsPage({
             <CurrencySelect className="w-72" />
           </Suspense>
         </Section>
+
+        {!mustEnrol ? (
+          <Section
+            title="Privacy"
+            description="Keep your numbers off screen when someone is looking over your shoulder or you are sharing your screen."
+          >
+            <HideAmounts />
+          </Section>
+        ) : null}
 
         <Section
           title="Two-step sign-in"

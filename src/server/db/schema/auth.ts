@@ -8,6 +8,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -195,6 +196,13 @@ export const userSettings = pgTable("user_settings", {
     .notNull(),
   /** Whether CPF and SRS balances count toward the net worth headline. */
   countCpfSrs: boolean("count_cpf_srs").default(true).notNull(),
+  /** Masks money figures everywhere until a card is shown on its own. */
+  hideAmounts: boolean("hide_amounts").default(false).notNull(),
+  /** Cards that differ from hideAmounts: card key to hidden. Cleared when hideAmounts changes. */
+  amountScopes: jsonb("amount_scopes")
+    .$type<Record<string, boolean>>()
+    .default({})
+    .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .$onUpdate(() => new Date())

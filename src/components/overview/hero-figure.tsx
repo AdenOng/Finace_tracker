@@ -7,10 +7,10 @@ export function HeroFigure({
   muted: boolean;
 }) {
   const match = /^([−+]?)(\D*?)([\d,]+)(\.\d+)?$/.exec(value);
-  if (!match) return <>{value}</>;
+  if (!match) return <span className="sensitive">{value}</span>;
   const [, sign, symbol, whole, fraction] = match;
   return (
-    <>
+    <span className="sensitive">
       <span className="text-ink-3 mr-2 align-[0.5em] text-[0.36em]">
         {sign}
         {symbol}
@@ -19,6 +19,6 @@ export function HeroFigure({
       {fraction ? (
         <span className="text-ink-3 text-[0.5em]">{fraction}</span>
       ) : null}
-    </>
+    </span>
   );
 }

@@ -274,6 +274,30 @@
   font-variant-numeric: tabular-nums lining-nums;
 }
 
+/*
+ * Hidden amounts. Money marked `sensitive` is drawn as a fixed row of dots in its own colour, so
+ * neither the digits nor how many there are show. A card's own setting wins over the app's.
+ */
+[data-amounts="hidden"] .sensitive:not([data-amounts-scope="shown"] .sensitive),
+[data-amounts-scope="hidden"] .sensitive {
+  /* Dots scale with the text but stay modest on headline figures. */
+  --dot: min(0.6em, 30px);
+  display: inline-block;
+  width: calc(var(--dot) * 6);
+  max-width: 100%;
+  overflow: clip;
+  white-space: nowrap;
+  vertical-align: bottom;
+  -webkit-text-fill-color: transparent;
+  background: radial-gradient(
+      circle,
+      currentColor calc(var(--dot) * 0.19),
+      transparent calc(var(--dot) * 0.19 + 0.5px)
+    )
+    0 55% / var(--dot) var(--dot) repeat-x;
+  user-select: none;
+}
+
 /* Hairline grid, used behind charts and hero panels. */
 @utility grid-lines {
   background-image:

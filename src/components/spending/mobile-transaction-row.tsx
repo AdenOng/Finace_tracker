@@ -50,7 +50,9 @@ export function MobileTransactionRow({
               new Decimal(t.amount).greaterThan(0) && "text-gain",
             )}
           >
-            {formatMoney(t.amount, t.currency, { signed: true })}
+            <span className="sensitive">
+              {formatMoney(t.amount, t.currency, { signed: true })}
+            </span>
           </span>
         </span>
         <span className="text-ink-3 mt-1 block truncate text-[11px]">

@@ -36,6 +36,8 @@ export function AccountReconciliation({
 
   return (
     <Section
+      amounts="account-reconciliation"
+      amountsFor={accountId}
       title="Reconciliation"
       description="Verify statement balances and protect the entries you have checked."
       actions={
@@ -79,7 +81,9 @@ export function AccountReconciliation({
                   {formatDate(record.startDate)} – {formatDate(record.endDate)}
                 </Td>
                 <Td className="figures text-right">
-                  {formatMoney(record.closingBalance, record.currency)}
+                  <span className="sensitive">
+                    {formatMoney(record.closingBalance, record.currency)}
+                  </span>
                 </Td>
                 <Td>
                   <div className="flex flex-wrap gap-2">

@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { Lock } from "lucide-react";
 import Link from "next/link";
 
+import { AmountsScope } from "~/components/finance/privacy";
 import { AccountRow } from "~/components/overview/account-row";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
 import { SheetHeader } from "~/components/overview/sheet-header";
@@ -33,7 +34,9 @@ function ColumnHeader({ label, value }: { label: string; value: string }) {
   return (
     <div className="border-ink/80 flex items-baseline justify-between border-b-2 pb-2">
       <p className="eyebrow">{label}</p>
-      <p className="figures font-mono text-[13px] font-semibold">{value}</p>
+      <p className="figures font-mono text-[13px] font-semibold">
+        <span className="sensitive">{value}</span>
+      </p>
     </div>
   );
 }
@@ -77,7 +80,11 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
     : null;
 
   return (
-    <section id="cpf-srs" className="card min-w-0 scroll-mt-6 p-5 sm:p-8">
+    <AmountsScope
+      scope="overview-cpf-srs"
+      id="cpf-srs"
+      className="card min-w-0 scroll-mt-6 p-5 sm:p-8"
+    >
       <SheetHeader
         eyebrow="CPF & SRS · for later"
         title={formatMoney(worth.cpfSrs.total ?? 0, currency)}
@@ -162,7 +169,7 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                               </>
                             )}
                           </span>
-                          <span className="figures font-mono text-[12px]">
+                          <span className="figures sensitive font-mono text-[12px]">
                             {formatMoney(b.total.toFixed(2), currency)}
                           </span>
                           <span className="figures text-ink-3 w-12 text-right font-mono text-[12px]">
@@ -174,7 +181,7 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                     {interest ? (
                       <p className="text-ink-3 mt-2 text-[12px]">
                         About{" "}
-                        <span className="text-gain figures font-mono">
+                        <span className="text-gain figures sensitive font-mono">
                           {sgd(interest)}
                         </span>{" "}
                         a year in interest at today&apos;s rates, paid in
@@ -221,7 +228,7 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="eyebrow">Put in {worth.srs.year}</p>
                   <p className="figures font-mono text-[13px] font-semibold">
-                    {sgd(toppedUp)}{" "}
+                    <span className="sensitive">{sgd(toppedUp)}</span>{" "}
                     <span className="text-ink-3 font-normal">
                       / {sgd(srsCap)}
                     </span>
@@ -236,11 +243,16 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                   />
                 </span>
                 <p className="text-ink-3 text-[12px]">
-                  {room.isZero()
-                    ? `You've reached the ${sgd(srsCap)} cap for ${worth.srs.year}.`
-                    : toppedUp.isZero()
-                      ? `No top-ups recorded yet. Anything in by 31 Dec comes off next year's tax bill. Deposits show up here when you import an SRS statement.`
-                      : `${sgd(room)} more by 31 Dec gets you the full tax relief.`}
+                  {room.isZero() ? (
+                    `You've reached the ${sgd(srsCap)} cap for ${worth.srs.year}.`
+                  ) : toppedUp.isZero() ? (
+                    `No top-ups recorded yet. Anything in by 31 Dec comes off next year's tax bill. Deposits show up here when you import an SRS statement.`
+                  ) : (
+                    <>
+                      <span className="sensitive">{sgd(room)}</span> more by 31
+                      Dec gets you the full tax relief.
+                    </>
+                  )}
                 </p>
               </div>
             ) : null}
@@ -259,6 +271,6 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
           {enabled ? " Change this under the gear icon." : null}
         </span>
       </p>
-    </section>
+    </AmountsScope>
   );
 }

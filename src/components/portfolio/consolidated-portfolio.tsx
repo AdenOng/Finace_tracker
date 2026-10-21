@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
+import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
 import { Allocation } from "~/components/overview/allocation";
 import { HeroFigure } from "~/components/overview/hero-figure";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
@@ -21,7 +22,11 @@ import { api, type RouterOutputs } from "~/trpc/react";
 type Portfolio = RouterOutputs["portfolio"]["consolidated"];
 type Stock = Portfolio["positions"][number];
 const amount = (value: string | null, currency: string) =>
-  value === null ? "Not valued" : formatMoney(value, currency);
+  value === null ? (
+    "Not valued"
+  ) : (
+    <span className="sensitive">{formatMoney(value, currency)}</span>
+  );
 
 const link =
   "font-semibold underline decoration-current/30 underline-offset-4 hover:decoration-current";
@@ -60,7 +65,9 @@ function Gain({
         className,
       )}
     >
-      {formatMoney(gain.amount, currency, { signed: true })}
+      <span className="sensitive">
+        {formatMoney(gain.amount, currency, { signed: true })}
+      </span>
       {gain.percent !== null ? (
         <span className="block text-[11px] opacity-80">
           {signedPercent(gain.percent)}
@@ -131,7 +138,10 @@ export function ConsolidatedPortfolio() {
       ) : null}
       {data ? (
         <>
-          <section className="card min-w-0 overflow-hidden">
+          <AmountsScope
+            scope="portfolio-summary"
+            className="card min-w-0 overflow-hidden"
+          >
             <div className="ink-strip h-1.5" />
             <div className="p-5 sm:p-10">
               <div className="flex items-center justify-between gap-4">
@@ -140,10 +150,13 @@ export function ConsolidatedPortfolio() {
                     ? data.brokers.find((b) => b.id === brokerId)?.name
                     : "All brokers"}
                 </p>
-                <PortfolioSettings
-                  currency={data.currency}
-                  id="consolidated-currency"
-                />
+                <div className="flex items-center gap-1">
+                  <AmountsToggle />
+                  <PortfolioSettings
+                    currency={data.currency}
+                    id="consolidated-currency"
+                  />
+                </div>
               </div>
               {data.incomplete ? (
                 <p className="text-warn mt-3 text-sm font-semibold">Partial</p>
@@ -170,9 +183,16 @@ export function ConsolidatedPortfolio() {
                     ? `, up to ${formatDate(data.newestEntry!)}`
                     : ""}
                   .
-                  {data.srs?.total && !new Decimal(data.srs.total).isZero()
-                    ? ` Includes ${formatMoney(data.srs.total, data.currency)} in SRS.`
-                    : ""}
+                  {data.srs?.total && !new Decimal(data.srs.total).isZero() ? (
+                    <>
+                      {" "}
+                      Includes{" "}
+                      <span className="sensitive">
+                        {formatMoney(data.srs.total, data.currency)}
+                      </span>{" "}
+                      in SRS.
+                    </>
+                  ) : null}
                 </p>
                 {unrecorded?.length ? (
                   <p className="text-ink-3 text-[12px]">
@@ -215,9 +235,11 @@ export function ConsolidatedPortfolio() {
                           : "text-gain",
                       )}
                     >
-                      {formatMoney(data.gain.amount, data.currency, {
-                        signed: true,
-                      })}
+                      <span className="sensitive">
+                        {formatMoney(data.gain.amount, data.currency, {
+                          signed: true,
+                        })}
+                      </span>
                     </span>
                   ) : (
                     <span className="text-ink-3">—</span>
@@ -246,7 +268,7 @@ export function ConsolidatedPortfolio() {
                 </div>
               ))}
             </div>
-          </section>
+          </AmountsScope>
 
           {data.incomplete ? (
             <Notice tone="warn">
@@ -260,21 +282,27 @@ export function ConsolidatedPortfolio() {
               {data.unconverted.length ? (
                 <p>
                   Waiting for exchange rates:{" "}
-                  {data.unconverted
-                    .map((a) => formatMoney(a.amount, a.currency))
-                    .join(", ")}
+                  <span className="sensitive">
+                    {data.unconverted
+                      .map((a) => formatMoney(a.amount, a.currency))
+                      .join(", ")}
+                  </span>
                   .
                 </p>
               ) : null}
             </Notice>
           ) : null}
 
-          <section
+          <AmountsScope
+            scope="portfolio-holdings"
             className="card min-w-0 p-5 sm:p-8"
             aria-label="Consolidated holdings"
           >
             <div className="border-ink/80 flex flex-wrap items-center justify-between gap-3 border-b-2 pb-3">
-              <p className="eyebrow">Holdings · {data.positions.length}</p>
+              <p className="eyebrow flex items-center gap-1">
+                Holdings · {data.positions.length}
+                <AmountsToggle />
+              </p>
               <label className="relative w-full min-w-0 sm:w-64">
                 <span className="sr-only">Search holdings</span>
                 <Search className="text-ink-3 pointer-events-none absolute top-3 left-3 size-4" />
@@ -337,14 +365,18 @@ export function ConsolidatedPortfolio() {
                 </div>
               </div>
             )}
-          </section>
+          </AmountsScope>
 
           {data.cashBalances.length ? (
-            <section className="card min-w-0 p-5 sm:p-8">
-              <div className="border-ink/80 flex items-baseline justify-between border-b-2 pb-2">
+            <AmountsScope
+              scope="portfolio-cash"
+              className="card min-w-0 p-5 sm:p-8"
+            >
+              <div className="border-ink/80 flex items-center justify-between border-b-2 pb-2">
                 <p className="eyebrow">Broker cash</p>
-                <p className="figures font-mono text-[13px] font-semibold">
+                <p className="figures flex items-center gap-1 font-mono text-[13px] font-semibold">
                   {amount(data.cash.total, data.currency)}
+                  <AmountsToggle />
                 </p>
               </div>
               <div className="divide-line divide-y">
@@ -353,9 +385,11 @@ export function ConsolidatedPortfolio() {
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm [&::-webkit-details-marker]:hidden">
                       <span className="font-semibold">{c.currency}</span>
                       <span className="figures ml-auto min-w-0 text-right font-mono text-[13px] break-all">
-                        {formatMoney(c.amount, c.currency)}
+                        <span className="sensitive">
+                          {formatMoney(c.amount, c.currency)}
+                        </span>
                         {c.currency !== data.currency && c.total !== null ? (
-                          <span className="text-ink-3 ml-2 text-[12px]">
+                          <span className="text-ink-3 sensitive ml-2 text-[12px]">
                             {formatMoney(c.total, data.currency)}
                           </span>
                         ) : null}
@@ -374,7 +408,7 @@ export function ConsolidatedPortfolio() {
                           >
                             {b.accountName}
                           </Link>
-                          <span className="figures shrink-0 font-mono text-[12px]">
+                          <span className="figures sensitive shrink-0 font-mono text-[12px]">
                             {formatMoney(b.amount, c.currency)}
                           </span>
                         </li>
@@ -383,11 +417,18 @@ export function ConsolidatedPortfolio() {
                   </details>
                 ))}
               </div>
-            </section>
+            </AmountsScope>
           ) : null}
 
-          <section aria-label="Broker accounts" className="pt-2">
-            <p className="eyebrow mb-3">By broker</p>
+          <AmountsScope
+            scope="portfolio-brokers"
+            aria-label="Broker accounts"
+            className="pt-2"
+          >
+            <p className="eyebrow mb-1 flex items-center gap-1">
+              By broker
+              <AmountsToggle />
+            </p>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {data.brokers
                 .filter((b) => !brokerId || b.id === brokerId)
@@ -422,9 +463,13 @@ export function ConsolidatedPortfolio() {
                             "text-ink-3 font-sans font-normal",
                         )}
                       >
-                        {b.total === null
-                          ? "—"
-                          : formatMoney(b.total, data.currency)}
+                        {b.total === null ? (
+                          "—"
+                        ) : (
+                          <span className="sensitive">
+                            {formatMoney(b.total, data.currency)}
+                          </span>
+                        )}
                       </p>
                       {b.unpriced || b.unconverted.length ? (
                         <span className="text-warn text-[11px]">Partial</span>
@@ -433,7 +478,7 @@ export function ConsolidatedPortfolio() {
                   </Link>
                 ))}
             </div>
-          </section>
+          </AmountsScope>
 
           <p className="text-ink-3 text-[12px]">
             The same symbol on the same exchange is combined across brokers.
@@ -496,12 +541,12 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
           )}
         </p>
         <p className="text-ink-3 text-[12px] md:hidden">
-          {formatQuantity(p.quantity)} units ·{" "}
-          {p.weight !== null ? `${p.weight}%` : "—"}
+          <span className="sensitive">{formatQuantity(p.quantity)}</span> units
+          · {p.weight !== null ? `${p.weight}%` : "—"}
         </p>
       </div>
       <p className="figures text-ink-2 hidden text-right font-mono text-[13px] md:block">
-        {formatQuantity(p.quantity)}
+        <span className="sensitive">{formatQuantity(p.quantity)}</span>
       </p>
       <div className="text-right">
         <p className="figures font-mono text-[14px] font-semibold">
@@ -563,7 +608,8 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
             </div>
             <div className="text-ink-3 mt-1 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12px]">
               <span>
-                {formatQuantity(b.quantity)} units · {formatDate(b.asOf)}
+                <span className="sensitive">{formatQuantity(b.quantity)}</span>{" "}
+                units · {formatDate(b.asOf)}
               </span>
               <span>
                 {b.source === "statement"
@@ -578,7 +624,9 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
             (b.nativeValue.currency !== currency ||
               b.unconverted.length > 0) ? (
               <p className="text-ink-3 mt-1 text-[12px]">
-                {formatMoney(b.nativeValue.amount, b.nativeValue.currency)}
+                <span className="sensitive">
+                  {formatMoney(b.nativeValue.amount, b.nativeValue.currency)}
+                </span>
                 {b.unconverted.length
                   ? " · Exchange rate unavailable"
                   : " before conversion"}

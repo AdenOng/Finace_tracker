@@ -62,6 +62,8 @@ export function WorkspaceSpending({
         </Select>
       </div>
       <Section
+        amounts="workspace-spending"
+        amountsFor={workspaceId}
         title="Spending summary"
         description="Marked transfers are excluded. Amounts are grouped by their original currency."
       >
@@ -87,10 +89,14 @@ export function WorkspaceSpending({
                   <Td>{r.categoryName ?? "Uncategorised"}</Td>
                   <Td>{r.currency}</Td>
                   <Td className="figures text-right">
-                    {formatMoney(r.spent, r.currency)}
+                    <span className="sensitive">
+                      {formatMoney(r.spent, r.currency)}
+                    </span>
                   </Td>
                   <Td className="figures text-right">
-                    {formatMoney(r.received, r.currency)}
+                    <span className="sensitive">
+                      {formatMoney(r.received, r.currency)}
+                    </span>
                   </Td>
                 </Tr>
               ))}
@@ -99,6 +105,8 @@ export function WorkspaceSpending({
         )}
       </Section>
       <Section
+        amounts="workspace-transactions"
+        amountsFor={workspaceId}
         title="Shared transactions"
         description="Read-only. Account owners manage entries in Personal view."
       >
@@ -136,7 +144,9 @@ export function WorkspaceSpending({
                       : (t.categoryName ?? "Uncategorised")}
                   </Td>
                   <Td className="figures text-right">
-                    {formatMoney(t.amount, t.currency, { signed: true })}
+                    <span className="sensitive">
+                      {formatMoney(t.amount, t.currency, { signed: true })}
+                    </span>
                   </Td>
                 </Tr>
               ))}

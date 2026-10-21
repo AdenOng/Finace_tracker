@@ -114,11 +114,15 @@ export function WorkspaceDetail({
           ) : (
             <>
               <Section
+                amounts="workspace-value"
+                amountsFor={workspaceId}
                 title="Shared account value"
                 description={`Latest recorded balances, shown in ${worth.data.currency}.`}
               >
                 <p className="figures font-display text-5xl font-semibold">
-                  {formatMoney(worth.data.total ?? "0", worth.data.currency)}
+                  <span className="sensitive">
+                    {formatMoney(worth.data.total ?? "0", worth.data.currency)}
+                  </span>
                 </p>
                 {worth.data.asOf ? (
                   <p className="text-ink-2 mt-3 text-sm">
@@ -139,14 +143,20 @@ export function WorkspaceDetail({
                 ) : null}
               </Section>
               {worth.data.allocation.length > 0 ? (
-                <Section title="Asset allocation">
+                <Section
+                  amounts="workspace-allocation"
+                  amountsFor={workspaceId}
+                  title="Asset allocation"
+                >
                   <Table>
                     <tbody>
                       {worth.data.allocation.map((a) => (
                         <Tr key={a.assetClass}>
                           <Td>{assetClassLabels[a.assetClass]}</Td>
                           <Td className="text-right">
-                            {formatMoney(a.total ?? "0", worth.data.currency)}
+                            <span className="sensitive">
+                              {formatMoney(a.total ?? "0", worth.data.currency)}
+                            </span>
                             {a.unconverted.length > 0 ? (
                               <Amounts
                                 totals={a.unconverted}
@@ -163,6 +173,8 @@ export function WorkspaceDetail({
             </>
           )}
           <Section
+            amounts="workspace-accounts"
+            amountsFor={workspaceId}
             title="Shared accounts"
             description="Read-only here. Account owners edit their records in Personal view."
           >

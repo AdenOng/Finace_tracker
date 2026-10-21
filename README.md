@@ -24,25 +24,26 @@ using the same database and encrypted provider credentials. The Compose project 
 
 ## Status
 
-| Area | State |
-| --- | --- |
-| Auth: invite-only sign-up, first user is admin, TOTP two-step, passkeys, rate limits | Done |
-| Self-service: name, password change, signed-in devices, "Forgot password" when email is set up | Done |
-| Admin console: status overview, users and invitations, account recovery (sessions, two-step reset, password reset links), brokers & banks, categories, AI providers, activity log | Done |
-| Admin operations: security policy and sign-in history, import jobs, AI usage, cost and limits, provider health and fallback, backups, market data, storage retention, data packs, system info, optional email | Done |
-| LLM layer: opencode / OpenAI-compatible / Anthropic adapters, structured output | Done |
-| Extraction: PDF text layer, scanned-PDF rasterising, admin playground | Done |
-| Accounts: bank, card, brokerage, wallet, CPF and SRS accounts; archive instead of delete when in use | Done |
-| Portfolio: manual balance and holdings entries, net worth in the display currency | Done |
-| Net-worth history: daily figures plus an estimate from earlier entries, chart on the overview | Done |
-| Spending: manual transactions, monthly summary by category, transfers excluded, search and CSV export | Done |
-| Reconciliation: statement-period review, exact balance checks, protected entries and reopening | Done |
-| Merchant rules: per-user text matching, automatic categorization and previewed application | Done |
-| Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion | Done |
-| Import pipeline: upload → background job → review & dedupe → commit, restart recovery, review reminders | Done |
-| Daily FX conversion, combined net worth and investment account totals | Done |
-| Hourly market prices for stocks, ETFs and crypto | Done |
-| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), CSV statement import | Later |
+| Area                                                                                                                                                                                                          | State |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| Auth: invite-only sign-up, first user is admin, TOTP two-step, passkeys, rate limits                                                                                                                          | Done  |
+| Self-service: name, password change, signed-in devices, "Forgot password" when email is set up                                                                                                                | Done  |
+| Admin console: status overview, users and invitations, account recovery (sessions, two-step reset, password reset links), brokers & banks, categories, AI providers, activity log                             | Done  |
+| Admin operations: security policy and sign-in history, import jobs, AI usage, cost and limits, provider health and fallback, backups, market data, storage retention, data packs, system info, optional email | Done  |
+| LLM layer: opencode / OpenAI-compatible / Anthropic adapters, structured output                                                                                                                               | Done  |
+| Extraction: PDF text layer, scanned-PDF rasterising, admin playground                                                                                                                                         | Done  |
+| Accounts: bank, card, brokerage, wallet, CPF and SRS accounts; archive instead of delete when in use                                                                                                          | Done  |
+| Portfolio: manual balance and holdings entries, net worth in the display currency                                                                                                                             | Done  |
+| Net-worth history: daily figures plus an estimate from earlier entries, chart on the overview                                                                                                                 | Done  |
+| Spending: manual transactions, monthly summary by category, transfers excluded, search and CSV export                                                                                                         | Done  |
+| Reconciliation: statement-period review, exact balance checks, protected entries and reopening                                                                                                                | Done  |
+| Merchant rules: per-user text matching, automatic categorization and previewed application                                                                                                                    | Done  |
+| Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion                                                                                                                      | Done  |
+| Import pipeline: upload → background job → review & dedupe → commit, restart recovery, review reminders                                                                                                       | Done  |
+| Daily FX conversion, combined net worth and investment account totals                                                                                                                                         | Done  |
+| Hourly market prices for stocks, ETFs and crypto                                                                                                                                                              | Done  |
+| Hide amounts: app-wide switch plus a per-card eye to show or hide one card                                                                                                                                    | Done  |
+| Broker sync (IBKR Flex, Longbridge OpenAPI, moomoo OpenD), CSV statement import                                                                                                                               | Later |
 
 The full database schema for the later phases already exists (`src/server/db/schema`).
 
@@ -202,13 +203,13 @@ opencode auth login           # on the host, once — signs in to your opencode 
 docker compose up -d --build  # db, opencode, app, nightly backup
 ```
 
-| Service | Purpose |
-| --- | --- |
-| `db` | Postgres 17, volume `pgdata` |
-| `opencode` | `opencode serve`, headless, all tools disabled, basic-auth protected. Mounts your host `auth.json` |
-| `app` | Next.js standalone server. Runs migrations and seeding on start |
-| `backup` | `pg_dump` once a day into `./backups`, kept `BACKUP_RETENTION_DAYS` (14). Also on request from **Admin → Data** |
-| `cloudflared` | Optional (`--profile tunnel`). If you already run a tunnel, point it at `http://<host>:3000` |
+| Service       | Purpose                                                                                                         |
+| ------------- | --------------------------------------------------------------------------------------------------------------- |
+| `db`          | Postgres 17, volume `pgdata`                                                                                    |
+| `opencode`    | `opencode serve`, headless, all tools disabled, basic-auth protected. Mounts your host `auth.json`              |
+| `app`         | Next.js standalone server. Runs migrations and seeding on start                                                 |
+| `backup`      | `pg_dump` once a day into `./backups`, kept `BACKUP_RETENTION_DAYS` (14). Also on request from **Admin → Data** |
+| `cloudflared` | Optional (`--profile tunnel`). If you already run a tunnel, point it at `http://<host>:3000`                    |
 
 Set `BETTER_AUTH_URL` to the public Cloudflare hostname in production so cookies and passkeys
 work. Putting Cloudflare Access in front of `/admin` is a cheap extra layer.
@@ -365,26 +366,35 @@ src/
   custom `PRESET_FILE` turns them on with `"features": { "cpfSrs": true }`. With them off, new CPF
   and SRS accounts can't be added, but existing ones stay visible and always count toward net
   worth.
+- **Hiding amounts.** **Settings → Privacy → Hide amounts**, or the eye beside your name (in the
+  header on phones), turns every balance, total, quantity and transaction amount into a row of
+  dots, so neither the digits nor their length show. Percentages, dates and unit prices stay
+  visible. Each card that shows money has its own eye to show or hide just that card; flipping
+  the main switch resets every card. The main switch and the overview, portfolio, accounts and
+  spending cards are saved to your account, so they follow you to other devices; a card on one
+  account or workspace applies to that record only and lasts until you reload. If a save fails,
+  the screen stays as you set it and Settings says it wasn't saved. It is a screen-privacy aid, not access control: the figures are still sent to
+  the browser. Statement review and the reconcile drawer stay unmasked because they are for
+  checking numbers.
 
 ## Scripts
 
-| Command | |
-| --- | --- |
-| `bun run dev` | Dev server |
-| `bun run db:generate` | Generate a SQL migration after editing the schema |
-| `bun run db:migrate:run` | Apply migrations (also done on boot) |
-| `bun run db:seed` | Insert missing defaults (also done on boot) |
-| `bun run db:studio` | Drizzle Studio |
-| `bun run check` | ESLint + TypeScript |
-| `bun run test` | Security and behavior regression tests (no live database or AI calls) |
-| `bun run format:check` | Check formatting of the active application |
-| `bun audit` | Audit the installed dependency versions |
+| Command                  |                                                                       |
+| ------------------------ | --------------------------------------------------------------------- |
+| `bun run dev`            | Dev server                                                            |
+| `bun run db:generate`    | Generate a SQL migration after editing the schema                     |
+| `bun run db:migrate:run` | Apply migrations (also done on boot)                                  |
+| `bun run db:seed`        | Insert missing defaults (also done on boot)                           |
+| `bun run db:studio`      | Drizzle Studio                                                        |
+| `bun run check`          | ESLint + TypeScript                                                   |
+| `bun run test`           | Security and behavior regression tests (no live database or AI calls) |
+| `bun run format:check`   | Check formatting of the active application                            |
+| `bun audit`              | Audit the installed dependency versions                               |
 
 If a Bun launcher substitutes Bun for Node and Next.js build workers fail, run
 `node node_modules/next/dist/bin/next build` with Node 22. Docker already runs Next.js on Node.
 
 See [architecture and maintenance](docs/architecture.md) for module boundaries and verification.
-
 
 ### Shared workspaces
 

@@ -13,6 +13,7 @@ import {
   signInEvent,
   userSettings,
 } from "~/server/db/schema";
+import { amountScopes } from "~/lib/privacy";
 import { preset } from "~/server/lib/preset";
 import { outer } from "~/server/lib/sql";
 
@@ -29,6 +30,8 @@ export const settingsRouter = createTRPCRouter({
         userId: ctx.scope.userId,
         displayCurrency: "SGD",
         countCpfSrs: true,
+        hideAmounts: false,
+        amountScopes: {},
       }),
       /** CPF and SRS accounts can be added (set by the preset pack). */
       cpfSrsEnabled: cpfSrs,
@@ -70,6 +73,39 @@ export const settingsRouter = createTRPCRouter({
           set: { countCpfSrs: input.count },
         });
       return { countCpfSrs: input.count };
+    }),
+
+  /** Masks or shows money everywhere; cards shown or hidden on their own follow again. */
+  setHideAmounts: enrollingProcedure
+    .input(z.object({ hide: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .insert(userSettings)
+        .values({ userId: ctx.scope.userId, hideAmounts: input.hide })
+        .onConflictDoUpdate({
+          target: userSettings.userId,
+          set: { hideAmounts: input.hide, amountScopes: {} },
+        });
+      return { hideAmounts: input.hide };
+    }),
+
+  /** Shows or hides one card's amounts; matching the main setting removes the exception. */
+  setAmountScope: enrollingProcedure
+    .input(z.object({ scope: z.enum(amountScopes), hidden: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .insert(userSettings)
+        .values({
+          userId: ctx.scope.userId,
+          // A new row hides nothing, so only hiding is an exception.
+          amountScopes: input.hidden ? { [input.scope]: true } : {},
+        })
+        .onConflictDoUpdate({
+          target: userSettings.userId,
+          set: {
+            amountScopes: sql`case when ${userSettings.hideAmounts} = ${input.hidden} then ${userSettings.amountScopes} - ${input.scope}::text else ${userSettings.amountScopes} || jsonb_build_object(${input.scope}::text, ${input.hidden}::boolean) end`,
+          },
+        });
     }),
 
   /** Your own signed-in devices, newest activity first. Session tokens are never returned. */

@@ -27,6 +27,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { Wordmark } from "~/components/brand";
+import { AmountsToggle, useHideAmounts } from "~/components/finance/privacy";
 import { Drawer } from "~/components/ui/dialog";
 import { cn } from "~/lib/cn";
 import { authClient } from "~/server/auth/client";
@@ -118,6 +119,7 @@ export function AppShell({
   const router = useRouter();
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [hideAmounts] = useHideAmounts();
   useEffect(() => setMenuOpen(false), [pathname]);
 
   async function signOut() {
@@ -132,7 +134,10 @@ export function AppShell({
   const admin = isAdmin && !enrolling ? adminNav : [];
 
   return (
-    <div className="desk relative isolate min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]">
+    <div
+      data-amounts={hideAmounts ? "hidden" : "shown"}
+      className="desk relative isolate min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]"
+    >
       {/* Desktop: a quiet column on the desk */}
       <aside className="border-line hidden flex-col border-r lg:sticky lg:top-0 lg:flex lg:h-dvh">
         <div className="flex h-20 items-center px-5">
@@ -163,6 +168,12 @@ export function AppShell({
               {user.email}
             </span>
           </span>
+          {!enrolling ? (
+            <AmountsToggle
+              global
+              className="text-ink-3 hover:text-ink size-8 shrink-0 px-0"
+            />
+          ) : null}
           <button
             type="button"
             onClick={signOut}
@@ -180,14 +191,17 @@ export function AppShell({
         <Link href={enrolling ? "/settings" : "/"}>
           <Wordmark />
         </Link>
-        <button
-          type="button"
-          onClick={() => setMenuOpen(true)}
-          aria-label="Open menu"
-          className="rounded-full"
-        >
-          <Avatar name={user.name} />
-        </button>
+        <div className="flex items-center gap-1">
+          {!enrolling ? <AmountsToggle global /> : null}
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            className="rounded-full"
+          >
+            <Avatar name={user.name} />
+          </button>
+        </div>
       </header>
 
       <main className="min-w-0 px-4 pt-6 pb-28 sm:px-8 lg:px-14 lg:py-12">

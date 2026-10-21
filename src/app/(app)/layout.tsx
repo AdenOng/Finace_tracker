@@ -2,12 +2,14 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { AmountsProvider } from "~/components/finance/privacy";
 import { AppShell } from "~/components/shell/app-shell";
 import {
   isAdmin,
   needsTwoFactorEnrollment,
   requireSession,
 } from "~/server/auth";
+import { api } from "~/trpc/server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,13 +22,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     redirect("/settings?enroll=1");
   }
 
+  const settings = await api.settings.get();
   return (
-    <AppShell
-      user={{ name: session.user.name, email: session.user.email }}
-      isAdmin={isAdmin(session.user)}
-      enrolling={needsTwoFactorEnrollment(session.user)}
+    <AmountsProvider
+      initial={{
+        hidden: settings.hideAmounts,
+        scopes: settings.amountScopes,
+      }}
     >
-      {children}
-    </AppShell>
+      <AppShell
+        user={{ name: session.user.name, email: session.user.email }}
+        isAdmin={isAdmin(session.user)}
+        enrolling={needsTwoFactorEnrollment(session.user)}
+      >
+        {children}
+      </AppShell>
+    </AmountsProvider>
   );
 }

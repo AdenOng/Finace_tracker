@@ -54,7 +54,7 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
         {inBarOrder.map((s) => (
           <span
             key={s.assetClass}
-            title={`${assetClassLabels[s.assetClass]} · ${s.display} · ${s.share.toFixed(1)}%`}
+            title={`${assetClassLabels[s.assetClass]} · ${s.share.toFixed(1)}%`}
             className="border-ink/25 min-w-[3px] border first:rounded-l-[4px] last:rounded-r-[4px]"
             style={{ width: `${s.share}%`, background: FILLS[s.assetClass] }}
           />
@@ -71,7 +71,9 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
               style={{ background: FILLS[s.assetClass] }}
             />
             <span className="flex-1">{assetClassLabels[s.assetClass]}</span>
-            <span className="figures font-mono text-[12px]">{s.display}</span>
+            <span className="figures sensitive font-mono text-[12px]">
+              {s.display}
+            </span>
             <span className="figures text-ink-3 w-12 text-right font-mono text-[12px]">
               {s.share.toFixed(1)}%
             </span>

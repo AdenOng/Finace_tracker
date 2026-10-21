@@ -134,6 +134,7 @@ export function AccountsView({
           return (
             <Section
               key={g.group}
+              amounts={`accounts-${g.group}`}
               title={g.title}
               description={g.description}
               actions={

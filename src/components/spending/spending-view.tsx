@@ -21,6 +21,7 @@ import {
   BulkEditDrawer,
   type BulkAction,
 } from "~/components/spending/bulk-edit-drawer";
+import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
 import { MerchantRulesDrawer } from "~/components/spending/merchant-rules-drawer";
 import { MobileTransactionRow } from "~/components/spending/mobile-transaction-row";
 import { TransactionDrawer } from "~/components/spending/transaction-drawer";
@@ -267,13 +268,17 @@ export function SpendingView({
       ) : null}
 
       <div className="space-y-5">
-        <section
+        <AmountsScope
+          scope="spending-summary"
           className="card min-w-0 overflow-hidden"
           aria-label="Monthly summary"
         >
-          <div className="flex items-center justify-between gap-2 px-4 pt-4 sm:px-6 sm:pt-5">
+          <div className="flex items-center justify-between gap-2 px-4 pt-2 sm:px-6 sm:pt-3">
             <h2 className="text-sm font-semibold">Monthly overview</h2>
-            <span className="text-ink-3 text-[11px]">Excludes transfers</span>
+            <span className="text-ink-3 flex items-center gap-1 text-[11px]">
+              Excludes transfers
+              <AmountsToggle />
+            </span>
           </div>
           {summary.error ? (
             <div className="p-4">
@@ -304,7 +309,9 @@ export function SpendingView({
                         Money out
                       </dt>
                       <dd className="font-poster figures mt-2 text-[clamp(20px,5.5vw,32px)] leading-none font-bold break-words">
-                        {formatMoney(t.spent.toFixed(), currency)}
+                        <span className="sensitive">
+                          {formatMoney(t.spent.toFixed(), currency)}
+                        </span>
                       </dd>
                     </div>
                     <div className="border-line min-w-0 border-l pl-4">
@@ -313,7 +320,9 @@ export function SpendingView({
                         Money in
                       </dt>
                       <dd className="font-poster figures text-gain mt-2 text-[clamp(20px,5.5vw,32px)] leading-none font-bold break-words">
-                        {formatMoney(t.received.toFixed(), currency)}
+                        <span className="sensitive">
+                          {formatMoney(t.received.toFixed(), currency)}
+                        </span>
                       </dd>
                     </div>
                   </div>
@@ -336,7 +345,7 @@ export function SpendingView({
                             color={r.categoryColor}
                           />
                         </span>
-                        <span className="figures shrink-0 font-mono text-[12px]">
+                        <span className="figures sensitive shrink-0 font-mono text-[12px]">
                           {formatMoney(r.spent, r.currency)}
                         </span>
                       </li>
@@ -346,9 +355,10 @@ export function SpendingView({
               ) : null}
             </>
           )}
-        </section>
+        </AmountsScope>
 
-        <section
+        <AmountsScope
+          scope="spending-transactions"
           className="card min-w-0 overflow-hidden"
           aria-label="Transactions"
         >
@@ -374,6 +384,7 @@ export function SpendingView({
                     <span className="hidden sm:inline">Export CSV</span>
                   </Button>
                 ) : null}
+                <AmountsToggle className="h-10 rounded-full px-2" />
               </div>
               <Button
                 variant={showFilters || activeFilters ? "secondary" : "ghost"}
@@ -713,9 +724,11 @@ export function SpendingView({
                               incoming && "text-gain",
                             )}
                           >
-                            {formatMoney(t.amount, t.currency, {
-                              signed: true,
-                            })}
+                            <span className="sensitive">
+                              {formatMoney(t.amount, t.currency, {
+                                signed: true,
+                              })}
+                            </span>
                           </Td>
                         </Tr>
                       );
@@ -725,7 +738,7 @@ export function SpendingView({
               </>
             )}
           </div>
-        </section>
+        </AmountsScope>
       </div>
 
       {showRules ? (
