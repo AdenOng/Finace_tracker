@@ -86,6 +86,19 @@ export const verification = pgTable(
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
 
+/** Shared counters for the public password-reset API; raw client IPs are not stored. */
+export const authRateLimit = pgTable(
+  "auth_rate_limit",
+  {
+    key: text("key").primaryKey(),
+    count: integer("count").notNull(),
+    windowStartedAt: timestamp("window_started_at", {
+      withTimezone: true,
+    }).notNull(),
+  },
+  (t) => [index("auth_rate_limit_window_idx").on(t.windowStartedAt)],
+);
+
 export const twoFactor = pgTable(
   "two_factor",
   {

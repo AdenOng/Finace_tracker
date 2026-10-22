@@ -11,15 +11,18 @@ const DAY_MS = 86_400_000;
 
 /**
  * The signed-in session for these headers, after the admin's maximum session length. Better Auth
- * already expires idle sessions; this also ends active ones a fixed time after sign-in.
+ * already expires idle sessions; this also ends active ones a fixed time after sign-in and rejects
+ * legacy impersonation sessions.
  */
 export async function getSessionFor(headers: Headers) {
   const current = await auth.api.getSession({ headers });
   if (!current) return null;
   const days = cachedInstanceSettings().maxSessionDays;
   if (
-    days &&
-    Date.now() - new Date(current.session.createdAt).getTime() > days * DAY_MS
+    current.session.impersonatedBy ||
+    (days &&
+      Date.now() - new Date(current.session.createdAt).getTime() >
+        days * DAY_MS)
   ) {
     await db
       .delete(sessionTable)

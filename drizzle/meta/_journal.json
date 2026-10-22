@@ -85,6 +85,13 @@
       "when": 1792580194614,
       "tag": "0011_hide_amounts",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792685957372,
+      "tag": "0012_auth_security",
+      "breakpoints": true
     }
   ]
 }

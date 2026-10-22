@@ -16,11 +16,13 @@ export function RegisterForm({
   lockedEmail,
   inviteToken,
   workspaceInviteToken,
+  setup = false,
   submitLabel,
 }: {
   lockedEmail?: string;
   inviteToken?: string;
   workspaceInviteToken?: string;
+  setup?: boolean;
   submitLabel: string;
 }) {
   const router = useRouter();
@@ -47,7 +49,9 @@ export function RegisterForm({
         ? { headers: { "x-workspace-invite-token": workspaceInviteToken } }
         : inviteToken
           ? { headers: { "x-invite-token": inviteToken } }
-          : undefined,
+          : setup
+            ? { headers: { "x-setup-token": formText(form, "setupToken") } }
+            : undefined,
     );
     setPending(false);
     if (error) return setError(error.message ?? "Could not create the account");
@@ -59,6 +63,21 @@ export function RegisterForm({
   return (
     <form onSubmit={onSubmit} className="space-y-5">
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {setup ? (
+        <Field
+          label="Setup token"
+          htmlFor="setupToken"
+          hint="Ask the instance operator for this token."
+        >
+          <Input
+            id="setupToken"
+            name="setupToken"
+            type="password"
+            autoComplete="off"
+            required
+          />
+        </Field>
+      ) : null}
       <Field label="Name" htmlFor="name">
         <Input id="name" name="name" autoComplete="name" required autoFocus />
       </Field>

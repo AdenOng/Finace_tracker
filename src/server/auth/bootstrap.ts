@@ -1,9 +1,27 @@
 import "server-only";
 
+import { timingSafeEqual } from "node:crypto";
+import { APIError } from "better-auth/api";
 import { sql } from "drizzle-orm";
 
+import { env } from "~/env";
 import type { Database } from "~/server/db";
 import { adminBootstrap, user } from "~/server/db/schema";
+
+/** A fresh public instance must not let an arbitrary visitor claim administrator access. */
+export function requireSetupToken(token: string | null | undefined) {
+  const expected = env.SETUP_TOKEN;
+  if (
+    !expected ||
+    !token ||
+    Buffer.byteLength(token) !== Buffer.byteLength(expected) ||
+    !timingSafeEqual(Buffer.from(token), Buffer.from(expected))
+  ) {
+    throw new APIError("FORBIDDEN", {
+      message: "A valid setup token from the instance operator is required.",
+    });
+  }
+}
 
 /**
  * Atomically claims the initial-admin slot. Returns true for exactly one caller while no user

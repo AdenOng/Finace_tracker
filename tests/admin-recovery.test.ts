@@ -9,7 +9,7 @@ import {
 } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { eq } from "drizzle-orm";
+import { eq, gt } from "drizzle-orm";
 
 import type { Database } from "../src/server/db";
 import * as schema from "../src/server/db/schema";
@@ -19,12 +19,15 @@ const db = drizzle(engine, { schema });
 // Only the auth/connection boundary is replaced. Tests run real routers, queries and migrations.
 await mock.module("server-only", () => ({}));
 await mock.module("~/server/db", () => ({ db }));
+const passwordHash = mock(
+  async (password: string) => `synthetic-hash:${password}`,
+);
 await mock.module("~/server/auth/config", () => ({
   auth: {
     api: { getSession: async () => null },
     $context: Promise.resolve({
       password: {
-        hash: async (password: string) => `synthetic-hash:${password}`,
+        hash: passwordHash,
         config: { minPasswordLength: 10, maxPasswordLength: 128 },
       },
     }),
@@ -44,6 +47,10 @@ await mock.module("~/server/lib/mailer", () => ({
 }));
 const { adminRouter } = await import("../src/server/api/routers/admin");
 const { settingsRouter } = await import("../src/server/api/routers/settings");
+const { passwordResetRouter } =
+  await import("../src/server/api/routers/password-reset");
+const { limitPasswordReset } =
+  await import("../src/server/auth/reset-rate-limit");
 const { consumePasswordReset, findPendingPasswordReset, requestPasswordReset } =
   await import("../src/server/auth/password-reset");
 const { sendReviewReminders } =
@@ -128,8 +135,9 @@ beforeAll(async () => {
   }
 }, 30_000);
 beforeEach(async () => {
+  passwordHash.mockClear();
   await engine.exec(
-    'TRUNCATE TABLE "user", llm_provider, audit_log, invitation CASCADE',
+    'TRUNCATE TABLE "user", llm_provider, audit_log, invitation, auth_rate_limit CASCADE',
   );
   await db.insert(schema.user).values([
     {
@@ -266,6 +274,52 @@ describe("account recovery", () => {
     ]);
   });
 
+  test("invalid, revoked, expired and reused reset tokens never hash passwords", async () => {
+    await expect(
+      consumePasswordReset(db as never, "invalid-token", "a-long-password"),
+    ).rejects.toThrow("no longer works");
+    expect(passwordHash).not.toHaveBeenCalled();
+    const first = await admin.users.createPasswordReset({ userId: "member" });
+    const second = await admin.users.createPasswordReset({ userId: "member" });
+    await expect(
+      consumePasswordReset(
+        db as never,
+        tokenFrom(first.url),
+        "a-long-password",
+      ),
+    ).rejects.toThrow("no longer works");
+    expect(passwordHash).not.toHaveBeenCalled();
+    await db
+      .update(schema.passwordReset)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.passwordReset.userId, "member"));
+    await expect(
+      consumePasswordReset(
+        db as never,
+        tokenFrom(second.url),
+        "a-long-password",
+      ),
+    ).rejects.toThrow("no longer works");
+    expect(passwordHash).not.toHaveBeenCalled();
+    const third = await admin.users.createPasswordReset({ userId: "member" });
+    const attempts = await Promise.allSettled([
+      consumePasswordReset(
+        db as never,
+        tokenFrom(third.url),
+        "a-long-password",
+      ),
+      consumePasswordReset(
+        db as never,
+        tokenFrom(third.url),
+        "a-long-password",
+      ),
+    ]);
+    expect(
+      attempts.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(passwordHash).toHaveBeenCalledTimes(1);
+  });
+
   test("expired reset links are rejected", async () => {
     const { url } = await admin.users.createPasswordReset({ userId: "member" });
     await db
@@ -275,6 +329,74 @@ describe("account recovery", () => {
     await expect(
       consumePasswordReset(db as never, tokenFrom(url), "a-new-long-password"),
     ).rejects.toThrow("no longer works");
+  });
+});
+
+describe("password reset rate limits", () => {
+  test("limits public completion attempts before hashing, with separate client buckets", async () => {
+    const callerFor = (address: string) =>
+      passwordResetRouter.createCaller({
+        db: db as unknown as Database,
+        headers: new Headers({ "x-forwarded-for": address }),
+        session: null,
+      });
+    const caller = callerFor("192.0.2.1");
+    for (let i = 0; i < 10; i++) {
+      await expect(
+        caller.complete({
+          token: "invalid-token",
+          password: "a-long-password",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    await expect(
+      caller.complete({ token: "invalid-token", password: "a-long-password" }),
+    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    await expect(
+      callerFor("192.0.2.2").complete({
+        token: "invalid-token",
+        password: "a-long-password",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(passwordHash).not.toHaveBeenCalled();
+    expect(
+      JSON.stringify(await db.select().from(schema.authRateLimit)),
+    ).not.toContain("192.0.2");
+  });
+
+  test("concurrent link requests share an atomic budget, reset after a minute, and expire", async () => {
+    const headers = new Headers({ "x-forwarded-for": "192.0.2.3" });
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 8 }, () =>
+        limitPasswordReset(db as never, headers, "request"),
+      ),
+    );
+    expect(
+      attempts.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(5);
+    expect(
+      attempts.filter((result) => result.status === "rejected"),
+    ).toHaveLength(3);
+    // Completion has its own budget.
+    await limitPasswordReset(db as never, headers, "complete");
+    await db
+      .update(schema.authRateLimit)
+      .set({ windowStartedAt: new Date(Date.now() - 61_000) })
+      .where(gt(schema.authRateLimit.count, 0));
+    await limitPasswordReset(db as never, headers, "request");
+    expect(
+      (await db.select().from(schema.authRateLimit)).map((row) => row.count),
+    ).toEqual([1, 1]);
+    await db
+      .update(schema.authRateLimit)
+      .set({ windowStartedAt: new Date(Date.now() - 86_401_000) })
+      .where(gt(schema.authRateLimit.count, 0));
+    await limitPasswordReset(
+      db as never,
+      new Headers({ "x-forwarded-for": "192.0.2.4" }),
+      "request",
+    );
+    expect(await db.$count(schema.authRateLimit)).toBe(1);
   });
 });
 

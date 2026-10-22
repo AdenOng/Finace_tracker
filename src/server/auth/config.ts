@@ -6,6 +6,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { admin, twoFactor } from "better-auth/plugins";
+import { defaultAc, userAc } from "better-auth/plugins/admin/access";
 import { eq } from "drizzle-orm";
 
 import { env } from "~/env";
@@ -17,7 +18,7 @@ import {
   WORKSPACE_INVITE_HEADER,
 } from "~/server/modules/workspaces/invitations";
 import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
-import { claimInitialAdmin } from "./bootstrap";
+import { claimInitialAdmin, requireSetupToken } from "./bootstrap";
 import { findPendingInvitation, INVITE_TOKEN_HEADER } from "./invitations";
 import { recordSignIns } from "./sign-in-events";
 
@@ -25,11 +26,23 @@ export const APP_NAME = "Finfolio";
 
 // Fallback only matters during `next build`, where env validation is skipped.
 const baseUrl = new URL(env.BETTER_AUTH_URL ?? "http://localhost:3000");
+// User management goes through the app's enrolled, audited tRPC procedures only.
+const adminPlugin = admin({
+  defaultRole: "user",
+  adminRoles: ["admin"],
+  roles: {
+    admin: defaultAc.newRole({ user: ["set-role", "ban"] }),
+    user: userAc,
+  },
+});
 
 export const auth = betterAuth({
   appName: APP_NAME,
   baseURL: baseUrl.origin,
   secret: env.BETTER_AUTH_SECRET,
+  disabledPaths: Object.values(adminPlugin.endpoints).map(
+    (endpoint) => endpoint.path,
+  ),
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
@@ -62,14 +75,17 @@ export const auth = betterAuth({
     user: {
       create: {
         /**
-         * Invite-only registration. The very first account becomes the admin; everyone after
+         * Invite-only registration. The first account requires the setup token and becomes admin; everyone after
          * that must present a valid invitation token for their email address. The count is only a
          * fast path; `claimInitialAdmin` is what makes concurrent first sign-ups safe.
          */
         before: async (user, ctx) => {
           const existingUsers = await db.$count(schema.user);
-          if (existingUsers === 0 && (await claimInitialAdmin(db))) {
-            return { data: { ...user, role: "admin" } };
+          if (existingUsers === 0) {
+            requireSetupToken(ctx?.headers?.get("x-setup-token"));
+            if (await claimInitialAdmin(db)) {
+              return { data: { ...user, role: "admin" } };
+            }
           }
           const workspaceToken = ctx?.headers?.get(WORKSPACE_INVITE_HEADER);
           if (workspaceToken) {
@@ -118,7 +134,7 @@ export const auth = betterAuth({
     },
   },
   plugins: [
-    admin({ defaultRole: "user", adminRoles: ["admin"] }),
+    adminPlugin,
     twoFactor({ issuer: APP_NAME }),
     passkey({
       rpID: baseUrl.hostname,

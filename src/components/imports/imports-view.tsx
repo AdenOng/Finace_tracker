@@ -240,6 +240,11 @@ export function ImportsView({
                 PDF · PNG · JPEG · WEBP — UP TO 20 MB
               </p>
             </div>
+            <p className="text-ink-3 mt-3 text-[12px]">
+              Uploading sends statement text or images to this instance&apos;s
+              configured AI provider, including its fallback if needed. Only
+              upload documents you agree to share with those providers.
+            </p>
             {error ? (
               <Notice tone="error" className="mt-3">
                 {error.message}{" "}

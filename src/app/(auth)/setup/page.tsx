@@ -19,7 +19,7 @@ export default async function SetupPage() {
         This is a fresh instance. The account you create now manages users,
         brokers, categories and AI providers.
       </AuthHeading>
-      <RegisterForm submitLabel="Create admin account" />
+      <RegisterForm setup submitLabel="Create admin account" />
     </>
   );
 }

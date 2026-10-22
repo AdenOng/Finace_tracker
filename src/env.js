@@ -20,6 +20,7 @@ export const env = createEnv({
     // Auth
     BETTER_AUTH_SECRET: z.string().min(32),
     BETTER_AUTH_URL: z.url().default("http://localhost:3000"),
+    SETUP_TOKEN: z.string().min(32).optional(),
     REQUIRE_TWO_FACTOR: booleanString,
 
     // Secrets at rest (LLM API keys, broker API tokens). 32 random bytes, base64 encoded.
@@ -58,6 +59,7 @@ export const env = createEnv({
     DATABASE_URL: process.env.DATABASE_URL,
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
     BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
+    SETUP_TOKEN: process.env.SETUP_TOKEN,
     REQUIRE_TWO_FACTOR: process.env.REQUIRE_TWO_FACTOR,
     APP_ENCRYPTION_KEY: process.env.APP_ENCRYPTION_KEY,
     DATA_PRESET: process.env.DATA_PRESET,

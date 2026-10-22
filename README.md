@@ -191,7 +191,12 @@ docker compose up -d db       # Postgres on 127.0.0.1:${POSTGRES_PORT:-5432}
 bun run dev                   # migrations + default data are applied on boot
 ```
 
-Open http://localhost:3000. The first visit goes to `/setup` and creates the admin account.
+For a new instance, generate a separate setup token with `openssl rand -base64 32` and set
+`SETUP_TOKEN` in `.env` before starting the app. Open http://localhost:3000 and enter that token
+on `/setup` to create the admin account. With no token configured, first-admin registration is
+disabled. Remove `SETUP_TOKEN` from `.env` after setup and restart; existing accounts and
+invite-based registration do not need it. Never reuse your auth or encryption keys as the setup
+token, or put the token in a URL.
 With `REQUIRE_TWO_FACTOR=true` (the default) everyone must enrol an authenticator app before the
 rest of the app unlocks. Set it to `false` to choose instead under **Admin → Security** (everyone,
 admins only, or not required).
@@ -213,6 +218,28 @@ docker compose up -d --build  # db, opencode, app, nightly backup
 
 Set `BETTER_AUTH_URL` to the public Cloudflare hostname in production so cookies and passkeys
 work. Putting Cloudflare Access in front of `/admin` is a cheap extra layer.
+The authentication library's `/api/auth/admin/*` endpoints are disabled; account management
+uses the app's enrolled, audited admin procedures. User impersonation is disabled, including
+sessions created by older versions of that feature.
+
+Password-reset requests are limited per client address across app processes and restarts:
+5 link requests and 10 completion attempts per minute. Missing client addresses share a bucket.
+As with Better Auth's sign-in limits, your reverse proxy must overwrite `X-Forwarded-For` with
+the real client address and prevent direct public access to the app port. Invalid, expired,
+revoked or already-used reset tokens never trigger password hashing.
+
+### Data privacy and operator access
+
+This app does not provide end-to-end encryption against its operator. Admins can download
+database backups containing every user's financial records, and account-recovery controls can
+reset passwords and two-factor enrollment. Backup downloads and recovery actions are audited.
+Uploaded statement files and database dumps are not encrypted by the application; protect the
+host volumes and backup storage with disk encryption and restricted access.
+
+Uploading a statement sends its text or images to the configured AI provider and, on failure,
+may send it to the configured fallback. Review those providers' retention policies before using
+real financial documents. Stored provider API keys are encrypted separately using
+`APP_ENCRYPTION_KEY`; that encryption does not cover financial records or uploads.
 
 If someone forgets their password or loses their authenticator, an admin opens
 **Admin → Users → Manage** to create a single-use password reset link (valid 24 hours, served at

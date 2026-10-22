@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import assert from "node:assert/strict";
 
 let session: {
+  session: { id: string; createdAt: Date; impersonatedBy: null };
   user: {
     name: string;
     email: string;
@@ -11,6 +12,7 @@ let session: {
     twoFactorEnabled: boolean;
   };
 } | null = {
+  session: { id: "test-session", createdAt: new Date(), impersonatedBy: null },
   user: {
     name: "Example",
     email: "example@example.com",
@@ -96,6 +98,7 @@ await assert.rejects(
 expect(queries).toBe(0);
 
 session = {
+  session: { id: "test-session", createdAt: new Date(), impersonatedBy: null },
   user: {
     name: "Example",
     email: "example@example.com",

@@ -55,8 +55,6 @@ export async function consumePasswordReset(
       `Use between ${minPasswordLength} and ${maxPasswordLength} characters.`,
     );
   }
-  const hash = await ctx.password.hash(newPassword);
-
   await db.transaction(async (tx) => {
     const [claimed] = await tx
       .update(passwordReset)
@@ -73,6 +71,9 @@ export async function consumePasswordReset(
     if (!claimed) {
       throw new PasswordResetError("This reset link no longer works.");
     }
+    // Only the request that claims a live token may perform expensive password hashing.
+    // A hashing/write failure rolls the claim back with the rest of the transaction.
+    const hash = await ctx.password.hash(newPassword);
     const updated = await tx
       .update(account)
       .set({ password: hash, updatedAt: new Date() })

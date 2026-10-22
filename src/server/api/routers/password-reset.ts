@@ -9,6 +9,7 @@ import {
   requestPasswordReset,
 } from "~/server/auth/password-reset";
 import { isEmailConfigured } from "~/server/lib/mailer";
+import { limitPasswordReset } from "~/server/auth/reset-rate-limit";
 
 /** Public: the reset link's token is the credential. */
 export const passwordResetRouter = createTRPCRouter({
@@ -17,6 +18,10 @@ export const passwordResetRouter = createTRPCRouter({
    * way, and the work runs after responding so timing does not tell addresses apart either.
    */
   request: publicProcedure
+    .use(async ({ ctx, next }) => {
+      await limitPasswordReset(ctx.db, ctx.headers, "request");
+      return next();
+    })
     .input(z.object({ email: z.email().max(254) }))
     .mutation(({ ctx, input }) => {
       if (!isEmailConfigured())
@@ -35,6 +40,10 @@ export const passwordResetRouter = createTRPCRouter({
     }),
 
   complete: publicProcedure
+    .use(async ({ ctx, next }) => {
+      await limitPasswordReset(ctx.db, ctx.headers, "complete");
+      return next();
+    })
     .input(
       z.object({ token: z.string().min(1).max(200), password: z.string() }),
     )
