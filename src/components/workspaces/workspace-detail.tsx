@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Amounts } from "~/components/finance/amounts";
+import { BalanceDate } from "~/components/finance/balance-date";
+import { TransferFreshnessNotices } from "~/components/overview/transfer-freshness-notices";
 import { Select } from "~/components/ui/field";
 import {
   EmptyState,
@@ -127,9 +129,14 @@ export function WorkspaceDetail({
                 {worth.data.asOf ? (
                   <p className="text-ink-2 mt-3 text-sm">
                     Latest snapshot: {formatDate(worth.data.asOf)}. Accounts may
-                    have different snapshot dates.
+                    have different snapshot dates. Balances more than 45 days
+                    old are marked stale.
                   </p>
                 ) : null}
+                <TransferFreshnessNotices
+                  warnings={worth.data.transferWarnings}
+                  workspaceId={workspaceId}
+                />
                 {worth.data.unconverted.length > 0 ? (
                   <Notice tone="warn" className="mt-4">
                     Excluded because an exchange rate is missing:{" "}
@@ -217,7 +224,9 @@ export function WorkspaceDetail({
                           </span>
                         ) : null}
                       </Td>
-                      <Td>{a.asOf ? formatDate(a.asOf) : "—"}</Td>
+                      <Td>
+                        <BalanceDate asOf={a.asOf} />
+                      </Td>
                     </Tr>
                   ))}
                 </tbody>

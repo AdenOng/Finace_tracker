@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { TRPCError } from "@trpc/server";
+import Decimal from "decimal.js";
 import {
   and,
   asc,
@@ -17,7 +18,13 @@ import { after } from "next/server";
 import { z } from "zod";
 
 import { accountGroupOf, holdsSecurities } from "~/lib/accounts";
-import { isoDateInput } from "~/server/api/inputs";
+import {
+  checkImportBalance,
+  type BalanceSummary,
+  type RecordedTransaction,
+} from "~/lib/import-balance-check";
+import { categoryKind } from "~/lib/transaction-classification";
+import { isoDateInput, moneyInput } from "~/server/api/inputs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
   accountSnapshot,
@@ -34,6 +41,10 @@ import {
   transaction,
 } from "~/server/db/schema";
 import { writableBy } from "~/server/lib/access";
+import {
+  classifyTransaction,
+  loadClassificationCategories,
+} from "~/server/modules/spending/classification";
 import { requireWritableAccount } from "~/server/modules/accounts/ownership";
 import type { StatementExtraction } from "~/server/modules/extraction";
 import {
@@ -178,6 +189,35 @@ export const importsRouter = createTRPCRouter({
         .where(eq(stagedRow.jobId, job.id))
         .orderBy(asc(stagedRow.createdAt), asc(stagedRow.id));
 
+      const recorded =
+        job.accountId &&
+        rows.some((r) => r.kind === "transaction" && r.matchStatus !== "new")
+          ? await ctx.db
+              .select({
+                rowId: stagedRow.id,
+                transaction: {
+                  amount: transaction.amount,
+                  currency: transaction.currency,
+                  postedDate: transaction.postedDate,
+                },
+              })
+              .from(stagedRow)
+              .innerJoin(
+                transaction,
+                eq(transaction.id, stagedRow.matchedRecordId),
+              )
+              .where(
+                and(
+                  eq(stagedRow.jobId, job.id),
+                  eq(transaction.accountId, job.accountId),
+                  writableBy(ctx.scope, transaction.ownerId),
+                ),
+              )
+          : [];
+      const recordedByRow = new Map(
+        recorded.map((r) => [r.rowId, r.transaction]),
+      );
+
       const { result, ...rest } = job;
       const removals = rows.length
         ? await ctx.db
@@ -235,7 +275,23 @@ export const importsRouter = createTRPCRouter({
           ])
         : [[], []];
       const out = result as
-        (StatementExtraction & { stagingNotes?: string[] }) | null;
+        | (StatementExtraction & {
+            stagingNotes?: string[];
+            balanceAcknowledgment?: { acknowledgedAt: string };
+          })
+        | null;
+      const balanceMetadata: Pick<
+        BalanceSummary,
+        "openingBalanceDirection" | "closingBalanceDirection"
+      > & { balanceAcknowledgment?: { acknowledgedAt: string } } = out
+        ? {
+            openingBalanceDirection: out.openingBalanceDirection,
+            closingBalanceDirection: out.closingBalanceDirection,
+            ...(out.balanceAcknowledgment
+              ? { balanceAcknowledgment: out.balanceAcknowledgment }
+              : {}),
+          }
+        : {};
       return {
         ...rest,
         latestHoldingsAsOf: latest[0]?.asOf ?? null,
@@ -249,6 +305,7 @@ export const importsRouter = createTRPCRouter({
         stale: isStaleJob(job),
         summary: out
           ? {
+              ...balanceMetadata,
               documentType: out.documentType,
               institutionName: out.institutionName,
               accountLast4: out.accountLast4,
@@ -263,26 +320,33 @@ export const importsRouter = createTRPCRouter({
         rows: rows.map((r) => ({
           ...r,
           removed: removedIds.has(r.id),
+          recorded: recordedByRow.has(r.id),
+          recordedTransaction: recordedByRow.get(r.id) ?? null,
           // Parsed again so the client gets the typed shape for its kind.
           data: stagedSchemas[r.kind].parse(r.data),
         })) as (
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
               removed: boolean;
+              recorded?: boolean;
               kind: "transaction";
               data: StagedTransaction;
+              recordedTransaction?: RecordedTransaction | null;
             })
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
               removed: boolean;
+              recorded?: boolean;
               kind: "position";
               data: StagedPosition;
             })
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
               removed: boolean;
+              recorded?: boolean;
               kind: "cash_balance";
               data: StagedCashBalance;
             })
           | (Omit<(typeof rows)[number], "kind" | "data"> & {
               removed: boolean;
+              recorded?: boolean;
               kind: "investment_transaction";
               data: StagedInvestmentTransaction;
             })
@@ -405,7 +469,7 @@ export const importsRouter = createTRPCRouter({
       }),
     ),
 
-  /** Accept or skip rows, and correct a transaction's category or description. */
+  /** Accept or skip rows, and correct amounts or transaction classification before saving. */
   updateRows: protectedProcedure
     .input(
       z.object({
@@ -417,6 +481,8 @@ export const importsRouter = createTRPCRouter({
             categoryId: z.uuid().nullable().optional(),
             merchant: z.string().trim().max(200).nullable().optional(),
             isTransfer: z.boolean().optional(),
+            amount: moneyInput.optional(),
+            confirmAmount: z.literal(true).optional(),
           })
           .optional(),
       }),
@@ -445,6 +511,7 @@ export const importsRouter = createTRPCRouter({
             id: stagedRow.id,
             kind: stagedRow.kind,
             data: stagedRow.data,
+            matchStatus: stagedRow.matchStatus,
           })
           .from(stagedRow)
           .where(
@@ -452,6 +519,7 @@ export const importsRouter = createTRPCRouter({
               eq(stagedRow.jobId, input.jobId),
               inArray(stagedRow.id, input.ids),
               isNull(stagedRow.committedRecordId),
+              writableBy(ctx.scope, stagedRow.ownerId),
             ),
           );
         if (rows.length !== input.ids.length) {
@@ -459,23 +527,78 @@ export const importsRouter = createTRPCRouter({
         }
         if (input.patch?.categoryId)
           await checkCategory(tx, input.patch.categoryId);
+        const categories = await loadClassificationCategories(tx);
         for (const row of rows) {
-          const patch =
-            input.patch && row.kind === "transaction"
-              ? stagedSchemas.transaction.parse({
-                  ...row.data,
-                  ...Object.fromEntries(
-                    Object.entries(input.patch).filter(
-                      ([, v]) => v !== undefined,
-                    ),
-                  ),
-                })
-              : undefined;
+          let patch;
+          const amount =
+            input.patch?.amount === undefined
+              ? undefined
+              : new Decimal(input.patch.amount).toFixed();
+          const amountChanged =
+            amount !== undefined &&
+            typeof row.data.amount === "string" &&
+            !new Decimal(amount).equals(row.data.amount);
+          if (input.patch && row.kind === "transaction") {
+            const current = stagedSchemas.transaction.parse(row.data);
+            const classification = classifyTransaction(
+              current,
+              input.patch,
+              categories,
+            );
+            if (
+              amountChanged &&
+              amount !== undefined &&
+              new Decimal(current.amount).isNegative() !==
+                new Decimal(amount).isNegative()
+            ) {
+              const kind = categoryKind(categories, classification.categoryId);
+              // A direction correction clears an incompatible income/expense label; transfers remain transfers.
+              if (
+                (kind === "expense" && !new Decimal(amount).isNegative()) ||
+                (kind === "income" && new Decimal(amount).isNegative())
+              ) {
+                classification.categoryId = null;
+              }
+            }
+            patch = stagedSchemas.transaction.parse({
+              ...current,
+              ...Object.fromEntries(
+                Object.entries(input.patch).filter(([, v]) => v !== undefined),
+              ),
+              ...classification,
+              ...(amount !== undefined ? { amount } : {}),
+              ...(input.patch.amount !== undefined || input.patch.confirmAmount
+                ? { signMismatch: false, suggestedAmount: null }
+                : {}),
+            });
+          } else if (amount !== undefined) {
+            if (
+              row.kind !== "cash_balance" &&
+              row.kind !== "investment_transaction"
+            )
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "This row has no editable cash amount",
+              });
+            patch = stagedSchemas[row.kind].parse({
+              ...row.data,
+              amount,
+            });
+          }
+          // An edited exact duplicate is now uncertain and must receive a fresh Keep/Skip choice.
+          const changedDuplicate =
+            amountChanged && row.matchStatus === "duplicate";
           await tx
             .update(stagedRow)
             .set({
               ...(input.decision ? { decision: input.decision } : {}),
               ...(patch ? { data: patch } : {}),
+              ...(changedDuplicate
+                ? {
+                    matchStatus: "possible_duplicate",
+                    decision: input.decision ?? "pending",
+                  }
+                : {}),
             })
             .where(eq(stagedRow.id, row.id));
         }
@@ -485,13 +608,20 @@ export const importsRouter = createTRPCRouter({
 
   /** Write every accepted row into the account. All of it is saved, or none of it. */
   commit: protectedProcedure
-    .input(z.object({ jobId: z.uuid(), asOf: isoDateInput }))
+    .input(
+      z.object({
+        jobId: z.uuid(),
+        asOf: isoDateInput,
+        acknowledgeBalanceMismatch: z.boolean().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) =>
       ctx.db.transaction(async (tx) => {
         const [job] = await tx
           .select({
             id: extractionJob.id,
             status: extractionJob.status,
+            result: extractionJob.result,
             documentId: document.id,
             accountId: document.accountId,
           })
@@ -528,40 +658,64 @@ export const importsRouter = createTRPCRouter({
             ),
           )
           .orderBy(asc(stagedRow.createdAt), asc(stagedRow.id));
-        const duplicateIds = rows.flatMap((r) =>
-          r.matchStatus === "duplicate" && r.matchedRecordId
+        if (
+          rows.some(
+            (r) =>
+              r.matchStatus === "possible_duplicate" &&
+              r.decision === "pending",
+          )
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Choose Keep or Skip for every possible duplicate before saving",
+          });
+        }
+        const matchedRecordIds = rows.flatMap((r) =>
+          r.matchStatus !== "new" && r.matchedRecordId
             ? [r.matchedRecordId]
             : [],
         );
-        // Keep the identities of rows matched at review time. Rows added by another pending
-        // import still meet the unique constraint below, so concurrent reviews cannot duplicate them.
-        const matches = duplicateIds.length
+        // Reserve occurrences matched at review time, including possible duplicates the user keeps.
+        // Rows added by another pending import still meet the unique constraint below,
+        // so concurrent reviews cannot duplicate them.
+        const matches = matchedRecordIds.length
           ? (
               await Promise.all([
                 tx
                   .select({
                     id: transaction.id,
                     fingerprint: transaction.fingerprint,
+                    recordedTransaction: {
+                      amount: transaction.amount,
+                      currency: transaction.currency,
+                      postedDate: transaction.postedDate,
+                    },
                   })
                   .from(transaction)
                   .where(
                     and(
                       eq(transaction.accountId, account.id),
                       writableBy(ctx.scope, transaction.ownerId),
-                      inArray(transaction.id, duplicateIds),
+                      inArray(transaction.id, matchedRecordIds),
                     ),
                   ),
                 tx
                   .select({
                     id: investmentTransaction.id,
                     fingerprint: investmentTransaction.fingerprint,
+                    recordedTransaction: {
+                      amount: investmentTransaction.amount,
+                      currency: investmentTransaction.currency,
+                      postedDate: investmentTransaction.tradeDate,
+                    },
                   })
                   .from(investmentTransaction)
                   .where(
                     and(
                       eq(investmentTransaction.accountId, account.id),
                       writableBy(ctx.scope, investmentTransaction.ownerId),
-                      inArray(investmentTransaction.id, duplicateIds),
+                      inArray(investmentTransaction.id, matchedRecordIds),
                     ),
                   ),
               ])
@@ -569,6 +723,31 @@ export const importsRouter = createTRPCRouter({
           : [];
         const matchedIds = new Set(matches.map((r) => r.id));
         const matchedFingerprints = new Set(matches.map((r) => r.fingerprint));
+        const recordedById = new Map(
+          matches.map((r) => [r.id, r.recordedTransaction]),
+        );
+        const balanceCheck = checkImportBalance({
+          summary: job.result as BalanceSummary | null,
+          accountType: account.type,
+          accountCurrency: account.currency,
+          rows: rows.map((r) => ({
+            ...r,
+            data: stagedSchemas[r.kind].parse(r.data),
+            recorded: matchedIds.has(r.matchedRecordId ?? ""),
+            recordedTransaction:
+              recordedById.get(r.matchedRecordId ?? "") ?? null,
+          })),
+        });
+        if (
+          balanceCheck.requiresAcknowledgment &&
+          !input.acknowledgeBalanceMismatch
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "The statement balance check does not match. Correct the rows or confirm “I've checked this — save anyway” before saving.",
+          });
+        }
         const of = <S extends z.ZodType>(kind: StagedKind, schema: S) =>
           rows
             .filter((r) => r.kind === kind && r.decision === "accept")
@@ -591,6 +770,7 @@ export const importsRouter = createTRPCRouter({
         const seen = new Map<string, number>();
 
         if (accountGroupOf(account.type) === "banking") {
+          const categories = await loadClassificationCategories(tx);
           for (const { id, data, duplicate } of of(
             "transaction",
             stagedSchemas.transaction,
@@ -605,6 +785,11 @@ export const importsRouter = createTRPCRouter({
               postedDate: data.postedDate,
             });
             await checkCategory(tx, data.categoryId);
+            const classification = classifyTransaction(
+              data,
+              { categoryId: data.categoryId },
+              categories,
+            );
             const [row] = await tx
               .insert(transaction)
               .values({
@@ -613,14 +798,14 @@ export const importsRouter = createTRPCRouter({
                 postedDate: data.postedDate,
                 transactionDate: data.transactionDate,
                 description: data.description,
+                reference: data.reference,
                 merchant: data.merchant,
                 amount: data.amount,
                 currency: data.currency,
                 originalAmount: data.originalAmount,
                 originalCurrency: data.originalCurrency,
-                categoryId: data.categoryId,
-                categorySource: data.categoryId ? "ai" : null,
-                isTransfer: data.isTransfer,
+                ...classification,
+                categorySource: classification.categoryId ? "ai" : null,
                 source: "statement",
                 documentId: job.documentId,
                 fingerprint: fingerprint(
@@ -629,6 +814,7 @@ export const importsRouter = createTRPCRouter({
                     data.amount,
                     data.currency,
                     normalizeMerchantText(data.description),
+                    data.reference,
                   ],
                   seen,
                   matchedFingerprints,
@@ -770,6 +956,7 @@ export const importsRouter = createTRPCRouter({
                 price: data.price,
                 amount: data.amount,
                 fees: data.fees,
+                reference: data.reference,
                 currency: data.currency,
                 description: data.description,
                 source: "statement",
@@ -781,6 +968,10 @@ export const importsRouter = createTRPCRouter({
                     data.symbol,
                     data.amount,
                     data.currency,
+                    data.quantity,
+                    data.price,
+                    data.fees,
+                    data.reference,
                   ],
                   seen,
                   matchedFingerprints,
@@ -808,7 +999,21 @@ export const importsRouter = createTRPCRouter({
         }
         await tx
           .update(extractionJob)
-          .set({ status: "completed" })
+          .set({
+            status: "completed",
+            ...(balanceCheck.requiresAcknowledgment &&
+            input.acknowledgeBalanceMismatch
+              ? {
+                  result: {
+                    ...(job.result as Record<string, unknown>),
+                    balanceAcknowledgment: {
+                      acknowledgedAt: new Date().toISOString(),
+                      check: balanceCheck,
+                    },
+                  },
+                }
+              : {}),
+          })
           .where(eq(extractionJob.id, job.id));
         return counts;
       }),

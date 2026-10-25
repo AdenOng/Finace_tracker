@@ -27,6 +27,13 @@ export function buildStatementSchema(categoryKeys: [string, ...string[]]) {
     ),
     postedDate: isoDate.nullable(),
     description: z.string().describe("Line text exactly as printed"),
+    reference: z
+      .string()
+      .trim()
+      .max(200)
+      .nullable()
+      .default(null)
+      .describe("Bank transaction reference as printed, if present"),
     merchant: z
       .string()
       .nullable()
@@ -35,6 +42,21 @@ export function buildStatementSchema(categoryKeys: [string, ...string[]]) {
       .number()
       .describe(
         "Signed amount in the account currency: negative = money out, positive = money in",
+      ),
+    printedDirection: z
+      .enum(["debit", "credit"])
+      .nullable()
+      .default(null)
+      .describe(
+        "Direction printed by DR/CR, debit/credit columns, minus sign or brackets; null if absent",
+      ),
+    printedAmount: z
+      .number()
+      .nonnegative()
+      .nullable()
+      .default(null)
+      .describe(
+        "Unsigned transaction magnitude exactly as printed; null if unreadable",
       ),
     currency: currencyCode,
     originalAmount: z
@@ -78,6 +100,13 @@ export function buildStatementSchema(categoryKeys: [string, ...string[]]) {
   });
 
   const investmentTransaction = z.object({
+    reference: z
+      .string()
+      .trim()
+      .max(200)
+      .nullable()
+      .default(null)
+      .describe("Broker trade or execution ID as printed, if present"),
     tradeDate: isoDate,
     settleDate: isoDate.nullable(),
     type: z.enum([
@@ -123,7 +152,21 @@ export function buildStatementSchema(categoryKeys: [string, ...string[]]) {
     periodStart: isoDate.nullable(),
     periodEnd: isoDate.nullable(),
     openingBalance: z.number().nullable(),
+    openingBalanceDirection: z
+      .enum(["owed", "credit"])
+      .nullable()
+      .default(null)
+      .describe(
+        "Card opening balance: owed/DR or overpayment/CR; null without evidence",
+      ),
     closingBalance: z.number().nullable(),
+    closingBalanceDirection: z
+      .enum(["owed", "credit"])
+      .nullable()
+      .default(null)
+      .describe(
+        "Card closing balance: owed/DR or overpayment/CR; null without evidence",
+      ),
     transactions: z.array(transaction),
     positions: z.array(position),
     cashBalances: z.array(

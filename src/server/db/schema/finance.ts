@@ -2,9 +2,10 @@
  * Per-user financial records. Every row carries `ownerId`; queries must be filtered through the
  * account access scope (src/server/lib/access.ts), including explicit workspace account grants.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   jsonb,
@@ -197,6 +198,7 @@ export const investmentTransaction = pgTable(
     fees: money("fees"),
     currency: varchar("currency", { length: 3 }).notNull(),
     description: text("description"),
+    reference: text("reference"),
     source: recordSource("source").default("manual").notNull(),
     /** Deterministic hash for exact duplicate detection on import; manual entries use a random one. */
     fingerprint: text("fingerprint").notNull(),
@@ -258,6 +260,7 @@ export const transaction = pgTable(
     postedDate: date("posted_date").notNull(),
     transactionDate: date("transaction_date"),
     description: text("description").notNull(),
+    reference: text("reference"),
     merchant: text("merchant"),
     amount: money("amount").notNull(),
     currency: varchar("currency", { length: 3 }).notNull(),
@@ -287,6 +290,86 @@ export const transaction = pgTable(
     unique("transaction_account_fingerprint_uq").on(t.accountId, t.fingerprint),
     index("transaction_owner_date_idx").on(t.ownerId, t.postedDate),
     index("transaction_category_idx").on(t.categoryId),
+  ],
+);
+
+/** Only confirmed matches are persisted; suggestions are recomputed from unlinked sides. */
+export const transferLink = pgTable(
+  "transfer_link",
+  {
+    id: id(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    outgoingTransactionId: uuid("outgoing_transaction_id").references(
+      () => transaction.id,
+      { onDelete: "cascade" },
+    ),
+    outgoingInvestmentId: uuid("outgoing_investment_id").references(
+      () => investmentTransaction.id,
+      { onDelete: "cascade" },
+    ),
+    incomingTransactionId: uuid("incoming_transaction_id").references(
+      () => transaction.id,
+      { onDelete: "cascade" },
+    ),
+    incomingInvestmentId: uuid("incoming_investment_id").references(
+      () => investmentTransaction.id,
+      { onDelete: "cascade" },
+    ),
+    feeAmount: money("fee_amount"),
+    feeCurrency: varchar("fee_currency", { length: 3 }),
+    ...timestamps(),
+  },
+  (t) => [
+    index("transfer_link_owner_idx").on(t.ownerId),
+    check(
+      "transfer_link_outgoing_ck",
+      sql`num_nonnulls(${t.outgoingTransactionId}, ${t.outgoingInvestmentId}) = 1`,
+    ),
+    check(
+      "transfer_link_incoming_ck",
+      sql`num_nonnulls(${t.incomingTransactionId}, ${t.incomingInvestmentId}) = 1`,
+    ),
+    check(
+      "transfer_link_distinct_ck",
+      sql`${t.outgoingTransactionId} is distinct from ${t.incomingTransactionId} or ${t.outgoingInvestmentId} is distinct from ${t.incomingInvestmentId}`,
+    ),
+    check(
+      "transfer_link_fee_ck",
+      sql`(${t.feeAmount} is null and ${t.feeCurrency} is null) or (${t.feeAmount} is not null and ${t.feeAmount} >= 0 and ${t.feeCurrency} is not null)`,
+    ),
+    unique("transfer_link_outgoing_transaction_uq").on(t.outgoingTransactionId),
+    unique("transfer_link_incoming_transaction_uq").on(t.incomingTransactionId),
+    unique("transfer_link_outgoing_investment_uq").on(t.outgoingInvestmentId),
+    unique("transfer_link_incoming_investment_uq").on(t.incomingInvestmentId),
+  ],
+);
+
+export const transferExclusion = pgTable(
+  "transfer_exclusion",
+  {
+    id: id(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id").references(() => transaction.id, {
+      onDelete: "cascade",
+    }),
+    investmentTransactionId: uuid("investment_transaction_id").references(
+      () => investmentTransaction.id,
+      { onDelete: "cascade" },
+    ),
+    ...timestamps(),
+  },
+  (t) => [
+    index("transfer_exclusion_owner_idx").on(t.ownerId),
+    check(
+      "transfer_exclusion_side_ck",
+      sql`num_nonnulls(${t.transactionId}, ${t.investmentTransactionId}) = 1`,
+    ),
+    unique("transfer_exclusion_transaction_uq").on(t.transactionId),
+    unique("transfer_exclusion_investment_uq").on(t.investmentTransactionId),
   ],
 );
 

@@ -99,6 +99,20 @@
       "when": 1792897710579,
       "tag": "0013_price_history_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792912214524,
+      "tag": "0014_flashy_squirrel_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792914230552,
+      "tag": "0015_icy_bloodstrike",
+      "breakpoints": true
     }
   ]
 }

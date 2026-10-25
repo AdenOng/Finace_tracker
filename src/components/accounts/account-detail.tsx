@@ -13,6 +13,7 @@ import { AccountTransactions } from "~/components/accounts/account-transactions"
 import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { SnapshotDrawer } from "~/components/accounts/snapshot-drawer";
 import { Amounts } from "~/components/finance/amounts";
+import { BalanceDate } from "~/components/finance/balance-date";
 import { Button } from "~/components/ui/button";
 import {
   EmptyState,
@@ -30,7 +31,7 @@ import {
   cpfBucketLabels,
   holdsSecurities,
 } from "~/lib/accounts";
-import { formatDate, formatMoney, formatQuantity } from "~/lib/format";
+import { formatMoney, formatQuantity } from "~/lib/format";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 export function AccountDetail({
@@ -179,9 +180,17 @@ export function AccountDetail({
           amountsFor={account.id}
           title={investments ? "Value" : "Balance"}
           description={
-            holdings
-              ? `As of ${formatDate(holdings.asOf)}${holdings.source === "manual" ? (readOnly ? ", entered by the owner" : ", entered by you") : ""}.`
-              : undefined
+            holdings ? (
+              <>
+                <BalanceDate asOf={holdings.asOf} />
+                {holdings.source === "manual"
+                  ? readOnly
+                    ? ", entered by the owner"
+                    : ", entered by you"
+                  : ""}
+                .
+              </>
+            ) : undefined
           }
         >
           {holdings ? (

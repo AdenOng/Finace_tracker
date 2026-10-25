@@ -23,6 +23,8 @@ import {
 } from "~/server/lib/access";
 import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
 import { preset } from "~/server/lib/preset";
+import { confirmedBalanceTransfers } from "~/server/modules/transfers/balance-links";
+import { transferFreshnessWarnings } from "~/server/modules/transfers/freshness";
 import { latestHoldings, ratesInto } from "./holdings";
 import { type Amount, convertAmounts } from "./valuation";
 
@@ -140,14 +142,19 @@ export async function computeNetWorth(
         )
     : [];
 
-  const latest = [...holdings.values()]
-    .map((h) => h.asOf)
-    .sort()
-    .at(-1);
   const countedEntries = [...holdings].filter(
     ([id]) => countCpfSrs || accountGroupOf(typeOf.get(id)!) !== "cpf_srs",
   );
   const countedHoldings = countedEntries.map(([, h]) => h);
+  const dates = countedHoldings.map((h) => h.asOf).sort();
+  const transferWarnings = transferFreshnessWarnings(
+    await confirmedBalanceTransfers(
+      db,
+      scope,
+      countedEntries.map(([id]) => id),
+    ),
+    new Map(countedEntries),
+  );
   const nameOf = new Map(accounts.map((a) => [a.id, a.name]));
   const held = countedHoldings.flatMap((h) => h.positions);
   const quoted = held.filter((p) => p.quotedAt);
@@ -156,7 +163,9 @@ export async function computeNetWorth(
     currency: target,
     fxAsOf,
     ...convertAmounts(counted, target, rates),
-    asOf: latest ?? null,
+    asOf: dates.at(-1) ?? null,
+    oldestAsOf: dates[0] ?? null,
+    transferWarnings,
     unpriced: countedHoldings.reduce((n, h) => n + h.unpriced, 0),
     /** How many holdings are valued at market prices rather than their statement price. */
     prices: held.length

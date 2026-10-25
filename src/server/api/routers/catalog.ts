@@ -5,6 +5,7 @@ import {
   enrollingProcedure,
   protectedProcedure,
 } from "~/server/api/trpc";
+import { categoryKind } from "~/lib/transaction-classification";
 import { category, currency, institution } from "~/server/db/schema";
 
 /** Read-only view of admin-managed reference data, for every signed-in user. */
@@ -33,8 +34,8 @@ export const catalogRouter = createTRPCRouter({
       .orderBy(asc(institution.kind), asc(institution.sortOrder)),
   ),
 
-  categories: protectedProcedure.query(({ ctx }) =>
-    ctx.db
+  categories: protectedProcedure.query(async ({ ctx }) => {
+    const categories = await ctx.db
       .select({
         id: category.id,
         key: category.key,
@@ -42,9 +43,19 @@ export const catalogRouter = createTRPCRouter({
         kind: category.kind,
         parentId: category.parentId,
         color: category.color,
+        archivedAt: category.archivedAt,
       })
       .from(category)
-      .where(isNull(category.archivedAt))
-      .orderBy(asc(category.sortOrder)),
-  ),
+      .orderBy(asc(category.sortOrder));
+    return categories
+      .filter((c) => !c.archivedAt)
+      .map((c) => ({
+        id: c.id,
+        key: c.key,
+        name: c.name,
+        parentId: c.parentId,
+        color: c.color,
+        kind: categoryKind(categories, c.id) ?? c.kind,
+      }));
+  }),
 });

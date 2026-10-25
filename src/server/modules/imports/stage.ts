@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 
 import {
   cpfBucketLabels,
@@ -7,14 +7,17 @@ import {
   type AccountType,
 } from "~/lib/accounts";
 import {
-  category,
   investmentTransaction,
   security,
   stagedRow,
   transaction,
 } from "~/server/db/schema";
-import type { AccessScope } from "~/server/lib/access";
+import { writableBy, type AccessScope } from "~/server/lib/access";
 import type { StatementExtraction } from "~/server/modules/extraction";
+import {
+  classifyTransaction,
+  loadClassificationCategories,
+} from "~/server/modules/spending/classification";
 import type { FinanceDatabase } from "~/server/modules/spending/guards";
 import {
   loadMerchantRules,
@@ -27,19 +30,23 @@ import {
   stagedSchemas,
   type StagedKind,
 } from "./rows";
+import { statementBalance, transactionEvidence } from "./evidence";
 
 type NewRow = {
   kind: StagedKind;
   data: Record<string, unknown>;
   matchStatus: "new" | "duplicate" | "possible_duplicate";
   matchedRecordId: string | null;
-  decision: "accept" | "skip";
+  decision: "pending" | "accept" | "skip";
 };
 
 const shiftDays = (iso: string, days: number) =>
   new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000)
     .toISOString()
     .slice(0, 10);
+
+const withinDateWindow = (date: string, target: string) =>
+  date >= shiftDays(target, -3) && date <= shiftDays(target, 3);
 
 function dateRange(dates: string[]) {
   const sorted = [...dates].sort();
@@ -51,7 +58,7 @@ function dateRange(dates: string[]) {
  * transactions (plus the closing balance, or CPF sub-account balances); investment accounts get
  * holdings, cash and activity.
  * Each line is compared with what the account already has: an exact match is a duplicate and
- * starts skipped, a same-day same-amount line is flagged but kept. Returns notes about anything
+ * starts skipped, an uncertain match needs an explicit decision. Returns notes about anything
  * that could not be staged.
  */
 export async function stageExtraction(
@@ -86,7 +93,10 @@ export async function stageExtraction(
   };
   // Each currency (and CPF sub-account) can only be saved once per dated entry.
   const seenCash = new Set<string>();
-  const addCash = (balances: StatementExtraction["cashBalances"]) => {
+  const addCash = (
+    balances: StatementExtraction["cashBalances"],
+    closing = false,
+  ) => {
     for (const c of balances) {
       const bucket = account.type === "cpf" ? c.bucket : null;
       const label = `${c.currency.toUpperCase()}${bucket ? ` ${cpfBucketLabels[bucket]}` : ""}`;
@@ -97,7 +107,21 @@ export async function stageExtraction(
       seenCash.add(label);
       add("cash_balance", {
         currency: c.currency,
-        amount: decimalString(c.amount, 4),
+        amount: statementBalance(
+          account.type,
+          c.amount,
+          out.closingBalanceDirection,
+        ),
+        balanceDirection:
+          account.type === "credit_card" ? out.closingBalanceDirection : null,
+        openingBalance: closing
+          ? statementBalance(
+              account.type,
+              out.openingBalance,
+              out.openingBalanceDirection,
+            )
+          : null,
+        openingBalanceDirection: closing ? out.openingBalanceDirection : null,
         bucket,
       });
     }
@@ -134,6 +158,10 @@ export async function stageExtraction(
               tradeDate: investmentTransaction.tradeDate,
               type: investmentTransaction.type,
               amount: investmentTransaction.amount,
+              reference: investmentTransaction.reference,
+              quantity: investmentTransaction.quantity,
+              price: investmentTransaction.price,
+              fees: investmentTransaction.fees,
               currency: investmentTransaction.currency,
               symbol: sql<
                 string | null
@@ -154,6 +182,7 @@ export async function stageExtraction(
             .where(
               and(
                 eq(investmentTransaction.accountId, account.id),
+                writableBy(scope, investmentTransaction.ownerId),
                 gte(
                   investmentTransaction.tradeDate,
                   dateRange(activity.map((a) => a.tradeDate)).from,
@@ -168,52 +197,76 @@ export async function stageExtraction(
     const used = new Set<string>();
     for (const a of activity) {
       const amount = decimalString(a.amount, 4);
-      const match = existing.find(
-        (e) =>
-          !used.has(e.id) &&
+      const reference = a.reference ?? null;
+      const details = {
+        quantity: optionalDecimal(a.quantity, 10),
+        price: optionalDecimal(a.price === null ? null : Math.abs(a.price), 8),
+        fees: optionalDecimal(a.fees, 4),
+      };
+      const candidates = existing.flatMap((e) => {
+        if (
+          used.has(e.id) ||
+          !withinDateWindow(e.tradeDate, a.tradeDate) ||
+          (reference && e.reference && reference !== e.reference)
+        )
+          return [];
+        const referenced = Boolean(reference && e.reference === reference);
+        let exact =
           e.tradeDate === a.tradeDate &&
           e.type === a.type &&
           e.currency === a.currency.toUpperCase() &&
           (e.symbol?.trim().toUpperCase() ?? null) ===
             (a.symbol?.trim().toUpperCase() ?? null) &&
-          new Decimal(e.amount).equals(amount),
-      );
-      if (match) used.add(match.id);
+          new Decimal(e.amount).equals(amount);
+        if (!exact && !referenced) return [];
+        for (const field of ["quantity", "price", "fees"] as const) {
+          if (e[field] === null || details[field] === null) {
+            if (!referenced) exact = false;
+          } else if (!new Decimal(e[field]).equals(details[field])) {
+            if (!referenced) return [];
+            exact = false;
+          }
+        }
+        return [{ row: e, exact, referenced }];
+      });
+      const match =
+        candidates.find((m) => m.exact && m.referenced) ??
+        candidates.find((m) => m.exact) ??
+        candidates.find((m) => m.referenced) ??
+        candidates[0];
+      if (match) used.add(match.row.id);
       add(
         "investment_transaction",
         {
           tradeDate: a.tradeDate,
+          reference,
           settleDate: a.settleDate,
           type: a.type,
           symbol: a.symbol,
-          quantity: optionalDecimal(a.quantity, 10),
-          price: optionalDecimal(
-            a.price === null ? null : Math.abs(a.price),
-            8,
-          ),
+          ...details,
           amount,
-          fees: optionalDecimal(a.fees, 4),
           currency: a.currency,
           description: a.description,
         },
         match
           ? {
-              matchStatus: "duplicate",
-              matchedRecordId: match.id,
-              decision: "skip",
+              matchStatus: match.exact ? "duplicate" : "possible_duplicate",
+              matchedRecordId: match.row.id,
+              decision: match.exact ? "skip" : "pending",
             }
           : {},
       );
     }
   } else {
-    const keys = await tx
-      .select({ id: category.id, key: category.key })
-      .from(category)
-      .where(isNull(category.archivedAt));
-    const categoryOf = new Map(keys.map((k) => [k.key, k.id]));
+    const categories = await loadClassificationCategories(tx);
+    const categoryOf = new Map(
+      categories.filter((c) => !c.archivedAt).map((c) => [c.key, c.id]),
+    );
     const rules = await loadMerchantRules(tx, scope);
 
-    const lines = out.transactions.filter((t) => t.amount !== 0);
+    const lines = out.transactions.filter(
+      (t) => t.amount !== 0 || (t.printedAmount ?? 0) !== 0,
+    );
     const existing =
       lines.length > 0
         ? await tx
@@ -223,11 +276,13 @@ export async function stageExtraction(
               amount: transaction.amount,
               currency: transaction.currency,
               description: transaction.description,
+              reference: transaction.reference,
             })
             .from(transaction)
             .where(
               and(
                 eq(transaction.accountId, account.id),
+                writableBy(scope, transaction.ownerId),
                 gte(
                   transaction.postedDate,
                   dateRange(lines.map((t) => t.postedDate ?? t.date)).from,
@@ -243,19 +298,32 @@ export async function stageExtraction(
     for (const t of lines) {
       const postedDate = t.postedDate ?? t.date;
       const amount = decimalString(t.amount, 4);
+      const reference = t.reference ?? null;
       const sameDay = existing.filter(
         (e) =>
           !used.has(e.id) &&
+          !(reference && e.reference && reference !== e.reference) &&
           e.currency === (t.currency || account.currency).toUpperCase() &&
           (e.postedDate === postedDate || e.postedDate === t.date) &&
           new Decimal(e.amount).equals(amount),
       );
-      const exact = sameDay.find(
-        (e) =>
-          normalizeMerchantText(e.description) ===
-          normalizeMerchantText(t.description),
-      );
-      const match = exact ?? sameDay[0];
+      const byReference = reference
+        ? existing.find(
+            (e) =>
+              !used.has(e.id) &&
+              e.reference === reference &&
+              (withinDateWindow(e.postedDate, postedDate) ||
+                withinDateWindow(e.postedDate, t.date)),
+          )
+        : undefined;
+      const exact =
+        sameDay.find((e) => reference && e.reference === reference) ??
+        sameDay.find(
+          (e) =>
+            normalizeMerchantText(e.description) ===
+            normalizeMerchantText(t.description),
+        );
+      const match = exact ?? sameDay[0] ?? byReference;
       if (match) used.add(match.id);
 
       const categoryId =
@@ -268,19 +336,24 @@ export async function stageExtraction(
           postedDate,
           transactionDate: t.date !== postedDate ? t.date : null,
           description: t.description,
+          reference,
           merchant: t.merchant,
           amount,
+          ...transactionEvidence(t),
           currency: t.currency || account.currency,
           originalAmount: optionalDecimal(t.originalAmount, 4),
           originalCurrency: t.originalCurrency,
-          categoryId,
-          isTransfer: t.isTransfer,
+          ...classifyTransaction(
+            { categoryId: null, isTransfer: t.isTransfer },
+            { categoryId },
+            categories,
+          ),
         },
         match
           ? {
               matchStatus: exact ? "duplicate" : "possible_duplicate",
               matchedRecordId: match.id,
-              decision: exact ? "skip" : "accept",
+              decision: exact ? "skip" : "pending",
             }
           : {},
       );
@@ -303,6 +376,7 @@ export async function stageExtraction(
             },
           ]
         : out.cashBalances,
+      !split && out.closingBalance !== null,
     );
   }
 

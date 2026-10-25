@@ -16,6 +16,10 @@ import {
   matchMerchantRule,
   normalizeMerchantText,
 } from "~/server/modules/spending/rules";
+import {
+  classifyTransaction,
+  loadClassificationCategories,
+} from "~/server/modules/spending/classification";
 
 const ruleInput = z.object({
   pattern: z.string().trim().min(1).max(200).transform(normalizeMerchantText),
@@ -141,10 +145,16 @@ export const merchantRulesRouter = createTRPCRouter({
           ids.push(change.id);
           byCategory.set(change.categoryId, ids);
         }
+        const categories = await loadClassificationCategories(tx);
         for (const [categoryId, ids] of byCategory) {
+          const classification = classifyTransaction(
+            { categoryId: null, isTransfer: false },
+            { categoryId },
+            categories,
+          );
           await tx
             .update(transaction)
-            .set({ categoryId, categorySource: "rule" })
+            .set({ ...classification, categorySource: "rule" })
             .where(
               and(
                 inArray(transaction.id, ids),

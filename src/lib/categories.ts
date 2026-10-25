@@ -1,3 +1,5 @@
+export type CategoryKind = "expense" | "income" | "transfer";
+
 /** Each top-level category followed by its children, for flat pickers. */
 export function orderCategories<
   T extends { id: string; parentId: string | null },

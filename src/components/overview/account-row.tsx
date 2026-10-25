@@ -2,9 +2,10 @@ import Decimal from "decimal.js";
 import Link from "next/link";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
+import { BalanceDate } from "~/components/finance/balance-date";
 import { accountTypeLabels } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
-import { formatDate, formatMoney } from "~/lib/format";
+import { formatMoney } from "~/lib/format";
 import type { RouterOutputs } from "~/trpc/react";
 
 type WorthAccount = RouterOutputs["portfolio"]["netWorth"]["accounts"][number];
@@ -37,14 +38,15 @@ export function AccountRow({
             ) : null}
           </span>
           <span className="text-ink-3 block truncate text-[12px]">
-            {[
-              account.institutionName,
-              accountTypeLabels[account.type],
-              account.asOf ? formatDate(account.asOf) : null,
-            ]
+            {[account.institutionName, accountTypeLabels[account.type]]
               .filter(Boolean)
               .join(" · ")}
           </span>
+          {account.asOf ? (
+            <span className="text-ink-2 mt-1 block text-[12px]">
+              <BalanceDate asOf={account.asOf} />
+            </span>
+          ) : null}
         </span>
         <span className="shrink-0 text-right">
           {!account.asOf ? (

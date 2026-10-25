@@ -65,9 +65,29 @@ function fakeAdapter(config: LlmProviderConfig): LlmAdapter {
         currency: "SGD",
         periodStart: null,
         periodEnd: null,
-        openingBalance: null,
-        closingBalance: null,
-        transactions: [],
+        openingBalance: model === "sign-evidence" ? 100 : null,
+        openingBalanceDirection: model === "sign-evidence" ? "owed" : null,
+        closingBalance: model === "sign-evidence" ? 50 : null,
+        closingBalanceDirection: model === "sign-evidence" ? "credit" : null,
+        transactions:
+          model === "sign-evidence"
+            ? [
+                {
+                  date: "2026-09-01",
+                  postedDate: null,
+                  description: "Card refund CR 45.00",
+                  merchant: null,
+                  amount: -45,
+                  printedDirection: "credit",
+                  printedAmount: 45,
+                  currency: "SGD",
+                  originalAmount: null,
+                  originalCurrency: null,
+                  categoryKey: null,
+                  isTransfer: false,
+                },
+              ]
+            : [],
         positions: [],
         cashBalances: [],
         investmentTransactions: [],
@@ -285,6 +305,40 @@ const brokenKey = await provider("broken-key", {
     isStaleJob({ ...failed, status: "running", startedAt: minutesAgo(1) }),
     false,
   );
+}
+
+// Printed evidence survives schema validation and the runner only stages data for review.
+{
+  const evidence = await provider("sign-evidence");
+  await setProviders(evidence.id, null);
+  await db
+    .update(schema.financialAccount)
+    .set({ type: "credit_card" })
+    .where(eq(schema.financialAccount.id, account!.id));
+  const imported = await job();
+  await runImportJob(imported.id);
+  const result = await read(imported.id);
+  assert.equal(result.status, "needs_review", result.error ?? "");
+  assert.equal(
+    (result.result as { closingBalance: number }).closingBalance,
+    50,
+  );
+  const rows = await db
+    .select()
+    .from(schema.stagedRow)
+    .where(eq(schema.stagedRow.jobId, imported.id));
+  const line = rows.find((r) => r.kind === "transaction")!.data;
+  assert.equal(line.amount, "-45");
+  assert.equal(line.printedDirection, "credit");
+  assert.equal(line.printedAmount, "45");
+  assert.equal(line.signMismatch, true);
+  assert.equal(line.suggestedAmount, "45");
+  const balance = rows.find((r) => r.kind === "cash_balance")!.data;
+  assert.equal(balance.amount, "50");
+  assert.equal(balance.openingBalance, "-100");
+  assert.equal(balance.balanceDirection, "credit");
+  assert.equal(await db.$count(schema.transaction), 0);
+  assert.equal(await db.$count(schema.cashBalance), 0);
 }
 
 // 5. Spent tokens still count after the import is deleted.

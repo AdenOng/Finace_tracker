@@ -11,10 +11,12 @@ import {
   Textarea,
 } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
-import { orderCategories } from "~/lib/categories";
+import { type CategoryKind, orderCategories } from "~/lib/categories";
 import { errorMessage } from "~/lib/errors";
 import { formText } from "~/lib/form";
 import { api, type RouterOutputs } from "~/trpc/react";
+import { categoryKind } from "~/lib/transaction-classification";
+import { TransactionTypeSelect } from "./transaction-type-select";
 
 type Transaction = RouterOutputs["spending"]["list"][number];
 export type BulkAction = "edit" | "rules" | "delete";
@@ -33,6 +35,17 @@ export function BulkEditDrawer({
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const [changeMerchant, setChangeMerchant] = useState(false);
   const [changeNotes, setChangeNotes] = useState(false);
+  const [categoryId, setCategoryId] = useState("keep");
+  const [type, setType] = useState<CategoryKind | "keep">("keep");
+  const allExpenses = rows.every((r) => r.amount.startsWith("-"));
+  const allIncome = rows.every((r) => !r.amount.startsWith("-"));
+  function chooseType(value: CategoryKind | "keep") {
+    setType(value);
+    if (value === "keep") return;
+    const kind = categoryKind(categories, categoryId);
+    if (kind && (kind === "transfer") !== (value === "transfer"))
+      setCategoryId("");
+  }
   const update = api.spending.bulkUpdate.useMutation();
   const remove = api.spending.bulkRemove.useMutation();
   const apply = api.merchantRules.applyRules.useMutation();
@@ -51,14 +64,12 @@ export function BulkEditDrawer({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const categoryId = formText(form, "categoryId");
-    const transfer = formText(form, "isTransfer");
     const cleared = formText(form, "cleared");
     const result = await update.mutateAsync({
       ids,
       changes: {
         ...(categoryId !== "keep" ? { categoryId: categoryId || null } : {}),
-        ...(transfer !== "keep" ? { isTransfer: transfer === "yes" } : {}),
+        ...(type !== "keep" ? { isTransfer: type === "transfer" } : {}),
         ...(!reconciled && cleared !== "keep"
           ? { cleared: cleared === "yes" }
           : {}),
@@ -150,7 +161,24 @@ export function BulkEditDrawer({
             field.
           </p>
           <Field label="Category" htmlFor="bulk-category">
-            <Select id="bulk-category" name="categoryId" defaultValue="keep">
+            <Select
+              id="bulk-category"
+              value={categoryId}
+              onChange={(e) => {
+                setCategoryId(e.target.value);
+                const kind = categoryKind(categories, e.target.value);
+                if (kind)
+                  setType(
+                    kind === "transfer"
+                      ? "transfer"
+                      : allExpenses
+                        ? "expense"
+                        : allIncome
+                          ? "income"
+                          : "keep",
+                  );
+              }}
+            >
               <option value="keep">Keep existing categories</option>
               <option value="">Clear category</option>
               {orderCategories(categories).map((c) => (
@@ -161,12 +189,17 @@ export function BulkEditDrawer({
               ))}
             </Select>
           </Field>
-          <Field label="Transfer" htmlFor="bulk-transfer">
-            <Select id="bulk-transfer" name="isTransfer" defaultValue="keep">
-              <option value="keep">Keep existing transfer status</option>
-              <option value="yes">Mark as transfer</option>
-              <option value="no">Mark as spending / income</option>
-            </Select>
+          <Field
+            label="Transaction type"
+            hint="Expense is money out; income is money in. Amounts stay unchanged. For mixed directions, select each direction separately to remove transfer status."
+          >
+            <TransactionTypeSelect
+              keep
+              value={type}
+              onChange={chooseType}
+              expenseDisabled={!allExpenses}
+              incomeDisabled={!allIncome}
+            />
           </Field>
           <Field
             label="Cleared"

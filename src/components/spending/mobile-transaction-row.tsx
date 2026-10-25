@@ -69,7 +69,11 @@ export function MobileTransactionRow({
               />
             ) : null}
             <span className="truncate">
-              {t.isTransfer ? "Transfer" : (t.categoryName ?? "Uncategorised")}
+              {t.isTransfer
+                ? t.transferLinkId
+                  ? "Transfer · Linked"
+                  : "Transfer"
+                : (t.categoryName ?? "Uncategorised")}
             </span>
           </span>
           <span className="text-ink-3">

@@ -14,12 +14,17 @@ import {
 } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
 import { accountGroupOf } from "~/lib/accounts";
-import { orderCategories } from "~/lib/categories";
+import { type CategoryKind, orderCategories } from "~/lib/categories";
 import { cn } from "~/lib/cn";
 import { todayIso } from "~/lib/dates";
 import { errorMessage } from "~/lib/errors";
 import { formText } from "~/lib/form";
 import { api, type RouterOutputs } from "~/trpc/react";
+import {
+  categoryKind,
+  classifyTransaction,
+} from "~/lib/transaction-classification";
+import { TransactionTypeSelect } from "./transaction-type-select";
 
 type Transaction = RouterOutputs["spending"]["list"][number];
 
@@ -43,6 +48,26 @@ export function TransactionDrawer({
   const [direction, setDirection] = useState<"out" | "in">(
     existing && new Decimal(existing.amount).isPositive() ? "in" : "out",
   );
+  const [classification, setClassification] = useState({
+    categoryId: existing?.categoryId ?? null,
+    isTransfer: existing?.isTransfer ?? false,
+  });
+  function chooseType(value: CategoryKind | "keep") {
+    if (value === "keep") return;
+    setClassification(
+      classifyTransaction(
+        classification,
+        {
+          isTransfer: value === "transfer",
+          ...(categoryKind(categories, classification.categoryId) !== value
+            ? { categoryId: null }
+            : {}),
+        },
+        categories,
+      ),
+    );
+    if (value !== "transfer") setDirection(value === "expense" ? "out" : "in");
+  }
   const create = api.spending.create.useMutation();
   const update = api.spending.update.useMutation();
   const remove = api.spending.remove.useMutation();
@@ -72,8 +97,7 @@ export function TransactionDrawer({
       merchant: formText(form, "merchant"),
       amount: direction === "out" ? `-${magnitude}` : magnitude,
       currency: currency === "" ? null : currency,
-      categoryId: formText(form, "categoryId") || null,
-      isTransfer: form.get("isTransfer") === "on",
+      ...classification,
       cleared: locked ? existing.cleared : form.get("cleared") === "on",
       notes: formText(form, "notes"),
     };
@@ -135,6 +159,23 @@ export function TransactionDrawer({
             account to change the amount, date or description.
           </Notice>
         ) : null}
+        <Field
+          label="Transaction type"
+          hint="Transfers are left out of spending totals."
+        >
+          <TransactionTypeSelect
+            value={
+              classification.isTransfer
+                ? "transfer"
+                : direction === "out"
+                  ? "expense"
+                  : "income"
+            }
+            onChange={chooseType}
+            expenseDisabled={locked && direction === "in"}
+            incomeDisabled={locked && direction === "out"}
+          />
+        </Field>
         <div
           role="radiogroup"
           aria-label="Direction"
@@ -152,7 +193,17 @@ export function TransactionDrawer({
               disabled={locked}
               role="radio"
               aria-checked={direction === value}
-              onClick={() => setDirection(value)}
+              onClick={() => {
+                setDirection(value);
+                if (!classification.isTransfer) {
+                  const kind = categoryKind(
+                    categories,
+                    classification.categoryId,
+                  );
+                  if (kind && kind !== (value === "out" ? "expense" : "income"))
+                    setClassification({ ...classification, categoryId: null });
+                }
+              }}
               className={cn(
                 "h-10 text-sm font-semibold transition-colors",
                 direction === value
@@ -259,7 +310,16 @@ export function TransactionDrawer({
           <Select
             id="txn-category"
             name="categoryId"
-            defaultValue={existing?.categoryId ?? ""}
+            value={classification.categoryId ?? ""}
+            onChange={(e) =>
+              setClassification(
+                classifyTransaction(
+                  classification,
+                  { categoryId: e.target.value || null },
+                  categories,
+                ),
+              )
+            }
           >
             <option value="">Uncategorised</option>
             {existing?.categoryId &&
@@ -275,12 +335,6 @@ export function TransactionDrawer({
             ))}
           </Select>
         </Field>
-        <Checkbox
-          name="isTransfer"
-          label="Transfer between my accounts"
-          description="Card bill payments, top-ups and moves to savings. Left out of spending totals."
-          defaultChecked={existing?.isTransfer}
-        />
         <Checkbox
           name="cleared"
           label="Cleared"

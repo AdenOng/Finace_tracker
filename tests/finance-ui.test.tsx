@@ -8,9 +8,17 @@ import { ConsolidatedPortfolio } from "../src/components/portfolio/consolidated-
 import { consolidateHoldings } from "../src/server/modules/portfolio/consolidated";
 import type { Holdings } from "../src/server/modules/portfolio/holdings";
 import { ImportReview } from "../src/components/imports/import-review";
+import { BulkEditDrawer } from "../src/components/spending/bulk-edit-drawer";
 import { TransactionDrawer } from "../src/components/spending/transaction-drawer";
+import { TransferReview } from "../src/components/spending/transfer-review";
+import { MobileTransactionRow } from "../src/components/spending/mobile-transaction-row";
 import { SpendingView } from "../src/components/spending/spending-view";
 import { AccountRow } from "../src/components/overview/account-row";
+import { AccountsView } from "../src/components/accounts/accounts-view";
+import { BalanceDate } from "../src/components/finance/balance-date";
+import { TransferFreshnessNotices } from "../src/components/overview/transfer-freshness-notices";
+import { AmountsProvider, AmountsScope } from "../src/components/finance/privacy";
+import { transferFreshnessWarnings } from "../src/server/modules/transfers/freshness";
 import { NetWorthChart } from "../src/components/overview/net-worth-chart";
 import { netWorthSeries } from "../src/lib/net-worth-series";
 import { formatDate } from "../src/lib/format";
@@ -272,6 +280,89 @@ test("broker rows show one converted holdings-and-cash total instead of currency
   expect(unrecorded).toContain("Not recorded");
 });
 
+test("balance dates stay visible and stale labels allow a monthly statement cadence in account rows and lists", () => {
+  setSystemTime(new Date("2026-10-15T12:00:00Z"));
+  const recent = renderToStaticMarkup(<BalanceDate asOf="2026-08-31" />);
+  expect(recent).toContain('dateTime="2026-08-31"');
+  expect(recent).not.toContain("Stale balance");
+  const old = { ...brokerTotal, asOf: "2026-08-30" };
+  const row = renderToStaticMarkup(<AccountRow account={old} currency="SGD" />);
+  expect(row).toContain("As of");
+  expect(row).toContain(formatDate(old.asOf));
+  expect(row).toContain("Stale balance");
+  expect(row).toContain("more than 45 days old");
+  expect(row).not.toMatch(/class="sensitive"[^>]*>[^<]*As of/);
+  const list = render(<AccountsView />, (client) =>
+    client.setQueryData(getQueryKey(api.accounts.list, undefined, "query"), [
+      { ...old, archivedAt: null },
+    ]),
+  );
+  expect(list).toContain("Stale balance");
+  expect(list).toContain('dateTime="2026-08-30"');
+});
+
+test("transfer freshness notices explain both dates and native amounts inside the net-worth privacy scope", () => {
+  const warnings = transferFreshnessWarnings(
+    [
+      {
+        id: "confirmed",
+        outgoing: {
+          accountId,
+          accountName: "DBS",
+          date: "2026-09-18",
+          amount: "-2000",
+          currency: "SGD",
+        },
+        incoming: {
+          accountId: "receiver",
+          accountName: "OCBC",
+          date: "2026-09-20",
+          amount: "1490",
+          currency: "USD",
+        },
+      },
+    ],
+    new Map([
+      [accountId, { asOf: "2026-08-31" }],
+      ["receiver", { asOf: "2026-09-30" }],
+    ]),
+  );
+  const html = render(
+    <AmountsProvider initial={{ hidden: true, scopes: {} }}>
+      <AmountsScope scope="overview-net-worth">
+        <TransferFreshnessNotices warnings={warnings} />
+      </AmountsScope>
+    </AmountsProvider>,
+  );
+  expect(html).toContain('data-amounts-scope="hidden"');
+  expect(html).toContain("counted twice in net worth");
+  expect(html).toContain('<span class="sensitive">S$2,000.00</span>');
+  expect(html).toContain('<span class="sensitive">US$1,490.00</span>');
+  for (const date of ["2026-09-18", "2026-09-20", "2026-08-31", "2026-09-30"])
+    expect(html).toContain(formatDate(date));
+  expect(html).toContain(`href="/accounts/${accountId}"`);
+  expect(html).toContain("Update DBS");
+  const shared = renderToStaticMarkup(
+    <TransferFreshnessNotices warnings={warnings} workspaceId={workspaceId} />,
+  );
+  expect(shared).toContain(
+    `href="/workspaces/${workspaceId}/accounts/${accountId}"`,
+  );
+  expect(shared).toContain("Ask the owner to update DBS");
+  const missing = renderToStaticMarkup(
+    <TransferFreshnessNotices
+      warnings={[
+        { ...warnings[0]!, kind: "missing", staleAccountId: "receiver" },
+      ]}
+    />,
+  );
+  expect(missing).toContain("missing from net worth");
+  expect(missing).toContain('href="/accounts/receiver"');
+  expect(renderToStaticMarkup(<TransferFreshnessNotices warnings={[]} />)).toBe(
+    "",
+  );
+});
+
 test("portfolio settings expose accessible SVG gear buttons in both card headers", () => {
   const html = renderToStaticMarkup(
     <PortfolioSettings currency="SGD" id="test-currency" />,
@@ -300,6 +391,7 @@ const transaction: RouterOutputs["spending"]["list"][number] = {
   categoryColor: null,
   categorySource: "rule",
   isTransfer: false,
+  transferLinkId: null,
   notes: null,
   source: "manual",
   cleared: false,
@@ -549,7 +641,14 @@ test("completed imports expose removal only for saved rows and keep removed evid
       {
         id: "a",
         kind: "cash_balance",
-        data: { currency: "SGD", amount: "10", bucket: null },
+        data: {
+          currency: "SGD",
+          amount: "10",
+          bucket: null,
+          balanceDirection: null,
+          openingBalance: null,
+          openingBalanceDirection: null,
+        },
         matchStatus: "new",
         decision: "accept",
         committedRecordId: "snapshot",
@@ -558,7 +657,14 @@ test("completed imports expose removal only for saved rows and keep removed evid
       {
         id: "b",
         kind: "cash_balance",
-        data: { currency: "USD", amount: "20", bucket: null },
+        data: {
+          currency: "USD",
+          amount: "20",
+          bucket: null,
+          balanceDirection: null,
+          openingBalance: null,
+          openingBalanceDirection: null,
+        },
         matchStatus: "new",
         decision: "skip",
         committedRecordId: "snapshot",
@@ -567,7 +673,14 @@ test("completed imports expose removal only for saved rows and keep removed evid
       {
         id: "c",
         kind: "cash_balance",
-        data: { currency: "HKD", amount: "30", bucket: null },
+        data: {
+          currency: "HKD",
+          amount: "30",
+          bucket: null,
+          balanceDirection: null,
+          openingBalance: null,
+          openingBalanceDirection: null,
+        },
         matchStatus: "duplicate",
         decision: "skip",
         committedRecordId: null,
@@ -650,7 +763,14 @@ test("import review requires a missing statement date and warns about dated repl
       {
         id: "balance",
         kind: "cash_balance",
-        data: { currency: "SGD", amount: "100", bucket: null },
+        data: {
+          currency: "SGD",
+          amount: "100",
+          bucket: null,
+          balanceDirection: null,
+          openingBalance: null,
+          openingBalanceDirection: null,
+        },
         matchStatus: "new",
         decision: "accept",
         committedRecordId: null,
@@ -697,6 +817,7 @@ test("import review requires a missing statement date and warns about dated repl
         id: "trade",
         kind: "investment_transaction",
         data: {
+          reference: null,
           tradeDate: "2026-09-15",
           settleDate: null,
           type: "buy",
@@ -876,4 +997,743 @@ test("consolidated portfolio renders combined quantities, expandable broker date
   expect(incomplete).toContain("Waiting for exchange rates");
   expect(incomplete).toContain("Broker C");
   expect(incomplete).not.toContain("75.0%");
+});
+
+test("manual and bulk entry expose Expense, Income and Transfer choices with direction preserved", () => {
+  const manual = render(
+    <TransactionDrawer
+      transaction={{
+        ...transaction,
+        isTransfer: true,
+        reconciliationId: "closed",
+      }}
+      defaultAccountId={null}
+      onClose={() => undefined}
+      onSaved={async () => undefined}
+    />,
+  );
+  expect(manual).toContain('aria-label="Transaction type"');
+  expect(manual).toContain(
+    '<option value="transfer" selected="">Transfer</option>',
+  );
+  expect(manual).toContain('value="income" disabled=""');
+  expect(manual).toContain('aria-label="Direction"');
+  const bulk = render(
+    <BulkEditDrawer
+      rows={[transaction, { ...transaction, id: "incoming", amount: "20" }]}
+      action="edit"
+      onClose={() => undefined}
+      onSaved={async () => undefined}
+    />,
+  );
+  expect(bulk).toContain('aria-label="Transaction type"');
+  expect(bulk).toContain('value="expense" disabled=""');
+  expect(bulk).toContain('value="income" disabled=""');
+  expect(bulk).toContain('<option value="transfer">Transfer</option>');
+  expect(bulk).toContain("Keep existing types");
+});
+
+test("import review keeps transfer categories editable and exposes sign-aware transaction types", () => {
+  const id = "88888888-8888-4888-8888-888888888888";
+  const job: RouterOutputs["imports"]["get"] = {
+    id,
+    status: "needs_review",
+    error: null,
+    model: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    startedAt: null,
+    finishedAt: null,
+    documentId: "99999999-9999-4999-8999-999999999999",
+    fileName: "transfers.pdf",
+    mimeType: "application/pdf",
+    periodStart: null,
+    periodEnd: null,
+    accountId,
+    accountName: "Bank",
+    accountArchivedAt: null,
+    accountType: "checking",
+    accountCurrency: "SGD",
+    institutionName: null,
+    institutionKey: null,
+    latestHoldingsAsOf: null,
+    statementDates: [],
+    importedHoldingsAsOf: null,
+    importedHoldingsAdjusted: false,
+    stale: false,
+    summary: null,
+    rows: [
+      {
+        id: "transfer-row",
+        kind: "transaction",
+        data: {
+          postedDate: "2026-10-01",
+          transactionDate: null,
+          description: "Broker funding",
+          reference: null,
+          merchant: null,
+          amount: "-100",
+          currency: "SGD",
+          printedDirection: null,
+          printedAmount: null,
+          signMismatch: false,
+          suggestedAmount: null,
+          originalAmount: null,
+          originalCurrency: null,
+          categoryId,
+          isTransfer: true,
+        },
+        matchStatus: "new",
+        decision: "accept",
+        committedRecordId: null,
+        removed: false,
+      },
+    ],
+  };
+  const html = render(<ImportReview id={id} />, (client) => {
+    client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), job);
+    client.setQueryData(
+      getQueryKey(api.catalog.categories, undefined, "query"),
+      [
+        {
+          id: categoryId,
+          key: "transfers",
+          name: "Transfers",
+          kind: "transfer",
+          parentId: null,
+          color: null,
+        },
+      ],
+    );
+  });
+  expect(html).toContain('aria-label="Transaction type"');
+  expect(html).toContain(
+    '<option value="transfer" selected="">Transfer</option>',
+  );
+  expect(html).toContain('value="income" disabled=""');
+  expect(html).toContain('aria-label="Category"');
+  expect(html).toContain(
+    `<option value="${categoryId}" selected="">Transfers</option>`,
+  );
+});
+
+test("bank and trade possible duplicates show Keep/Skip actions and block Save until resolved", () => {
+  const id = "88888888-8888-4888-8888-888888888888";
+  type Job = RouterOutputs["imports"]["get"];
+  const bankRow: Job["rows"][number] = {
+    id: "bank-pending",
+    kind: "transaction",
+    data: {
+      reference: "bank-ref",
+      postedDate: "2026-09-15",
+      transactionDate: null,
+      description: "Coffee",
+      merchant: null,
+      amount: "-5",
+      currency: "SGD",
+      printedDirection: null,
+      printedAmount: null,
+      signMismatch: false,
+      suggestedAmount: null,
+      originalAmount: null,
+      originalCurrency: null,
+      categoryId: null,
+      isTransfer: false,
+    },
+    matchStatus: "possible_duplicate",
+    decision: "pending",
+    committedRecordId: null,
+    removed: false,
+  };
+  const tradeRow: Job["rows"][number] = {
+    id: "trade-pending",
+    kind: "investment_transaction",
+    data: {
+      reference: "trade-ref",
+      tradeDate: "2026-09-15",
+      settleDate: null,
+      type: "buy",
+      symbol: "AAPL",
+      quantity: "1",
+      price: "100",
+      amount: "-100",
+      fees: null,
+      currency: "SGD",
+      description: "Bought AAPL",
+    },
+    matchStatus: "possible_duplicate",
+    decision: "pending",
+    committedRecordId: null,
+    removed: false,
+  };
+  for (const row of [bankRow, tradeRow]) {
+    const job: Job = {
+      id,
+      status: "needs_review",
+      error: null,
+      model: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      startedAt: null,
+      finishedAt: null,
+      documentId: "99999999-9999-4999-8999-999999999999",
+      fileName: "statement.pdf",
+      mimeType: "application/pdf",
+      periodStart: "2026-09-01",
+      periodEnd: "2026-09-30",
+      accountId,
+      accountName: "Example account",
+      accountArchivedAt: null,
+      accountType: row.kind === "transaction" ? "checking" : "brokerage",
+      accountCurrency: "SGD",
+      institutionName: null,
+      institutionKey: null,
+      latestHoldingsAsOf: null,
+      statementDates: [],
+      importedHoldingsAsOf: null,
+      importedHoldingsAdjusted: false,
+      stale: false,
+      summary: {
+        documentType: "bank_statement",
+        institutionName: null,
+        accountLast4: null,
+        currency: "SGD",
+        periodStart: "2026-09-01",
+        periodEnd: "2026-09-30",
+        openingBalance: null,
+        closingBalance: null,
+        warnings: [],
+      },
+      rows: [
+        row,
+        { ...row, id: `${row.id}-second` },
+        {
+          id: "balance",
+          kind: "cash_balance",
+          data: {
+            currency: "SGD",
+            amount: "100",
+            bucket: null,
+            balanceDirection: null,
+            openingBalance: null,
+            openingBalanceDirection: null,
+          },
+          matchStatus: "new",
+          decision: "accept",
+          committedRecordId: null,
+          removed: false,
+        },
+      ],
+    };
+    const review = (data: Job) =>
+      render(<ImportReview id={id} />, (client) => {
+        client.setQueryData(
+          getQueryKey(api.imports.get, { id }, "query"),
+          data,
+        );
+        client.setQueryData(
+          getQueryKey(api.catalog.categories, undefined, "query"),
+          [],
+        );
+      });
+    const saveButton = (html: string) =>
+      html
+        .match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
+        ?.find((button) => button.includes("Save "));
+    const pending = review(job);
+    expect(pending).toContain("2 possible duplicates need");
+    expect(pending).toContain("2 undecided");
+    expect(pending).toContain("Needs decision");
+    expect(pending).toContain("bg-warn-wash");
+    expect(pending).toContain(">Keep</button>");
+    expect(pending).toContain(">Skip</button>");
+    expect(pending).toContain(`Ref ${row.data.reference}`);
+    expect(saveButton(pending)).toContain('disabled=""');
+    const resolved = review({
+      ...job,
+      rows: job.rows.map((r, i) => ({
+        ...r,
+        decision: i === 0 ? "skip" : "accept",
+      })),
+    });
+    expect(resolved).not.toContain("undecided");
+    expect(resolved).not.toContain("Needs decision");
+    expect(saveButton(resolved)).not.toContain('disabled=""');
+  }
+});
+
+test("import amount warnings show printed evidence and corrections without blocking Save", () => {
+  type Job = RouterOutputs["imports"]["get"];
+  const id = "88888888-8888-4888-8888-888888888888";
+  const job: Job = {
+    id,
+    status: "needs_review",
+    error: null,
+    model: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    startedAt: null,
+    finishedAt: null,
+    documentId: "99999999-9999-4999-8999-999999999999",
+    fileName: "card.pdf",
+    mimeType: "application/pdf",
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    accountId,
+    accountName: "Card",
+    accountArchivedAt: null,
+    accountType: "credit_card",
+    accountCurrency: "SGD",
+    institutionName: null,
+    institutionKey: null,
+    latestHoldingsAsOf: null,
+    statementDates: [],
+    importedHoldingsAsOf: null,
+    importedHoldingsAdjusted: false,
+    stale: false,
+    summary: {
+      documentType: "card_statement",
+      institutionName: null,
+      accountLast4: null,
+      currency: "SGD",
+      periodStart: "2026-09-01",
+      periodEnd: "2026-09-30",
+      openingBalance: null,
+      closingBalance: null,
+      warnings: [],
+    },
+    rows: [
+      {
+        id: "refund",
+        kind: "transaction",
+        data: {
+          postedDate: "2026-09-01",
+          transactionDate: null,
+          description: "Refund",
+          reference: null,
+          merchant: null,
+          amount: "-45",
+          printedDirection: "credit",
+          printedAmount: "45.00",
+          signMismatch: true,
+          suggestedAmount: "45",
+          currency: "SGD",
+          originalAmount: null,
+          originalCurrency: null,
+          categoryId: null,
+          isTransfer: false,
+        },
+        matchStatus: "new",
+        decision: "accept",
+        committedRecordId: null,
+        removed: false,
+      },
+      {
+        id: "debt",
+        kind: "cash_balance",
+        data: {
+          currency: "SGD",
+          amount: "-100",
+          bucket: null,
+          openingBalance: "-50",
+          balanceDirection: "owed",
+          openingBalanceDirection: "owed",
+        },
+        matchStatus: "new",
+        decision: "accept",
+        committedRecordId: null,
+        removed: false,
+      },
+    ],
+  };
+  const review = (data: Job) =>
+    render(<ImportReview id={id} />, (client) => {
+      client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), data);
+      client.setQueryData(
+        getQueryKey(api.catalog.categories, undefined, "query"),
+        [],
+      );
+    });
+  const html = review(job);
+  expect(html).toContain("Statement shows CR 45.00");
+  expect(html).toContain("Check amount/direction");
+  expect(html).toContain("Confirm current amount");
+  expect(html).toContain("Use +S$45.00");
+  expect(html).toContain("1 amount/direction warnings (saving allowed)");
+  expect(html).toContain('aria-label="Edit amount for Refund"');
+  expect(html).toContain(
+    'aria-label="Edit amount for SGD closing/cash balance"',
+  );
+  const save = html
+    .match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
+    ?.find((button) => button.includes("Save 2 to"));
+  expect(save).toBeDefined();
+  expect(save).not.toContain('disabled=""');
+  const skipped = review({
+    ...job,
+    rows: job.rows.map((row) =>
+      row.id === "refund" ? { ...row, decision: "skip" } : row,
+    ),
+  });
+  expect(skipped).not.toContain("warnings (saving allowed)");
+  const completed = review({ ...job, status: "completed" });
+  expect(completed).not.toContain("Edit amount");
+  expect(completed).not.toContain("Confirm current amount");
+  const broker = review({
+    ...job,
+    accountType: "brokerage",
+    rows: [
+      job.rows[1]!,
+      {
+        id: "trade-edit",
+        kind: "investment_transaction",
+        data: {
+          reference: null,
+          tradeDate: "2026-09-01",
+          settleDate: null,
+          type: "buy",
+          symbol: "AAPL",
+          quantity: "1",
+          price: "45",
+          amount: "-45",
+          fees: null,
+          currency: "SGD",
+          description: null,
+        },
+        matchStatus: "new",
+        decision: "accept",
+        committedRecordId: null,
+        removed: false,
+      },
+    ],
+  });
+  expect(broker).toContain('aria-label="Edit amount for buy AAPL"');
+  expect(broker).toContain(
+    'aria-label="Edit amount for SGD closing/cash balance"',
+  );
+});
+
+test("import balance review distinguishes extraction, saved gaps, currencies, provisional choices and acknowledgment", () => {
+  type Job = RouterOutputs["imports"]["get"];
+  type TransactionRow = Extract<Job["rows"][number], { kind: "transaction" }>;
+  const id = "88888888-8888-4888-8888-888888888888";
+  const row = (id: string, amount: string): TransactionRow => ({
+    id,
+    kind: "transaction",
+    decision: "accept",
+    matchStatus: "new",
+    committedRecordId: null,
+    removed: false,
+    data: {
+      postedDate: "2026-09-10",
+      transactionDate: null,
+      description: id,
+      merchant: null,
+      reference: null,
+      amount,
+      currency: "SGD",
+      printedAmount: null,
+      printedDirection: null,
+      signMismatch: false,
+      suggestedAmount: null,
+      originalAmount: null,
+      originalCurrency: null,
+      categoryId: null,
+      isTransfer: false,
+    },
+  });
+  const job: Job = {
+    id,
+    status: "needs_review",
+    error: null,
+    model: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    startedAt: null,
+    finishedAt: null,
+    documentId: "99999999-9999-4999-8999-999999999999",
+    fileName: "balance.pdf",
+    mimeType: "application/pdf",
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    accountId,
+    accountName: "Bank",
+    accountArchivedAt: null,
+    accountType: "checking",
+    accountCurrency: "SGD",
+    institutionName: null,
+    institutionKey: null,
+    latestHoldingsAsOf: null,
+    statementDates: [],
+    importedHoldingsAsOf: null,
+    importedHoldingsAdjusted: false,
+    stale: false,
+    summary: {
+      documentType: "bank_statement",
+      institutionName: null,
+      accountLast4: null,
+      currency: "SGD",
+      periodStart: "2026-09-01",
+      periodEnd: "2026-09-30",
+      openingBalance: 100,
+      closingBalance: 70,
+      warnings: [],
+    },
+    rows: [row("Purchase", "-20"), { ...row("Fee", "-10"), decision: "skip" }],
+  };
+  const review = (data: Job) =>
+    render(<ImportReview id={id} />, (client) => {
+      client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), data);
+      client.setQueryData(
+        getQueryKey(api.catalog.categories, undefined, "query"),
+        [],
+      );
+    });
+  const save = (html: string) =>
+    html
+      .match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
+      ?.find((b) => b.includes(" to Bank"));
+  const gap = review(job);
+  expect(gap).toContain("Extraction balances: matches");
+  expect(gap).toContain("Saved records will balance: S$10.00 over closing");
+  expect(gap).toContain("Skipped rows explain the difference");
+  expect(gap).toContain("Fee · −S$10.00");
+  expect(gap).toContain("I&#x27;ve checked this — save anyway");
+  expect(save(gap)).toContain('disabled=""');
+  const recorded = review({
+    ...job,
+    rows: [job.rows[0]!, { ...job.rows[1]!, matchStatus: "duplicate" }],
+  });
+  expect(recorded).toContain("Saved records will balance: matches");
+  expect(recorded).not.toContain("save anyway");
+  expect(save(recorded)).toBeDefined();
+  expect(save(recorded)).not.toContain('disabled=""');
+  const foreign = review({
+    ...job,
+    rows: [
+      job.rows[0]!,
+      { ...job.rows[1]!, decision: "accept" },
+      {
+        ...row("Foreign", "-999"),
+        data: { ...row("Foreign", "-999").data, currency: "USD" },
+      },
+    ],
+  });
+  expect(foreign).toContain("1 line in USD not included");
+  expect(foreign).not.toContain("save anyway");
+  const pending = review({
+    ...job,
+    rows: [
+      job.rows[0]!,
+      {
+        ...job.rows[1]!,
+        decision: "pending",
+        matchStatus: "possible_duplicate",
+      },
+    ],
+  });
+  expect(pending).toContain("Provisional — decide possible duplicates");
+  expect(save(pending)).toContain('disabled=""');
+  const partial = review({
+    ...job,
+    summary: { ...job.summary!, openingBalance: null },
+  });
+  expect(partial).toContain(
+    "Unverified — no opening/closing balance to check against",
+  );
+  expect(partial).not.toContain("save anyway");
+  expect(save(partial)).not.toContain('disabled=""');
+  const completed = review({
+    ...job,
+    status: "completed",
+    summary: {
+      ...job.summary!,
+      balanceAcknowledgment: { acknowledgedAt: "2026-10-25T00:00:00Z" },
+    },
+  });
+  expect(completed).toContain("Saved with an acknowledged balance mismatch");
+  expect(completed).not.toContain("save anyway");
+  const card = review({
+    ...job,
+    accountType: "credit_card",
+    summary: {
+      ...job.summary!,
+      documentType: "card_statement",
+      closingBalance: 20,
+      openingBalanceDirection: "owed",
+      closingBalanceDirection: "credit",
+    },
+    rows: [row("Card payment", "120")],
+  });
+  expect(card).toContain("−S$100.00");
+  expect(card).toContain("Saved records will balance: matches");
+  expect(card).not.toContain("save anyway");
+});
+
+test("transfer review renders three suggested pairs once, two unpaired sides and linked transfers", () => {
+  type Review = RouterOutputs["transfers"]["list"];
+  const outgoing: Review["unmatched"][number] = {
+    kind: "transaction",
+    id: transaction.id,
+    accountId,
+    accountName: "Everyday bank",
+    date: "2026-10-03",
+    direction: "out",
+    amount: "-1000",
+    currency: "SGD",
+    description: "Broker funding",
+  };
+  const incoming: typeof outgoing = {
+    ...outgoing,
+    kind: "investment",
+    id: "44444444-4444-4444-8444-444444444444",
+    accountId: "55555555-5555-4555-8555-555555555555",
+    accountName: "Broker deposit",
+    date: "2026-10-05",
+    direction: "in",
+    amount: "750",
+    currency: "USD",
+  };
+  const suggestions: Review["suggestions"] = [
+    {
+      outgoing,
+      incoming,
+      feeAmount: null,
+      feeCurrency: null,
+      fxRate: "0.75",
+      differenceRatio: "0",
+      days: 2,
+    },
+    ...["Fee", "Exact"].map((name) => ({
+      outgoing: {
+        ...outgoing,
+        id: `out-${name}`,
+        accountName: `${name} bank`,
+      },
+      incoming: {
+        ...incoming,
+        id: `in-${name}`,
+        accountName: `${name} savings`,
+        amount: name === "Fee" ? "997" : "1000",
+        currency: "SGD",
+      },
+      feeAmount: name === "Fee" ? "3.0000" : null,
+      feeCurrency: name === "Fee" ? "SGD" : null,
+      fxRate: null,
+      differenceRatio: name === "Fee" ? "0.003" : "0",
+      days: 2,
+    })),
+  ];
+  const review: Review = {
+    unmatched: [
+      ...suggestions.flatMap((match) => [match.outgoing, match.incoming]),
+      { ...outgoing, id: "unpaired-out", accountName: "Unpaired bank" },
+      { ...incoming, id: "unpaired-in", accountName: "Unpaired broker" },
+    ],
+    fxAsOf: "2026-10-05",
+    suggestions,
+    links: [
+      {
+        id: "linked",
+        outgoing,
+        incoming,
+        feeAmount: "3.0000",
+        feeCurrency: "SGD",
+      },
+    ],
+    excluded: [
+      { ...outgoing, id: "excluded", accountName: "External account payment" },
+    ],
+  };
+  const html = render(<TransferReview />, (client) =>
+    client.setQueryData(
+      getQueryKey(api.transfers.list, undefined, "query"),
+      review,
+    ),
+  );
+  expect(html).toContain("Suggested matches (3 pairs)");
+  expect(html).toContain("Without a match (2)");
+  expect(html).toContain("Linked transfers (1)");
+  expect(html).not.toContain("Unmatched transfers");
+  expect(html).not.toContain("Suggested counterpart");
+  const suggested = html
+    .split("Suggested matches (3 pairs)")[1]!
+    .split("Without a match (2)")[0]!;
+  expect(suggested.match(/<li\b/g)).toHaveLength(3);
+  expect(suggested.match(/>Confirm<\/button>/g)).toHaveLength(3);
+  expect(suggested.match(/>Not a pair<\/button>/g)).toHaveLength(3);
+  expect(suggested.match(/>Choose another \/ fee<\/button>/g)).toHaveLength(3);
+  expect(suggested.match(/From /g)).toHaveLength(3);
+  expect(suggested.match(/To /g)).toHaveLength(3);
+  expect(suggested.match(/→/g)).toHaveLength(3);
+  for (const match of suggestions) {
+    for (const side of [match.outgoing, match.incoming]) {
+      expect(suggested.split(side.accountName)).toHaveLength(2);
+    }
+  }
+  expect(suggested).toContain("Implied fee:");
+  expect(suggested).not.toContain("Unpaired");
+  const unpaired = html
+    .split("Without a match (2)")[1]!
+    .split("Linked transfers (1)")[0]!;
+  expect(unpaired.match(/<li\b/g)).toHaveLength(2);
+  expect(unpaired).toContain("Unpaired bank");
+  expect(unpaired).toContain("Unpaired broker");
+  expect(unpaired.match(/>Choose another \/ fee<\/button>/g)).toHaveLength(2);
+  expect(unpaired.match(/>No counterpart in Finfolio<\/button>/g)).toHaveLength(
+    2,
+  );
+  expect(unpaired).not.toContain(">Confirm</button>");
+  expect(html).toContain("Everyday bank");
+  expect(html).toContain("Broker deposit");
+  expect(html).toContain("Approximate FX: 1 SGD = 0.75 USD");
+  expect(html).toContain("Confirm");
+  expect(html).toContain("Choose another / fee");
+  expect(html).toContain("No counterpart in Finfolio");
+  expect(html).toContain("Review again");
+  expect(html).toContain("Unlink");
+  expect(html).toContain("sensitive");
+  expect(html).toContain("no transactions are created");
+});
+
+test("linked transfers have a small indicator on mobile transactions and spending links to review", () => {
+  const html = renderToStaticMarkup(
+    <MobileTransactionRow
+      transaction={{
+        ...transaction,
+        isTransfer: true,
+        transferLinkId: "linked",
+      }}
+      selected={false}
+      disabled={false}
+      onSelect={() => undefined}
+      onEdit={() => undefined}
+    />,
+  );
+  expect(html).toContain("Transfer · Linked");
+  const spending = render(
+    <SpendingView initialAccountId={null} initialMonth="2026-10" />,
+  );
+  expect(spending).toContain('href="/spending/transfers"');
+});
+
+test("transfer review explains unmatched sides and an empty queue", () => {
+  const review = {
+    unmatched: [],
+    suggestions: [],
+    links: [],
+    excluded: [],
+    fxAsOf: null,
+  };
+  const html = render(<TransferReview />, (client) =>
+    client.setQueryData(
+      getQueryKey(api.transfers.list, undefined, "query"),
+      review,
+    ),
+  );
+  expect(html).toContain("Suggested matches (0 pairs)");
+  expect(html).toContain("Without a match (0)");
+  expect(html).toContain("Linked transfers (0)");
+  expect(html).toContain("No suggested matches.");
+  expect(html).toContain("No transfers without a match.");
 });

@@ -18,6 +18,7 @@ import {
 import { CpfSrsSheet } from "~/components/overview/cpf-srs-sheet";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
 import { PriceRefresh } from "~/components/overview/price-refresh";
+import { TransferFreshnessNotices } from "~/components/overview/transfer-freshness-notices";
 import { SheetHeader } from "~/components/overview/sheet-header";
 import { accountGroupOf } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
@@ -103,7 +104,7 @@ export default async function OverviewPage() {
     : true;
   const firstName = session.user.name.split(" ")[0];
   const currency = worth.currency;
-  const recorded = worth.accounts.some((a) => a.asOf);
+  const recorded = worth.asOf !== null;
   // The chart ends on the figure shown above it, whatever today's recorded value was.
   const today = todayIso();
   const trend: NetWorthPoint[] = [
@@ -268,8 +269,15 @@ export default async function OverviewPage() {
                 holds.
               </p>
             ) : (
-              <p>Latest balances, up to {formatDate(worth.asOf!)}.</p>
+              <p>
+                Latest recorded balances
+                {worth.oldestAsOf && worth.oldestAsOf !== worth.asOf
+                  ? `, from ${formatDate(worth.oldestAsOf)} to ${formatDate(worth.asOf!)}`
+                  : `, as of ${formatDate(worth.asOf!)}`}
+                . Balances more than 45 days old are marked stale.
+              </p>
             )}
+            <TransferFreshnessNotices warnings={worth.transferWarnings} />
             {recorded && worth.prices ? (
               <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span>

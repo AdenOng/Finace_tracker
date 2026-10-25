@@ -191,6 +191,15 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* Scrolling stays; the platform scrollbars (light grey bars on Linux Chromium) don't. */
+  * {
+    scrollbar-width: none;
+  }
+
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Film grain over everything; fixed so it doesn't scroll. */
   body::after {
     content: "";

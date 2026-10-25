@@ -39,6 +39,7 @@ await mock.module("~/server/auth/config", () => ({
 }));
 const { accountsRouter } = await import("../src/server/api/routers/accounts");
 const { portfolioRouter } = await import("../src/server/api/routers/portfolio");
+const { transfersRouter } = await import("../src/server/api/routers/transfers");
 const { spendingRouter } = await import("../src/server/api/routers/spending");
 const { merchantRulesRouter } =
   await import("../src/server/api/routers/merchant-rules");
@@ -101,6 +102,7 @@ const callers = (id: string) => ({
   accounts: accountsRouter.createCaller(contextFor(id)),
   portfolio: portfolioRouter.createCaller(contextFor(id)),
   spending: spendingRouter.createCaller(contextFor(id)),
+  transfers: transfersRouter.createCaller(contextFor(id)),
   rules: merchantRulesRouter.createCaller(contextFor(id)),
   reconciliation: reconciliationRouter.createCaller(contextFor(id)),
 });
@@ -3651,5 +3653,731 @@ describe("correcting holdings", () => {
       positions: [],
       cash: [{ currency: "SGD", amount: "1" }],
     });
+  });
+});
+
+test("manual and bulk categorisation consistently include and exclude transfers without changing amounts", async () => {
+  const account = await alice.accounts.create(bank);
+  const [parent] = await db
+    .insert(schema.category)
+    .values({ key: "transfer-writes", name: "Transfers", kind: "transfer" })
+    .returning();
+  const [child] = await db
+    .insert(schema.category)
+    .values({
+      key: "transfer-writes.child",
+      name: "Funding",
+      parentId: parent!.id,
+    })
+    .returning();
+  await db
+    .update(schema.category)
+    .set({ archivedAt: new Date() })
+    .where(eq(schema.category.id, parent!.id));
+  const { catalogRouter } = await import("../src/server/api/routers/catalog");
+  const categories = await catalogRouter
+    .createCaller(contextFor("alice"))
+    .categories();
+  expect(categories.find((c) => c.id === child!.id)?.kind).toBe("transfer");
+  expect(categories.some((c) => c.id === parent!.id)).toBe(false);
+  const first = await spendingEntry(account.id, {
+    categoryId: child!.id,
+    amount: "-20",
+  });
+  const second = await spendingEntry(account.id, {
+    categoryId: groceriesId,
+    isTransfer: true,
+    amount: "30",
+  });
+  let rows = await alice.spending.list(october);
+  expect(rows.find((r) => r.id === first.id)).toMatchObject({
+    isTransfer: true,
+    categoryId: child!.id,
+  });
+  expect(rows.find((r) => r.id === second.id)).toMatchObject({
+    isTransfer: false,
+    categoryId: groceriesId,
+  });
+  expect(
+    (await alice.spending.summary({ month: "2026-10" })).map((r) => [
+      r.spent,
+      r.received,
+    ]),
+  ).toEqual([["0", "30.0000"]]);
+  await alice.spending.update({
+    ...rows.find((r) => r.id === first.id)!,
+    isTransfer: false,
+  });
+  expect(
+    (await alice.spending.list(october)).find((r) => r.id === first.id)
+      ?.isTransfer,
+  ).toBe(true);
+  await alice.spending.update({
+    ...rows.find((r) => r.id === first.id)!,
+    categoryId: groceriesId,
+  });
+  expect(
+    (await alice.spending.list(october)).find((r) => r.id === first.id)
+      ?.isTransfer,
+  ).toBe(false);
+  await alice.spending.bulkUpdate({
+    ids: [first.id, second.id],
+    changes: { categoryId: child!.id, isTransfer: false },
+  });
+  rows = await alice.spending.list(october);
+  expect(rows.every((r) => r.isTransfer && r.categoryId === child!.id)).toBe(
+    true,
+  );
+  expect(await alice.spending.summary({ month: "2026-10" })).toEqual([]);
+  await alice.spending.bulkUpdate({
+    ids: [first.id, second.id],
+    changes: { isTransfer: false },
+  });
+  rows = await alice.spending.list(october);
+  expect(
+    rows.every(
+      (r) =>
+        !r.isTransfer && r.categoryId === null && r.categorySource === "user",
+    ),
+  ).toBe(true);
+  await alice.spending.bulkUpdate({
+    ids: [first.id],
+    changes: { categoryId: groceriesId },
+  });
+  await alice.spending.bulkUpdate({
+    ids: [first.id, second.id],
+    changes: { isTransfer: true },
+  });
+  rows = await alice.spending.list(october);
+  expect(rows.every((r) => r.isTransfer && r.categoryId === null)).toBe(true);
+  expect(rows.find((r) => r.id === first.id)?.amount).toBe("-20.0000");
+  expect(rows.find((r) => r.id === second.id)?.amount).toBe("30.0000");
+  await expect(
+    bob.spending.bulkUpdate({
+      ids: [first.id],
+      changes: { categoryId: child!.id },
+    }),
+  ).rejects.toMatchObject({ code: "NOT_FOUND" });
+});
+
+test("notes and merchant edits preserve legacy transfer flags, spending totals and confirmed links", async () => {
+  const source = await alice.accounts.create(bank);
+  const target = await alice.accounts.create({ ...bank, name: "Savings" });
+  const [transfer] = await db
+    .insert(schema.category)
+    .values({
+      key: "legacy-transfer-edit",
+      name: "Transfers",
+      kind: "transfer",
+    })
+    .returning();
+  // These combinations were allowed before category and type choices were coupled.
+  const legacy = await db
+    .insert(schema.transaction)
+    .values([
+      {
+        ownerId: "alice",
+        accountId: source.id,
+        postedDate: "2026-10-03",
+        description: "Legacy transfer",
+        amount: "-20",
+        currency: "SGD",
+        categoryId: groceriesId,
+        categorySource: "user" as const,
+        isTransfer: true,
+        fingerprint: "legacy-transfer-edit",
+      },
+      {
+        ownerId: "alice",
+        accountId: source.id,
+        postedDate: "2026-10-03",
+        description: "Legacy expense",
+        amount: "-30",
+        currency: "SGD",
+        categoryId: transfer!.id,
+        categorySource: "user" as const,
+        isTransfer: false,
+        fingerprint: "legacy-expense-edit",
+      },
+    ])
+    .returning();
+  const incoming = await spendingEntry(target.id, {
+    amount: "20",
+    isTransfer: true,
+  });
+  const link = await alice.transfers.link({
+    outgoing: { kind: "transaction", id: legacy[0]!.id },
+    incoming: { kind: "transaction", id: incoming.id },
+  });
+  const before = await alice.spending.summary({ month: "2026-10" });
+  const ids = legacy.map((r) => r.id);
+  await alice.spending.bulkUpdate({
+    ids,
+    changes: { notes: "Only notes changed" },
+  });
+  for (const row of (await alice.spending.list(october)).filter((r) =>
+    ids.includes(r.id),
+  )) {
+    expect(row.isTransfer).toBe(
+      legacy.find((r) => r.id === row.id)!.isTransfer,
+    );
+    await alice.spending.update({ ...row, merchant: "A new merchant" });
+  }
+  const after = await alice.spending.list(october);
+  for (const original of legacy) {
+    expect(after.find((r) => r.id === original.id)).toMatchObject({
+      isTransfer: original.isTransfer,
+      categoryId: original.categoryId,
+      categorySource: original.categorySource,
+      notes: "Only notes changed",
+      merchant: "A new merchant",
+    });
+  }
+  expect(after.find((r) => r.id === legacy[0]!.id)?.transferLinkId).toBe(
+    link.id,
+  );
+  expect(await alice.spending.summary({ month: "2026-10" })).toEqual(before);
+});
+
+test("merchant rules derive transfer status on manual creation and application to existing entries", async () => {
+  const account = await alice.accounts.create(bank);
+  const [transfer] = await db
+    .insert(schema.category)
+    .values({ key: "transfer-rule", name: "Transfers", kind: "transfer" })
+    .returning();
+  const existing = await spendingEntry(account.id, {
+    description: "Broker deposit",
+  });
+  await alice.rules.create({
+    pattern: "broker deposit",
+    categoryId: transfer!.id,
+  });
+  const created = await spendingEntry(account.id, {
+    description: "Broker deposit",
+  });
+  const ids = [existing.id];
+  const preview = await alice.rules.preview({ ids });
+  await alice.rules.applyRules({ ids, revision: preview.revision });
+  const rows = await alice.spending.list(october);
+  for (const id of [existing.id, created.id])
+    expect(rows.find((r) => r.id === id)).toMatchObject({
+      categoryId: transfer!.id,
+      isTransfer: true,
+      categorySource: "rule",
+    });
+});
+
+describe("balance freshness in net worth", () => {
+  test("only confirmed, included, readable pairs warn; sharing and archiving immediately change visibility", async () => {
+    const { workspaceId, shared, privateAccount } = await workspaceFixture();
+    const outgoing = await spendingEntry(shared.id, {
+      isTransfer: true,
+      amount: "-2000",
+    });
+    const incoming = await spendingEntry(privateAccount.id, {
+      isTransfer: true,
+      amount: "2000",
+      postedDate: "2026-10-05",
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: privateAccount.id,
+      asOf: "2026-10-05",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "2900" }],
+    });
+    // A newer blank legacy entry is ignored, just as in the actual net-worth total.
+    await db.insert(schema.accountSnapshot).values({
+      ownerId: "alice",
+      accountId: shared.id,
+      asOf: "2026-10-10",
+      source: "manual",
+    });
+    const before = await alice.portfolio.netWorth();
+    expect(before.transferWarnings).toEqual([]);
+    const link = await alice.transfers.link({
+      outgoing: { kind: "transaction", id: outgoing.id },
+      incoming: { kind: "transaction", id: incoming.id },
+      manual: true,
+    });
+    const worth = await alice.portfolio.netWorth();
+    expect(worth.total).toBe(before.total);
+    expect(worth).toMatchObject({
+      oldestAsOf: "2026-10-01",
+      asOf: "2026-10-05",
+    });
+    expect(worth.transferWarnings).toEqual([
+      {
+        id: link.id,
+        kind: "double_counted",
+        staleAccountId: shared.id,
+        outgoing: {
+          accountId: shared.id,
+          accountName: "Shared bank",
+          date: "2026-10-03",
+          amount: "2000",
+          currency: "SGD",
+          asOf: "2026-10-01",
+        },
+        incoming: {
+          accountId: privateAccount.id,
+          accountName: "Private bank",
+          date: "2026-10-05",
+          amount: "2000",
+          currency: "SGD",
+          asOf: "2026-10-05",
+        },
+      },
+    ]);
+    expect((await bob.portfolio.netWorth()).transferWarnings).toEqual([]);
+    expect(
+      (await bob.portfolio.netWorth({ workspaceId })).transferWarnings,
+    ).toEqual([]);
+    await alice.workspaces.shareAccount({
+      workspaceId,
+      accountId: privateAccount.id,
+    });
+    expect(
+      (await bob.portfolio.netWorth({ workspaceId })).transferWarnings,
+    ).toEqual(worth.transferWarnings);
+    await alice.workspaces.unshareAccount({
+      workspaceId,
+      accountId: shared.id,
+    });
+    expect(
+      (await bob.portfolio.netWorth({ workspaceId })).transferWarnings,
+    ).toEqual([]);
+    await alice.accounts.remove({ id: privateAccount.id });
+    expect((await alice.portfolio.netWorth()).transferWarnings).toEqual([]);
+  });
+
+  test("bank-to-investment transfers retain each currency, respect CPF/SRS inclusion, and resolve on the receiving date", async () => {
+    const source = await alice.accounts.create(bank);
+    const target = await alice.accounts.create({
+      ...broker,
+      name: "SRS",
+      type: "srs",
+      currency: "USD",
+    });
+    const outgoing = await spendingEntry(source.id, {
+      isTransfer: true,
+      amount: "-2000.1234",
+    });
+    const [incoming] = await db
+      .insert(schema.investmentTransaction)
+      .values({
+        ownerId: "alice",
+        accountId: target.id,
+        type: "deposit",
+        tradeDate: "2026-10-05",
+        amount: "1490.5678",
+        currency: "USD",
+        fingerprint: "freshness-fx-deposit",
+      })
+      .returning();
+    await alice.portfolio.recordSnapshot({
+      accountId: source.id,
+      asOf: "2026-10-03",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: target.id,
+      asOf: "2026-10-04",
+      positions: [],
+      cash: [{ currency: "USD", amount: "0" }],
+    });
+    await alice.transfers.link({
+      outgoing: { kind: "transaction", id: outgoing.id },
+      incoming: { kind: "investment", id: incoming!.id },
+      manual: true,
+    });
+    expect(
+      (await alice.portfolio.netWorth()).transferWarnings[0],
+    ).toMatchObject({
+      kind: "missing",
+      staleAccountId: target.id,
+      outgoing: { amount: "2000.1234", currency: "SGD" },
+      incoming: { amount: "1490.5678", currency: "USD" },
+    });
+    const settings = settingsRouter.createCaller(contextFor("alice"));
+    await settings.setCountCpfSrs({ count: false });
+    expect(await alice.portfolio.netWorth()).toMatchObject({
+      transferWarnings: [],
+      asOf: "2026-10-03",
+      oldestAsOf: "2026-10-03",
+    });
+    await settings.setCountCpfSrs({ count: true });
+    await alice.portfolio.recordSnapshot({
+      accountId: target.id,
+      asOf: "2026-10-05",
+      positions: [],
+      cash: [{ currency: "USD", amount: "1490.5678" }],
+    });
+    expect((await alice.portfolio.netWorth()).transferWarnings).toEqual([]);
+  });
+});
+
+describe("transfer review", () => {
+  const ref = (
+    row: { id: string },
+    kind: "transaction" | "investment" = "transaction",
+  ) => ({ id: row.id, kind });
+  async function pair(amount = "1000") {
+    const source = await alice.accounts.create(bank);
+    const target = await alice.accounts.create({ ...bank, name: "Savings" });
+    const outgoing = await spendingEntry(source.id, {
+      isTransfer: true,
+      amount: `-${amount}`,
+      description: "Transfer out",
+    });
+    const incoming = await spendingEntry(target.id, {
+      isTransfer: true,
+      amount,
+      postedDate: "2026-10-05",
+      description: "Transfer in",
+    });
+    return { source, target, outgoing: ref(outgoing), incoming: ref(incoming) };
+  }
+  test("suggests and confirms bank/card transfers without creating entries or changing spending totals; unlink reopens review", async () => {
+    const rows = await pair();
+    const [before] = await alice.transfers.list().then((r) => r.suggestions);
+    expect(before).toMatchObject({
+      outgoing: { id: rows.outgoing.id },
+      incoming: { id: rows.incoming.id },
+      days: 2,
+    });
+    expect(await bob.transfers.list()).toMatchObject({
+      unmatched: [],
+      suggestions: [],
+      links: [],
+    });
+    const link = await alice.transfers.link(rows);
+    expect((await alice.transfers.list()).unmatched).toEqual([]);
+    expect(await db.$count(schema.transaction)).toBe(2);
+    expect(await alice.spending.summary({ month: "2026-10" })).toEqual([]);
+    expect(
+      (await alice.spending.list(october)).every(
+        (s) => s.transferLinkId === link.id,
+      ),
+    ).toBe(true);
+    await expect(alice.transfers.link(rows)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await bob.transfers.unlink(link);
+    expect((await alice.transfers.list()).links).toHaveLength(1);
+    await alice.transfers.unlink(link);
+    expect((await alice.transfers.list()).unmatched).toHaveLength(2);
+    expect(
+      (await alice.spending.list(october)).every(
+        (s) => s.transferLinkId === null,
+      ),
+    ).toBe(true);
+  });
+  test("links bank to broker and broker to card, deriving investment directions from their type", async () => {
+    const bankAccount = await alice.accounts.create(bank);
+    const brokerAccount = await alice.accounts.create(broker);
+    const card = await alice.accounts.create({
+      ...bank,
+      name: "Card",
+      type: "credit_card",
+    });
+    const out = await spendingEntry(bankAccount.id, {
+      isTransfer: true,
+      amount: "-1000",
+    });
+    const intoCard = await spendingEntry(card.id, {
+      isTransfer: true,
+      amount: "800",
+    });
+    const investments = await db
+      .insert(schema.investmentTransaction)
+      .values([
+        {
+          ownerId: "alice",
+          accountId: brokerAccount.id,
+          type: "deposit",
+          tradeDate: "2026-10-04",
+          amount: "1000",
+          currency: "SGD",
+          fingerprint: "transfer-deposit",
+        },
+        {
+          ownerId: "alice",
+          accountId: brokerAccount.id,
+          type: "withdrawal",
+          tradeDate: "2026-10-04",
+          amount: "800",
+          currency: "SGD",
+          fingerprint: "transfer-withdrawal",
+        },
+        {
+          ownerId: "alice",
+          accountId: brokerAccount.id,
+          type: "fee",
+          tradeDate: "2026-10-04",
+          amount: "-2",
+          currency: "SGD",
+          fingerprint: "separate-fee",
+        },
+      ])
+      .returning();
+    const review = await alice.transfers.list();
+    expect(review.unmatched).toHaveLength(4);
+    expect(review.suggestions).toHaveLength(2);
+    await alice.transfers.link({
+      outgoing: ref(out),
+      incoming: ref(investments[0]!, "investment"),
+      fee: { amount: "2", currency: "SGD" },
+    });
+    await alice.transfers.link({
+      outgoing: ref(investments[1]!, "investment"),
+      incoming: ref(intoCard),
+    });
+    expect((await alice.transfers.list()).unmatched).toEqual([]);
+    expect(
+      (await alice.transfers.list()).links.some(
+        (s) => s.feeAmount === "2.0000",
+      ),
+    ).toBe(true);
+    expect(await db.$count(schema.investmentTransaction)).toBe(3);
+  });
+  test("same-currency differences become optional metadata; manual pairs allow other dates and separately recorded fees", async () => {
+    const rows = await pair("100");
+    await db
+      .update(schema.transaction)
+      .set({ amount: "99.5" })
+      .where(eq(schema.transaction.id, rows.incoming.id));
+    expect((await alice.transfers.list()).suggestions[0]?.feeAmount).toBe(
+      "0.5000",
+    );
+    const confirmed = await alice.transfers.link(rows);
+    expect((await alice.transfers.list()).links[0]).toMatchObject({
+      feeAmount: "0.5000",
+      feeCurrency: "SGD",
+    });
+    await alice.transfers.unlink(confirmed);
+    await db
+      .update(schema.transaction)
+      .set({ postedDate: "2026-11-05" })
+      .where(eq(schema.transaction.id, rows.incoming.id));
+    await expect(alice.transfers.link(rows)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await alice.transfers.link({
+      ...rows,
+      manual: true,
+      fee: { amount: "3.25", currency: "USD" },
+    });
+    expect((await alice.transfers.list()).links[0]).toMatchObject({
+      feeAmount: "3.2500",
+      feeCurrency: "USD",
+    });
+  });
+  test("FX uses existing rate storage and records no implied fee; missing rates require a manual pair", async () => {
+    const rows = await pair();
+    await db
+      .update(schema.transaction)
+      .set({ currency: "USD", amount: "750" })
+      .where(eq(schema.transaction.id, rows.incoming.id));
+    expect((await alice.transfers.list()).suggestions).toEqual([]);
+    await expect(alice.transfers.link(rows)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-10-05",
+      rate: "0.75",
+      source: "test",
+    });
+    expect((await alice.transfers.list()).suggestions[0]).toMatchObject({
+      fxRate: "0.75",
+      feeAmount: null,
+    });
+    await alice.transfers.link(rows);
+    expect((await alice.transfers.list()).links[0]?.feeAmount).toBeNull();
+  });
+  test("no counterpart decisions persist, can be reversed, and cannot dismiss a confirmed side", async () => {
+    const rows = await pair();
+    await alice.transfers.noCounterpart(rows.outgoing);
+    const review = await alice.transfers.list();
+    expect(review.unmatched).toHaveLength(1);
+    expect(review.suggestions).toEqual([]);
+    expect(review.excluded[0]?.id).toBe(rows.outgoing.id);
+    await expect(
+      alice.transfers.link({ ...rows, manual: true }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      bob.transfers.noCounterpart(rows.outgoing),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await alice.transfers.noCounterpart({ ...rows.outgoing, excluded: false });
+    await alice.transfers.link(rows);
+    await expect(
+      alice.transfers.noCounterpart(rows.outgoing),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+  test("rejects same-account, wrong direction, ordinary spending and foreign or merely shared counterparts", async () => {
+    const rows = await pair();
+    await expect(
+      alice.transfers.link({
+        outgoing: rows.incoming,
+        incoming: rows.outgoing,
+        manual: true,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const sameAccount = await spendingEntry(rows.source.id, {
+      isTransfer: true,
+      amount: "1000",
+    });
+    await expect(
+      alice.transfers.link({
+        outgoing: rows.outgoing,
+        incoming: ref(sameAccount),
+        manual: true,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const ordinary = await spendingEntry(rows.target.id, { amount: "1000" });
+    await expect(
+      alice.transfers.link({
+        outgoing: rows.outgoing,
+        incoming: ref(ordinary),
+        manual: true,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      bob.transfers.link({ ...rows, manual: true }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const shared = await alice.workspaces.create({
+      name: "Shared transfer test",
+      kind: "custom",
+      displayCurrency: "SGD",
+    });
+    await db
+      .insert(schema.workspaceMember)
+      .values({ workspaceId: shared.id, userId: "bob", role: "member" });
+    await alice.workspaces.shareAccount({
+      workspaceId: shared.id,
+      accountId: rows.target.id,
+    });
+    const foreignAccount = await bob.accounts.create(bank);
+    const [foreign] = await db
+      .insert(schema.transaction)
+      .values({
+        ownerId: "bob",
+        accountId: foreignAccount.id,
+        isTransfer: true,
+        amount: "-1000",
+        postedDate: "2026-10-03",
+        currency: "SGD",
+        description: "Bob out",
+        fingerprint: "bob-transfer",
+      })
+      .returning();
+    await expect(
+      bob.transfers.link({
+        outgoing: ref(foreign!),
+        incoming: rows.incoming,
+        manual: true,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await bob.transfers.list()).unmatched.map((s) => s.id)).toEqual([
+      foreign!.id,
+    ]);
+  });
+  test("competing confirmations cannot consume the same side, including manual attempts to reuse it", async () => {
+    const rows = await pair();
+    const third = await alice.accounts.create({
+      ...bank,
+      name: "Third account",
+    });
+    const other = await spendingEntry(third.id, {
+      isTransfer: true,
+      amount: "1000",
+    });
+    const results = await Promise.allSettled([
+      alice.transfers.link(rows),
+      alice.transfers.link({ outgoing: rows.outgoing, incoming: ref(other) }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+    expect(await db.$count(schema.transferLink)).toBe(1);
+  });
+  test("financial edits invalidate matching and exclusions; source deletion cascades the link", async () => {
+    const rows = await pair();
+    await alice.transfers.link(rows);
+    await alice.spending.bulkUpdate({
+      ids: [rows.outgoing.id],
+      changes: { isTransfer: false },
+    });
+    expect((await alice.transfers.list()).links).toEqual([]);
+    await alice.spending.bulkUpdate({
+      ids: [rows.outgoing.id],
+      changes: { isTransfer: true },
+    });
+    await alice.transfers.noCounterpart(rows.outgoing);
+    await alice.spending.update({
+      id: rows.outgoing.id,
+      accountId: rows.source.id,
+      postedDate: "2026-10-04",
+      description: "Transfer edited",
+      merchant: null,
+      amount: "-1000",
+      currency: "SGD",
+      categoryId: null,
+      isTransfer: true,
+      notes: null,
+    });
+    expect((await alice.transfers.list()).excluded).toEqual([]);
+    await alice.transfers.link(rows);
+    await alice.spending.remove(rows.outgoing);
+    expect((await alice.transfers.list()).links).toEqual([]);
+    expect((await alice.transfers.list()).unmatched).toHaveLength(1);
+  });
+  test("schema rejects invalid sides, cross-role reuse and invalid fees", async () => {
+    const rows = await pair();
+    const insert = (values: typeof schema.transferLink.$inferInsert) =>
+      db.insert(schema.transferLink).values(values).execute();
+    await expect(
+      insert({ ownerId: "alice", incomingTransactionId: rows.incoming.id }),
+    ).rejects.toThrow();
+    await expect(
+      insert({
+        ownerId: "alice",
+        outgoingTransactionId: rows.outgoing.id,
+        incomingTransactionId: rows.incoming.id,
+        feeAmount: "-1",
+        feeCurrency: "SGD",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      insert({
+        ownerId: "alice",
+        outgoingTransactionId: rows.outgoing.id,
+        incomingTransactionId: rows.incoming.id,
+        feeCurrency: "SGD",
+      }),
+    ).rejects.toThrow();
+    await alice.transfers.link(rows);
+    await expect(
+      insert({
+        ownerId: "alice",
+        outgoingTransactionId: rows.outgoing.id,
+        incomingTransactionId: rows.incoming.id,
+      }),
+    ).rejects.toThrow();
+    const third = await spendingEntry(rows.source.id, {
+      isTransfer: true,
+      amount: "-1000",
+    });
+    await expect(
+      insert({
+        ownerId: "alice",
+        outgoingTransactionId: third.id,
+        incomingTransactionId: rows.outgoing.id,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      alice.transfers.link({ ...rows, fee: { amount: "-1", currency: "SGD" } }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

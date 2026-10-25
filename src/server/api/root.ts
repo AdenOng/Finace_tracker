@@ -1,3 +1,4 @@
+import { transfersRouter } from "./routers/transfers";
 import { workspacesRouter } from "./routers/workspaces";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 import { accountsRouter } from "./routers/accounts";
@@ -18,6 +19,7 @@ export const appRouter = createTRPCRouter({
   accounts: accountsRouter,
   portfolio: portfolioRouter,
   spending: spendingRouter,
+  transfers: transfersRouter,
   merchantRules: merchantRulesRouter,
   reconciliation: reconciliationRouter,
   imports: importsRouter,

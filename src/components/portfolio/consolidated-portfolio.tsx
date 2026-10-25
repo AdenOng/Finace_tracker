@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
+import { BalanceDate } from "~/components/finance/balance-date";
 import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
 import { cardTools } from "~/components/ui/card-tools";
 import { Allocation } from "~/components/overview/allocation";
@@ -453,7 +454,11 @@ export function ConsolidatedPortfolio() {
                         ) : null}
                       </p>
                       <p className="text-ink-3 text-[12px]">
-                        {b.asOf ? formatDate(b.asOf) : "Nothing recorded"}
+                        {b.asOf ? (
+                          <BalanceDate asOf={b.asOf} />
+                        ) : (
+                          "Nothing recorded"
+                        )}
                       </p>
                     </div>
                     <div className="shrink-0 text-right">

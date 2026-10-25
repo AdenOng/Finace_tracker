@@ -20,8 +20,16 @@ export const stagedTransaction = z.object({
   postedDate: isoDateInput,
   transactionDate: isoDateInput.nullable(),
   description: z.string().trim().min(1).max(500),
+  reference: nullableText(200).default(null),
   merchant: nullableText(200),
   amount: moneyInput,
+  printedDirection: z.enum(["debit", "credit"]).nullable().default(null),
+  printedAmount: moneyInput
+    .refine((v) => !v.startsWith("-"))
+    .nullable()
+    .default(null),
+  signMismatch: z.boolean().default(false),
+  suggestedAmount: moneyInput.nullable().default(null),
   currency: currencyInput,
   originalAmount: moneyInput.nullable(),
   originalCurrency: currencyInput.nullable(),
@@ -44,6 +52,9 @@ export const stagedPosition = z.object({
 export const stagedCashBalance = z.object({
   currency: currencyInput,
   amount: moneyInput,
+  balanceDirection: z.enum(["owed", "credit"]).nullable().default(null),
+  openingBalance: moneyInput.nullable().default(null),
+  openingBalanceDirection: z.enum(["owed", "credit"]).nullable().default(null),
   /** CPF sub-account; rows staged before sub-accounts existed have none. */
   bucket: z.enum(cpfBuckets).nullable().default(null),
 });
@@ -65,6 +76,7 @@ export const investmentTxnTypes = [
 ] as const;
 
 export const stagedInvestmentTransaction = z.object({
+  reference: nullableText(200).default(null),
   tradeDate: isoDateInput,
   settleDate: isoDateInput.nullable(),
   type: z.enum(investmentTxnTypes),

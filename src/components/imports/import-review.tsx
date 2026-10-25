@@ -16,6 +16,8 @@ import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { ImportLineRemoval } from "~/components/imports/line-removal";
 import { ImportStatus, isReading } from "~/components/imports/import-status";
 import { ReadGlyph } from "~/components/landing/glyphs";
+import { TransactionTypeSelect } from "~/components/spending/transaction-type-select";
+import { transactionType } from "~/lib/transaction-classification";
 import { Button } from "~/components/ui/button";
 import { Input, Select } from "~/components/ui/field";
 import { Notice, Section, Tag } from "~/components/ui/panel";
@@ -27,9 +29,11 @@ import {
 } from "~/lib/accounts";
 import { orderCategories } from "~/lib/categories";
 import { cn } from "~/lib/cn";
+import { checkImportBalance } from "~/lib/import-balance-check";
 import { todayIso } from "~/lib/dates";
 import { errorMessage } from "~/lib/errors";
 import { formatDate, formatMoney, formatQuantity } from "~/lib/format";
+import { moneyInput } from "~/server/api/inputs";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type Job = RouterOutputs["imports"]["get"];
@@ -40,7 +44,19 @@ const RowControls = createContext<{
   completed: boolean;
   canRemove: boolean;
   onRemove: (row: Row) => void;
-}>({ completed: false, canRemove: false, onRemove: () => undefined });
+  editingAmount: string | null;
+  setEditingAmount: (id: string | null) => void;
+  onAmount: (id: string, amount: string) => void;
+  onConfirmAmount: (id: string) => void;
+}>({
+  completed: false,
+  canRemove: false,
+  onRemove: () => undefined,
+  editingAmount: null,
+  setEditingAmount: () => undefined,
+  onAmount: () => undefined,
+  onConfirmAmount: () => undefined,
+});
 
 const DOCUMENT_LABELS: Record<string, string> = {
   bank_statement: "Bank statement",
@@ -101,9 +117,21 @@ export function ImportReview({ id }: { id: string }) {
     : (job.summary?.periodEnd ?? today);
   const [flash, setFlash] = useState<string | null>(null);
   const [removing, setRemoving] = useState<Row | null>(null);
+  const [editingAmount, setEditingAmount] = useState<string | null>(null);
+  const [acknowledgedCheck, setAcknowledgedCheck] = useState<string | null>(
+    null,
+  );
+  const balanceCheck = checkImportBalance({
+    summary: job.summary,
+    accountType: job.accountType,
+    accountCurrency: job.accountCurrency,
+    rows: job.rows,
+  });
+  const balanceKey = JSON.stringify({ id, balanceCheck });
+  const acknowledged = acknowledgedCheck === balanceKey;
 
   const update = api.imports.updateRows.useMutation({
-    onMutate: ({ ids, decision, patch }) => {
+    onMutate: ({ ids, decision }) => {
       utils.imports.get.setData({ id }, (old) =>
         old
           ? {
@@ -111,20 +139,17 @@ export function ImportReview({ id }: { id: string }) {
               rows: old.rows.map((r) =>
                 !ids.includes(r.id)
                   ? r
-                  : ({
+                  : {
                       ...r,
                       decision: decision ?? r.decision,
-                      data:
-                        patch && r.kind === "transaction"
-                          ? { ...r.data, ...patch }
-                          : r.data,
-                    } as Row),
+                    },
               ),
             }
           : old,
       );
     },
     onError: () => utils.imports.get.invalidate({ id }),
+    onSuccess: () => utils.imports.get.invalidate({ id }),
   });
   const commit = api.imports.commit.useMutation({
     onSuccess: async (counts) => {
@@ -176,6 +201,12 @@ export function ImportReview({ id }: { id: string }) {
   const of = <K extends Row["kind"]>(kind: K) =>
     rows.filter((r): r is RowOf<K> => r.kind === kind);
   const accepted = rows.filter((r) => r.decision === "accept");
+  const mismatches = accepted.filter(
+    (r) => r.kind === "transaction" && r.data.signMismatch,
+  );
+  const undecided = rows.filter(
+    (r) => r.matchStatus === "possible_duplicate" && r.decision === "pending",
+  );
   const holdingsDate =
     job.status === "completed" ? job.importedHoldingsAsOf : asOf;
   const hasHoldings =
@@ -198,6 +229,16 @@ export function ImportReview({ id }: { id: string }) {
         completed: job.status === "completed",
         canRemove: !!job.accountId && !job.accountArchivedAt,
         onRemove: setRemoving,
+        editingAmount,
+        setEditingAmount,
+        onAmount: (rowId, amount) =>
+          update.mutate({ jobId: id, ids: [rowId], patch: { amount } }),
+        onConfirmAmount: (rowId) =>
+          update.mutate({
+            jobId: id,
+            ids: [rowId],
+            patch: { confirmAmount: true },
+          }),
       }}
     >
       <Link
@@ -302,6 +343,11 @@ export function ImportReview({ id }: { id: string }) {
           </Link>
         </Notice>
       ) : null}
+      {update.error ? (
+        <Notice tone="error" className="mb-4">
+          {errorMessage(update.error)}
+        </Notice>
+      ) : null}
 
       {reading ? (
         <section className="card flex flex-col items-center px-6 py-12 text-center">
@@ -353,7 +399,40 @@ export function ImportReview({ id }: { id: string }) {
         </section>
       ) : (
         <div className="space-y-4 pb-24">
-          <Summary job={job} />
+          <Summary job={job} check={balanceCheck} />
+          {job.status === "needs_review" &&
+          balanceCheck.requiresAcknowledgment ? (
+            <Notice tone="warn">
+              <p>
+                Compare the rows with your statement. Correct the difference or
+                confirm you have checked it.
+              </p>
+              <label className="mt-3 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  disabled={
+                    update.isPending ||
+                    balanceCheck.provisional ||
+                    editingAmount !== null
+                  }
+                  onChange={(e) =>
+                    setAcknowledgedCheck(e.target.checked ? balanceKey : null)
+                  }
+                  className="accent-ink size-4"
+                />
+                I&apos;ve checked this — save anyway
+              </label>
+            </Notice>
+          ) : null}
+          {job.status === "needs_review" && undecided.length > 0 ? (
+            <Notice tone="warn">
+              {undecided.length} possible{" "}
+              {undecided.length === 1 ? "duplicate needs" : "duplicates need"} a
+              decision. Choose Keep or Skip on each highlighted row before
+              saving.
+            </Notice>
+          ) : null}
           {job.status === "completed" && job.importedHoldingsAdjusted ? (
             <Notice>
               The holdings from this import have been adjusted in the account.
@@ -423,8 +502,15 @@ export function ImportReview({ id }: { id: string }) {
             <>
               <TransactionsSection
                 rows={of("transaction")}
-                disabled={job.status !== "needs_review"}
+                disabled={job.status !== "needs_review" || update.isPending}
                 onDecision={setDecision}
+                onTransfer={(rowId, isTransfer) =>
+                  update.mutate({
+                    jobId: id,
+                    ids: [rowId],
+                    patch: { isTransfer },
+                  })
+                }
                 onCategory={(rowId, categoryId) =>
                   update.mutate({
                     jobId: id,
@@ -436,7 +522,7 @@ export function ImportReview({ id }: { id: string }) {
               <BalanceSection
                 rows={of("cash_balance")}
                 asOf={holdingsDate ?? asOf}
-                disabled={job.status !== "needs_review"}
+                disabled={job.status !== "needs_review" || update.isPending}
                 onDecision={setDecision}
               />
             </>
@@ -445,12 +531,12 @@ export function ImportReview({ id }: { id: string }) {
               <HoldingsSection
                 positions={of("position")}
                 cash={of("cash_balance")}
-                disabled={job.status !== "needs_review"}
+                disabled={job.status !== "needs_review" || update.isPending}
                 onDecision={setDecision}
               />
               <ActivitySection
                 rows={of("investment_transaction")}
-                disabled={job.status !== "needs_review"}
+                disabled={job.status !== "needs_review" || update.isPending}
                 onDecision={setDecision}
               />
             </>
@@ -463,6 +549,10 @@ export function ImportReview({ id }: { id: string }) {
                   {accepted.length}
                 </span>{" "}
                 of {rows.length} selected
+                {undecided.length > 0 ? ` · ${undecided.length} undecided` : ""}
+                {mismatches.length > 0 ? (
+                  <span className="text-warn">{` · ${mismatches.length} amount/direction warnings (saving allowed)`}</span>
+                ) : null}
               </p>
               {needsDate ? (
                 <label className="flex items-center gap-2 text-[13px]">
@@ -484,12 +574,21 @@ export function ImportReview({ id }: { id: string }) {
                 Discard
               </Button>
               <Button
-                onClick={() => commit.mutate({ jobId: id, asOf })}
+                onClick={() =>
+                  commit.mutate({
+                    jobId: id,
+                    asOf,
+                    acknowledgeBalanceMismatch: acknowledged,
+                  })
+                }
                 loading={commit.isPending}
                 disabled={
                   accepted.length === 0 ||
+                  (balanceCheck.requiresAcknowledgment && !acknowledged) ||
+                  undecided.length > 0 ||
                   !asOf ||
                   update.isPending ||
+                  editingAmount !== null ||
                   !job.accountId ||
                   !!job.accountArchivedAt
                 }
@@ -529,23 +628,16 @@ export function ImportReview({ id }: { id: string }) {
   );
 }
 
-function Summary({ job }: { job: Job }) {
+function Summary({
+  job,
+  check,
+}: {
+  job: Job;
+  check: ReturnType<typeof checkImportBalance>;
+}) {
   const s = job.summary;
   if (!s) return null;
-  const currency = s.currency ?? job.accountCurrency ?? "SGD";
-  const lines = job.rows.filter(
-    (r): r is RowOf<"transaction"> => r.kind === "transaction",
-  );
-  // Opening balance plus every line should land on the closing balance printed on the statement.
-  const check =
-    s.openingBalance !== null && s.closingBalance !== null && lines.length > 0
-      ? lines
-          .reduce(
-            (sum, r) => sum.plus(r.data.amount),
-            new Decimal(s.openingBalance),
-          )
-          .minus(s.closingBalance)
-      : null;
+  const currency = check.currency;
   const facts = [
     { label: "Document", value: DOCUMENT_LABELS[s.documentType] ?? "Document" },
     {
@@ -559,11 +651,11 @@ function Summary({ job }: { job: Job }) {
             ? formatDate(s.periodEnd)
             : "Not shown",
     },
-    ...(s.openingBalance !== null
-      ? [{ label: "Opening", value: money(s.openingBalance, currency) }]
+    ...(check.openingBalance !== null
+      ? [{ label: "Opening", value: money(check.openingBalance, currency) }]
       : []),
-    ...(s.closingBalance !== null
-      ? [{ label: "Closing", value: money(s.closingBalance, currency) }]
+    ...(check.closingBalance !== null
+      ? [{ label: "Closing", value: money(check.closingBalance, currency) }]
       : []),
   ];
   return (
@@ -580,25 +672,73 @@ function Summary({ job }: { job: Job }) {
             </div>
           ))}
         </dl>
-        {check ? (
-          <p
-            className={cn(
-              "rounded-ctl mt-5 flex items-center gap-2 px-3 py-2 text-[13px]",
-              check.isZero()
-                ? "bg-art-green/10 text-gain"
-                : "bg-warn-wash text-warn",
-            )}
-          >
-            {check.isZero() ? (
-              <Check className="size-4 shrink-0" />
+        <div className="mt-5 space-y-3 text-[13px]">
+          {check.provisional ? (
+            <Tag tone="warn">Provisional — decide possible duplicates</Tag>
+          ) : null}
+          {!check.complete ? (
+            <p className="text-ink-2">
+              Unverified — no opening/closing balance to check against
+              {check.openingBalance !== null && check.closingBalance !== null
+                ? " for a complete statement"
+                : ""}
+              .
+            </p>
+          ) : null}
+          {check.currencies.map((c) =>
+            c.extraction.difference === null ? (
+              c.lineCount > 0 ? (
+                <p key={c.currency} className="text-ink-2">
+                  {c.lineCount} {c.lineCount === 1 ? "line" : "lines"} in{" "}
+                  {c.currency} not included — no opening/closing balances.
+                </p>
+              ) : null
             ) : (
-              <AlertTriangle className="size-4 shrink-0" />
-            )}
-            {check.isZero()
-              ? `All ${lines.length} lines add up from the opening to the closing balance.`
-              : `The lines are ${money(check.abs(), currency)} ${check.isPositive() ? "over" : "short of"} the closing balance. A line may have been missed or misread; compare with the statement.`}
-          </p>
-        ) : null}
+              <div key={c.currency} className="space-y-1">
+                <p className="font-semibold">Balance check · {c.currency}</p>
+                {(
+                  [
+                    ["Extraction balances", c.extraction],
+                    ["Saved records will balance", c.saved],
+                  ] as const
+                ).map(([label, result]) => (
+                  <p
+                    key={label}
+                    className={result.balances ? "text-gain" : "text-warn"}
+                  >
+                    {label}:{" "}
+                    {result.balances
+                      ? "matches"
+                      : `${money(new Decimal(result.difference!).abs(), c.currency)} ${new Decimal(result.difference!).isPositive() ? "over" : "short of"} closing`}
+                    .
+                  </p>
+                ))}
+                {c.skippedRows.length > 0 ? (
+                  <div className="text-ink-2">
+                    <p>
+                      {c.skippedExplainDifference
+                        ? "Skipped rows explain the difference"
+                        : "Skipped rows not being saved"}
+                      : {money(c.skippedTotal, c.currency, true)}. Already
+                      recorded rows are included.
+                    </p>
+                    <ul className="mt-1 space-y-1">
+                      {c.skippedRows.map((r) => (
+                        <li key={r.id}>
+                          {r.postedDate ? `${shortDate(r.postedDate)} · ` : ""}
+                          {r.description} · {money(r.amount, c.currency, true)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ),
+          )}
+          {s.balanceAcknowledgment ? (
+            <Tag tone="warn">Saved with an acknowledged balance mismatch</Tag>
+          ) : null}
+        </div>
         {s.warnings.length > 0 ? (
           <ul className="mt-4 space-y-1">
             {s.warnings.map((w) => (
@@ -724,16 +864,53 @@ function MatchTag({ status }: { status: Row["matchStatus"] }) {
   return null;
 }
 
+function DuplicateDecision({
+  row,
+  disabled,
+  onDecision,
+}: {
+  row: Row;
+  disabled: boolean;
+  onDecision: (ids: string[], decision: "accept" | "skip") => void;
+}) {
+  if (disabled || row.matchStatus !== "possible_duplicate") return null;
+  return (
+    <span className="mt-2 flex items-center gap-2">
+      {row.decision === "pending" ? (
+        <Tag tone="warn">Needs decision</Tag>
+      ) : null}
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={row.decision === "accept"}
+        onClick={() => onDecision([row.id], "accept")}
+      >
+        Keep
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={row.decision === "skip"}
+        onClick={() => onDecision([row.id], "skip")}
+      >
+        Skip
+      </Button>
+    </span>
+  );
+}
+
 function TransactionsSection({
   rows,
   disabled,
   onDecision,
   onCategory,
+  onTransfer,
 }: {
   rows: RowOf<"transaction">[];
   disabled: boolean;
   onDecision: (ids: string[], decision: "accept" | "skip") => void;
   onCategory: (rowId: string, categoryId: string | null) => void;
+  onTransfer: (rowId: string, isTransfer: boolean) => void;
 }) {
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const ordered = orderCategories(categories);
@@ -767,19 +944,20 @@ function TransactionsSection({
         <ul className="-mx-1">
           {rows.map((r) => {
             const amount = new Decimal(r.data.amount);
-            const skipped = r.decision !== "accept";
+            const skipped = r.decision === "skip";
             return (
               <li
                 key={r.id}
                 className={cn(
                   "border-line grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 border-b px-1 py-3 last:border-b-0 sm:grid-cols-[auto_4.5rem_minmax(0,1fr)_12rem_auto] sm:items-center",
                   skipped && "opacity-50",
+                  r.decision === "pending" && "bg-warn-wash",
                 )}
               >
                 <span className="pt-0.5 sm:pt-0">
                   <RowControl
                     row={r}
-                    checked={!skipped}
+                    checked={r.decision === "accept"}
                     disabled={disabled}
                     label={`Save ${r.data.description}`}
                     onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
@@ -798,6 +976,7 @@ function TransactionsSection({
                       {r.data.merchant ? " · " : ""}
                     </span>
                     {r.data.merchant ? r.data.description : null}
+                    {r.data.reference ? ` · Ref ${r.data.reference}` : null}
                     {r.data.originalAmount && r.data.originalCurrency
                       ? ` · ${money(r.data.originalAmount, r.data.originalCurrency)}`
                       : null}
@@ -805,13 +984,23 @@ function TransactionsSection({
                   <span className="mt-1 flex flex-wrap gap-1">
                     {r.data.isTransfer ? <Tag>Transfer</Tag> : null}
                     <MatchTag status={r.matchStatus} />
+                    {r.data.signMismatch ? (
+                      <Tag tone="warn">Check amount/direction</Tag>
+                    ) : null}
                   </span>
+                  <AmountWarning row={r} disabled={disabled} />
+                  <DuplicateDecision
+                    row={r}
+                    disabled={disabled}
+                    onDecision={onDecision}
+                  />
                   <span className="mt-2 block sm:hidden">
                     <CategoryPicker
                       row={r}
                       categories={ordered}
                       disabled={disabled}
                       onCategory={onCategory}
+                      onTransfer={onTransfer}
                     />
                   </span>
                 </span>
@@ -821,6 +1010,7 @@ function TransactionsSection({
                     categories={ordered}
                     disabled={disabled}
                     onCategory={onCategory}
+                    onTransfer={onTransfer}
                   />
                 </span>
                 <span
@@ -829,7 +1019,7 @@ function TransactionsSection({
                     amount.isPositive() && "text-gain",
                   )}
                 >
-                  {money(r.data.amount, r.data.currency, true)}
+                  <RowAmount row={r} disabled={disabled} />
                 </span>
               </li>
             );
@@ -840,33 +1030,178 @@ function TransactionsSection({
   );
 }
 
+function AmountWarning({
+  row,
+  disabled,
+}: {
+  row: RowOf<"transaction">;
+  disabled: boolean;
+}) {
+  const controls = useContext(RowControls);
+  const data = row.data;
+  if (!data.signMismatch) return null;
+  const direction =
+    data.printedDirection === "credit"
+      ? "CR "
+      : data.printedDirection === "debit"
+        ? "DR "
+        : "";
+  return (
+    <span className="text-warn mt-1 block text-[12px]">
+      Statement shows {direction}
+      {data.printedAmount ?? new Decimal(data.amount).abs().toFixed()}.
+      {!disabled ? (
+        <span className="mt-1 flex flex-wrap gap-1">
+          {data.suggestedAmount !== null ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => controls.onAmount(row.id, data.suggestedAmount!)}
+            >
+              Use {money(data.suggestedAmount, data.currency, true)}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => controls.onConfirmAmount(row.id)}
+          >
+            Confirm current amount
+          </Button>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function RowAmount({
+  row,
+  disabled,
+}: {
+  row:
+    | RowOf<"transaction">
+    | RowOf<"cash_balance">
+    | RowOf<"investment_transaction">;
+  disabled: boolean;
+}) {
+  const controls = useContext(RowControls);
+  const [draft, setDraft] = useState(row.data.amount);
+  const editing = controls.editingAmount === row.id;
+  const valid = moneyInput.safeParse(draft).success;
+  const label =
+    row.kind === "transaction"
+      ? row.data.description
+      : row.kind === "cash_balance"
+        ? `${row.data.currency} ${row.data.bucket ?? "closing/cash"} balance`
+        : `${row.data.type} ${row.data.symbol ?? "activity"}`;
+  return (
+    <span className="inline-grid gap-1">
+      {money(row.data.amount, row.data.currency, row.kind !== "cash_balance")}
+      {!disabled && !editing ? (
+        <button
+          type="button"
+          className="text-ink-3 text-right font-sans text-[12px] font-normal underline"
+          aria-label={`Edit amount for ${label}`}
+          onClick={() => {
+            setDraft(row.data.amount);
+            controls.setEditingAmount(row.id);
+          }}
+        >
+          Edit amount
+        </button>
+      ) : null}
+      {!disabled && editing ? (
+        <span className="grid max-w-52 gap-1 font-sans font-normal">
+          <Input
+            aria-label={`Amount for ${label}`}
+            inputMode="decimal"
+            value={draft}
+            aria-invalid={!valid}
+            onChange={(e) => setDraft(e.target.value)}
+            className="h-8"
+          />
+          <span className="text-ink-3 text-[11px]">
+            {row.kind === "cash_balance"
+              ? "Negative = debt/overdraft; positive = cash/credit"
+              : "Negative = money out; positive = money in"}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={!valid}
+            onClick={() =>
+              setDraft(new Decimal(draft.trim()).negated().toFixed())
+            }
+          >
+            Flip direction
+          </Button>
+          <span className="flex justify-end gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => controls.setEditingAmount(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!valid}
+              onClick={() => {
+                controls.onAmount(row.id, draft.trim());
+                controls.setEditingAmount(null);
+              }}
+            >
+              Apply amount
+            </Button>
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function CategoryPicker({
   row,
   categories,
   disabled,
   onCategory,
+  onTransfer,
 }: {
   row: RowOf<"transaction">;
   categories: RouterOutputs["catalog"]["categories"];
   disabled: boolean;
   onCategory: (rowId: string, categoryId: string | null) => void;
+  onTransfer: (rowId: string, isTransfer: boolean) => void;
 }) {
-  if (row.data.isTransfer) return null;
   return (
-    <Select
-      aria-label="Category"
-      value={row.data.categoryId ?? ""}
-      disabled={disabled}
-      onChange={(e) => onCategory(row.id, e.target.value || null)}
-      className={cn("h-8 text-[12px]", !row.data.categoryId && "text-ink-3")}
-    >
-      <option value="">Uncategorised</option>
-      {categories.map((c) => (
-        <option key={c.id} value={c.id}>
-          {c.parentId ? `— ${c.name}` : c.name}
-        </option>
-      ))}
-    </Select>
+    <span className="grid gap-1">
+      <TransactionTypeSelect
+        value={transactionType(row.data.amount, row.data.isTransfer)}
+        disabled={disabled}
+        expenseDisabled={new Decimal(row.data.amount).isPositive()}
+        incomeDisabled={!new Decimal(row.data.amount).isPositive()}
+        onChange={(value) => onTransfer(row.id, value === "transfer")}
+      />
+      <Select
+        aria-label="Category"
+        value={row.data.categoryId ?? ""}
+        disabled={disabled}
+        onChange={(e) => onCategory(row.id, e.target.value || null)}
+        className={cn("h-8 text-[12px]", !row.data.categoryId && "text-ink-3")}
+      >
+        <option value="">Uncategorised</option>
+        {categories.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.parentId ? `— ${c.name}` : c.name}
+          </option>
+        ))}
+      </Select>
+    </span>
   );
 }
 
@@ -903,7 +1238,7 @@ function BalanceSection({
           <span>
             Record{" "}
             <span className="figures font-mono font-semibold">
-              {money(r.data.amount, r.data.currency)}
+              <RowAmount row={r} disabled={disabled} />
             </span>{" "}
             as the {r.data.bucket ? `${cpfBucketLabels[r.data.bucket]} ` : ""}
             balance on {asOf ? formatDate(asOf) : "the statement date"}
@@ -1003,7 +1338,7 @@ function HoldingsSection({
                 Cash · {r.data.currency}
               </span>
               <span className="figures text-right font-mono text-[13px] font-semibold">
-                {money(r.data.amount, r.data.currency)}
+                <RowAmount row={r} disabled={disabled} />
               </span>
             </li>
           ))}
@@ -1037,7 +1372,8 @@ function ActivitySection({
             key={r.id}
             className={cn(
               "border-line grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b px-1 py-3 last:border-b-0",
-              r.decision !== "accept" && "opacity-50",
+              r.decision === "skip" && "opacity-50",
+              r.decision === "pending" && "bg-warn-wash",
             )}
           >
             <RowControl
@@ -1059,6 +1395,7 @@ function ActivitySection({
                     ? `${formatQuantity(r.data.quantity)} × ${money(r.data.price, r.data.currency)}`
                     : null,
                   r.data.description,
+                  r.data.reference ? `Ref ${r.data.reference}` : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -1066,6 +1403,11 @@ function ActivitySection({
               <span className="mt-1 flex gap-1">
                 <MatchTag status={r.matchStatus} />
               </span>
+              <DuplicateDecision
+                row={r}
+                disabled={disabled}
+                onDecision={onDecision}
+              />
             </span>
             <span
               className={cn(
@@ -1073,7 +1415,7 @@ function ActivitySection({
                 new Decimal(r.data.amount).isPositive() && "text-gain",
               )}
             >
-              {money(r.data.amount, r.data.currency, true)}
+              <RowAmount row={r} disabled={disabled} />
             </span>
           </li>
         ))}

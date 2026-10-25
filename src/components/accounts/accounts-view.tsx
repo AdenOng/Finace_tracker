@@ -8,6 +8,7 @@ import { useState } from "react";
 import { AccountDrawer } from "~/components/accounts/account-drawer";
 import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { Amounts } from "~/components/finance/amounts";
+import { BalanceDate } from "~/components/finance/balance-date";
 import { Button } from "~/components/ui/button";
 import { Notice, Section, Tag } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
@@ -17,7 +18,6 @@ import {
   accountGroupOf,
   accountTypeLabels,
 } from "~/lib/accounts";
-import { formatDate } from "~/lib/format";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type Filter = "open" | "archived";
@@ -278,7 +278,7 @@ function AccountTable({
               <Amounts totals={r.totals} empty="Not recorded" />
             </Td>
             <Td className="text-ink-2 text-right">
-              {r.asOf ? formatDate(r.asOf) : "—"}
+              <BalanceDate asOf={r.asOf} />
             </Td>
             {archived ? (
               <Td className="text-right">

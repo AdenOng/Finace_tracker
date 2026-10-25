@@ -27,6 +27,7 @@ import {
   category,
   financialAccount,
   transaction,
+  transferLink,
   userSettings,
 } from "~/server/db/schema";
 import {
@@ -49,6 +50,11 @@ import {
   loadMerchantRules,
   matchMerchantRule,
 } from "~/server/modules/spending/rules";
+import {
+  classifyTransaction,
+  loadClassificationCategories,
+} from "~/server/modules/spending/classification";
+import { clearTransactionTransferReview } from "~/server/modules/transfers/store";
 import { ratesInto } from "~/server/modules/portfolio/holdings";
 import { convertAmounts } from "~/server/modules/portfolio/valuation";
 
@@ -151,6 +157,12 @@ export const spendingRouter = createTRPCRouter({
           categoryName: category.name,
           categoryColor: category.color,
           isTransfer: transaction.isTransfer,
+          transferLinkId: sql<
+            string | null
+          >`(select ${transferLink.id} from ${transferLink}
+            where ${readableAccount(scope, transferLink.ownerId, transaction.accountId)}
+            and (${transferLink.outgoingTransactionId} = ${transaction.id}
+              or ${transferLink.incomingTransactionId} = ${transaction.id}) limit 1)`,
           notes: transaction.notes,
           source: transaction.source,
           categorySource: transaction.categorySource,
@@ -278,13 +290,20 @@ export const spendingRouter = createTRPCRouter({
           !input.categoryId && !input.isTransfer
             ? matchMerchantRule(await loadMerchantRules(tx, ctx.scope), input)
             : undefined;
+        const classification = classifyTransaction(
+          input,
+          {
+            categoryId: input.categoryId ?? rule?.categoryId ?? null,
+          },
+          await loadClassificationCategories(tx),
+        );
         const [row] = await tx
           .insert(transaction)
           .values({
             ...input,
             ownerId: ctx.scope.userId,
             currency,
-            categoryId: input.categoryId ?? rule?.categoryId ?? null,
+            ...classification,
             categorySource: input.categoryId ? "user" : rule ? "rule" : null,
             source: "manual",
             fingerprint: `manual:${randomUUID()}`,
@@ -320,6 +339,15 @@ export const spendingRouter = createTRPCRouter({
         );
         if (values.categoryId !== current!.categoryId)
           await checkCategory(tx, values.categoryId);
+        // The full edit form resends category and type even when only notes changed.
+        const classification = classifyTransaction(
+          current!,
+          values.categoryId === current!.categoryId &&
+            values.isTransfer === current!.isTransfer
+            ? {}
+            : values,
+          await loadClassificationCategories(tx),
+        );
         const currency = values.currency ?? account.currency;
         const cleared = values.cleared ?? current!.cleared;
         const financialChange =
@@ -333,13 +361,27 @@ export const spendingRouter = createTRPCRouter({
           requireUnreconciled([current!]);
           await requireOpenPeriod(tx, ctx.scope, { ...values, currency });
         }
+        if (
+          current!.accountId !== values.accountId ||
+          current!.postedDate !== values.postedDate ||
+          current!.currency !== currency ||
+          !new Decimal(current!.amount).equals(values.amount) ||
+          current!.isTransfer !== classification.isTransfer
+        )
+          await clearTransactionTransferReview(tx, ctx.scope, id);
         const categorySource =
           current!.categoryId === values.categoryId
             ? current!.categorySource
             : ("user" as const);
         await tx
           .update(transaction)
-          .set({ ...values, currency, cleared, categorySource })
+          .set({
+            ...values,
+            ...classification,
+            currency,
+            cleared,
+            categorySource,
+          })
           .where(
             and(
               eq(transaction.id, id),
@@ -373,20 +415,32 @@ export const spendingRouter = createTRPCRouter({
         if (input.changes.cleared !== undefined) requireUnreconciled(rows);
         if (input.changes.categoryId !== undefined)
           await checkCategory(tx, input.changes.categoryId);
-        await tx
-          .update(transaction)
-          .set({
-            ...input.changes,
-            ...(input.changes.categoryId !== undefined
-              ? { categorySource: "user" as const }
-              : {}),
-          })
-          .where(
-            and(
-              inArray(transaction.id, input.ids),
-              writableBy(ctx.scope, transaction.ownerId),
-            ),
+        const categories = await loadClassificationCategories(tx);
+        for (const row of rows) {
+          const classification = classifyTransaction(
+            row,
+            input.changes,
+            categories,
           );
+          if (classification.isTransfer !== row.isTransfer)
+            await clearTransactionTransferReview(tx, ctx.scope, row.id);
+          await tx
+            .update(transaction)
+            .set({
+              ...input.changes,
+              ...classification,
+              ...(input.changes.categoryId !== undefined ||
+              classification.categoryId !== row.categoryId
+                ? { categorySource: "user" as const }
+                : {}),
+            })
+            .where(
+              and(
+                eq(transaction.id, row.id),
+                writableBy(ctx.scope, transaction.ownerId),
+              ),
+            );
+        }
         return { count: rows.length };
       }),
     ),

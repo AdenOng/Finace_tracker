@@ -198,6 +198,12 @@ export function SpendingView({
           <span className="hidden sm:inline">Add transaction</span>
         </Button>
       </header>
+      <Link
+        href="/spending/transfers"
+        className="mb-4 inline-block text-sm font-semibold underline underline-offset-4"
+      >
+        Review transfers
+      </Link>
       <div className="border-line mb-5 flex items-center justify-between gap-2 border-b pb-4">
         <div className="card flex min-w-0 items-center rounded-full p-0.5 shadow-none">
           <Button
@@ -701,7 +707,11 @@ export function SpendingView({
                           <Td className="text-ink-2">{t.accountName}</Td>
                           <Td>
                             {t.isTransfer ? (
-                              <Tag tone="outline">Transfer</Tag>
+                              <Tag tone="outline">
+                                {t.transferLinkId
+                                  ? "Transfer · Linked"
+                                  : "Transfer"}
+                              </Tag>
                             ) : (
                               <CategoryLabel
                                 name={t.categoryName}

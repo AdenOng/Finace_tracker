@@ -358,6 +358,14 @@ src/
   and out (`spending` router). Balances and holdings are point-in-time snapshots per account
   (`portfolio` router); net worth is the latest snapshot of every open account. Re-entering a date
   replaces that day's manual snapshot.
+- **Balance freshness.** Each account shows its snapshot date; balances more than 45 calendar
+  days old are marked stale to allow for monthly statements. A snapshot dated D includes
+  transactions posted on D (end-of-day). Net worth uses mixed snapshot dates and does not
+  adjust the total for transfers. Confirmed transfers warn when only one included account's
+  snapshot reflects its side: sender updated alone means temporarily missing money; receiver
+  updated alone means double counting. Each side retains its own currency and amount. Both
+  accounts must be readable, active, have recorded balances, and count toward the current total
+  (including the CPF/SRS setting); workspace notices require both accounts to be shared.
 - **Blank entries do not replace holdings.** A manual holdings or balance entry must contain at
   least one holding or cash balance. To explicitly record an empty account, enter a cash balance
   of `0`. Older blank entries are ignored when selecting current holdings. Imported statements
