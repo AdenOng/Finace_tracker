@@ -86,11 +86,21 @@ const jobColumns = {
 };
 
 /** Deterministic, so committing the same statement line twice is caught by the unique index. */
-function fingerprint(parts: (string | null)[], seen: Map<string, number>) {
+function fingerprint(
+  parts: (string | null)[],
+  seen: Map<string, number>,
+  matched: ReadonlySet<string>,
+) {
   const key = parts.map((p) => p ?? "").join("\u0000");
-  const n = (seen.get(key) ?? 0) + 1;
+  let n = seen.get(key) ?? 0;
+  let value: string;
+  // Skipped duplicates already occupy occurrence numbers; a new identical line needs a free one.
+  do {
+    n++;
+    value = `statement:${createHash("sha256").update(`${key}\u0000${n}`).digest("hex")}`;
+  } while (matched.has(value));
   seen.set(key, n);
-  return `statement:${createHash("sha256").update(`${key}\u0000${n}`).digest("hex")}`;
+  return value;
 }
 
 /**
@@ -195,14 +205,16 @@ export const importsRouter = createTRPCRouter({
       const [latest, saved] = job.accountId
         ? await Promise.all([
             ctx.db
-              .select({ asOf: accountSnapshot.asOf })
+              .select({
+                asOf: accountSnapshot.asOf,
+                source: accountSnapshot.source,
+              })
               .from(accountSnapshot)
               .where(snapshotScope)
               .orderBy(
                 desc(accountSnapshot.asOf),
                 desc(accountSnapshot.createdAt),
-              )
-              .limit(1),
+              ),
             ctx.db
               .select({
                 asOf: accountSnapshot.asOf,
@@ -227,6 +239,11 @@ export const importsRouter = createTRPCRouter({
       return {
         ...rest,
         latestHoldingsAsOf: latest[0]?.asOf ?? null,
+        statementDates: [
+          ...new Set(
+            latest.filter((s) => s.source === "statement").map((s) => s.asOf),
+          ),
+        ],
         importedHoldingsAsOf: saved[0]?.asOf ?? null,
         importedHoldingsAdjusted: saved[0]?.adjusted ?? false,
         stale: isStaleJob(job),
@@ -507,17 +524,60 @@ export const importsRouter = createTRPCRouter({
           .where(
             and(
               eq(stagedRow.jobId, job.id),
-              eq(stagedRow.decision, "accept"),
               isNull(stagedRow.committedRecordId),
             ),
           )
           .orderBy(asc(stagedRow.createdAt), asc(stagedRow.id));
+        const duplicateIds = rows.flatMap((r) =>
+          r.matchStatus === "duplicate" && r.matchedRecordId
+            ? [r.matchedRecordId]
+            : [],
+        );
+        // Keep the identities of rows matched at review time. Rows added by another pending
+        // import still meet the unique constraint below, so concurrent reviews cannot duplicate them.
+        const matches = duplicateIds.length
+          ? (
+              await Promise.all([
+                tx
+                  .select({
+                    id: transaction.id,
+                    fingerprint: transaction.fingerprint,
+                  })
+                  .from(transaction)
+                  .where(
+                    and(
+                      eq(transaction.accountId, account.id),
+                      writableBy(ctx.scope, transaction.ownerId),
+                      inArray(transaction.id, duplicateIds),
+                    ),
+                  ),
+                tx
+                  .select({
+                    id: investmentTransaction.id,
+                    fingerprint: investmentTransaction.fingerprint,
+                  })
+                  .from(investmentTransaction)
+                  .where(
+                    and(
+                      eq(investmentTransaction.accountId, account.id),
+                      writableBy(ctx.scope, investmentTransaction.ownerId),
+                      inArray(investmentTransaction.id, duplicateIds),
+                    ),
+                  ),
+              ])
+            ).flat()
+          : [];
+        const matchedIds = new Set(matches.map((r) => r.id));
+        const matchedFingerprints = new Set(matches.map((r) => r.fingerprint));
         const of = <S extends z.ZodType>(kind: StagedKind, schema: S) =>
           rows
-            .filter((r) => r.kind === kind)
+            .filter((r) => r.kind === kind && r.decision === "accept")
             .map((r) => ({
               id: r.id,
               data: schema.parse(r.data),
+              duplicate:
+                r.matchStatus === "duplicate" &&
+                matchedIds.has(r.matchedRecordId ?? ""),
             }));
 
         const committed = new Map<string, string>();
@@ -531,10 +591,14 @@ export const importsRouter = createTRPCRouter({
         const seen = new Map<string, number>();
 
         if (accountGroupOf(account.type) === "banking") {
-          for (const { id, data } of of(
+          for (const { id, data, duplicate } of of(
             "transaction",
             stagedSchemas.transaction,
           )) {
+            if (duplicate) {
+              counts.duplicates++;
+              continue;
+            }
             await requireOpenPeriod(tx, ctx.scope, {
               accountId: account.id,
               currency: data.currency,
@@ -567,6 +631,7 @@ export const importsRouter = createTRPCRouter({
                     normalizeMerchantText(data.description),
                   ],
                   seen,
+                  matchedFingerprints,
                 ),
               })
               .onConflictDoNothing({
@@ -683,7 +748,11 @@ export const importsRouter = createTRPCRouter({
                 : [],
             );
           const holdings = [await heldIn(imported), await heldIn(earlier?.id)];
-          for (const { id, data } of activity) {
+          for (const { id, data, duplicate } of activity) {
+            if (duplicate) {
+              counts.duplicates++;
+              continue;
+            }
             const [row] = await tx
               .insert(investmentTransaction)
               .values({
@@ -714,6 +783,7 @@ export const importsRouter = createTRPCRouter({
                     data.currency,
                   ],
                   seen,
+                  matchedFingerprints,
                 ),
               })
               .onConflictDoNothing({

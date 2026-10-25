@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { and, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
 
 import {
   cpfBucketLabels,
@@ -9,6 +9,7 @@ import {
 import {
   category,
   investmentTransaction,
+  security,
   stagedRow,
   transaction,
 } from "~/server/db/schema";
@@ -133,8 +134,23 @@ export async function stageExtraction(
               tradeDate: investmentTransaction.tradeDate,
               type: investmentTransaction.type,
               amount: investmentTransaction.amount,
+              currency: investmentTransaction.currency,
+              symbol: sql<
+                string | null
+              >`coalesce(${security.symbol}, ${stagedRow.data}->>'symbol')`,
             })
             .from(investmentTransaction)
+            .leftJoin(
+              security,
+              eq(security.id, investmentTransaction.securityId),
+            )
+            .leftJoin(
+              stagedRow,
+              and(
+                eq(stagedRow.committedRecordId, investmentTransaction.id),
+                eq(stagedRow.kind, "investment_transaction"),
+              ),
+            )
             .where(
               and(
                 eq(investmentTransaction.accountId, account.id),
@@ -157,6 +173,9 @@ export async function stageExtraction(
           !used.has(e.id) &&
           e.tradeDate === a.tradeDate &&
           e.type === a.type &&
+          e.currency === a.currency.toUpperCase() &&
+          (e.symbol?.trim().toUpperCase() ?? null) ===
+            (a.symbol?.trim().toUpperCase() ?? null) &&
           new Decimal(e.amount).equals(amount),
       );
       if (match) used.add(match.id);
@@ -202,6 +221,7 @@ export async function stageExtraction(
               id: transaction.id,
               postedDate: transaction.postedDate,
               amount: transaction.amount,
+              currency: transaction.currency,
               description: transaction.description,
             })
             .from(transaction)
@@ -226,6 +246,7 @@ export async function stageExtraction(
       const sameDay = existing.filter(
         (e) =>
           !used.has(e.id) &&
+          e.currency === (t.currency || account.currency).toUpperCase() &&
           (e.postedDate === postedDate || e.postedDate === t.date) &&
           new Decimal(e.amount).equals(amount),
       );

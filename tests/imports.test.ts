@@ -467,6 +467,253 @@ describe("statement imports", () => {
   });
 });
 
+test("an older overlapping statement keeps repeated bank charges and the newer balance", async () => {
+  const account = await alice.accounts.create({
+    name: "Repeated charges",
+    type: "checking",
+    institutionId: null,
+    currency: "SGD",
+    last4: "",
+    notes: "",
+  });
+  const coffee = line("2026-09-15", "COFFEE", -5);
+  const newer = await stagedJob(
+    { ...account, type: "checking" },
+    { ...base, transactions: [coffee], closingBalance: 100 },
+    "repeated-charges-newer",
+  );
+  await alice.imports.commit({ jobId: newer, asOf: "2026-10-01" });
+  const older = await stagedJob(
+    { ...account, type: "checking" },
+    { ...base, transactions: [coffee, coffee], closingBalance: 90 },
+    "repeated-charges-older",
+  );
+  expect(
+    (await alice.imports.get({ id: older })).rows
+      .filter((r) => r.kind === "transaction")
+      .map((r) => [r.matchStatus, r.decision]),
+  ).toEqual([
+    ["duplicate", "skip"],
+    ["new", "accept"],
+  ]);
+  expect(
+    await alice.imports.commit({ jobId: older, asOf: "2026-09-30" }),
+  ).toMatchObject({ transactions: 1, duplicates: 0 });
+  expect((await alice.accounts.get(account)).holdings?.asOf).toBe("2026-10-01");
+
+  const repeated = await stagedJob(
+    { ...account, type: "checking" },
+    { ...base, transactions: [coffee, coffee] },
+    "repeated-charges-again",
+  );
+  const rows = (await alice.imports.get({ id: repeated })).rows.filter(
+    (r) => r.kind === "transaction",
+  );
+  expect(rows.map((r) => r.matchStatus)).toEqual(["duplicate", "duplicate"]);
+  // Selecting a known duplicate must not create another transaction.
+  await alice.imports.updateRows({
+    jobId: repeated,
+    ids: rows.map((r) => r.id),
+    decision: "accept",
+  });
+  expect(
+    await alice.imports.commit({ jobId: repeated, asOf: "2026-09-30" }),
+  ).toMatchObject({ transactions: 0, duplicates: 2 });
+  expect(
+    await db.$count(
+      schema.transaction,
+      eq(schema.transaction.accountId, account.id),
+    ),
+  ).toBe(2);
+  expect((await alice.imports.get({ id: repeated })).statementDates).toEqual([
+    "2026-10-01",
+    "2026-09-30",
+  ]);
+  // The same numeric amount in another currency is a different charge.
+  const foreign = await stagedJob(
+    { ...account, type: "checking" },
+    {
+      ...base,
+      closingBalance: null,
+      transactions: [{ ...coffee, currency: "USD" }],
+    },
+    "repeated-charges-foreign",
+  );
+  expect((await alice.imports.get({ id: foreign })).rows[0]?.matchStatus).toBe(
+    "new",
+  );
+  expect(
+    await alice.imports.commit({ jobId: foreign, asOf: "2026-09-30" }),
+  ).toMatchObject({ transactions: 1 });
+});
+
+test("excluded identical charges do not prevent a later import from adding the missing occurrence", async () => {
+  const account = await alice.accounts.create({
+    name: "Excluded repeated charge",
+    type: "checking",
+    institutionId: null,
+    currency: "SGD",
+    last4: "",
+    notes: "",
+  });
+  const out = {
+    ...base,
+    transactions: [
+      line("2026-09-18", "COFFEE", -5),
+      line("2026-09-18", "COFFEE", -5),
+    ],
+  };
+  const first = await stagedJob(
+    { ...account, type: "checking" },
+    out,
+    "excluded-charge-first",
+  );
+  const [excluded] = (await alice.imports.get({ id: first })).rows;
+  await alice.imports.updateRows({
+    jobId: first,
+    ids: [excluded!.id],
+    decision: "skip",
+  });
+  await alice.imports.commit({ jobId: first, asOf: "2026-09-30" });
+  const second = await stagedJob(
+    { ...account, type: "checking" },
+    out,
+    "excluded-charge-second",
+  );
+  expect(
+    await alice.imports.commit({ jobId: second, asOf: "2026-09-30" }),
+  ).toMatchObject({ transactions: 1, duplicates: 0 });
+  expect(
+    await db.$count(
+      schema.transaction,
+      eq(schema.transaction.accountId, account.id),
+    ),
+  ).toBe(2);
+});
+
+test("statements reviewed before another import saves still deduplicate at commit", async () => {
+  const account = await alice.accounts.create({
+    name: "Pending overlaps",
+    type: "checking",
+    institutionId: null,
+    currency: "SGD",
+    last4: "",
+    notes: "",
+  });
+  const out = {
+    ...base,
+    transactions: [
+      line("2026-09-19", "COFFEE", -5),
+      line("2026-09-19", "COFFEE", -5),
+    ],
+  };
+  const first = await stagedJob(
+    { ...account, type: "checking" },
+    out,
+    "pending-overlap-first",
+  );
+  const second = await stagedJob(
+    { ...account, type: "checking" },
+    out,
+    "pending-overlap-second",
+  );
+  await alice.imports.commit({ jobId: first, asOf: "2026-10-01" });
+  expect(
+    await alice.imports.commit({ jobId: second, asOf: "2026-09-30" }),
+  ).toMatchObject({ transactions: 0, duplicates: 2 });
+  expect(
+    await db.$count(
+      schema.transaction,
+      eq(schema.transaction.accountId, account.id),
+    ),
+  ).toBe(2);
+});
+
+test("overlapping trades distinguish symbols and currencies even without linked holdings", async () => {
+  const account = await alice.accounts.create({
+    name: "Distinct overlapping trades",
+    type: "brokerage",
+    institutionId: null,
+    currency: "SGD",
+    last4: "",
+    notes: "",
+  });
+  const trade = (symbol: string, currency = "SGD") => ({
+    type: "buy" as const,
+    tradeDate: "2026-09-15",
+    settleDate: null,
+    symbol,
+    quantity: 1,
+    price: 100,
+    amount: -100,
+    fees: null,
+    currency,
+    description: `Bought ${symbol}`,
+  });
+  const first = await stagedJob(
+    { ...account, type: "brokerage" },
+    { ...base, investmentTransactions: [trade("AAPL")] },
+    "distinct-trades-newer",
+  );
+  await alice.imports.commit({ jobId: first, asOf: "2026-10-01" });
+  const out = {
+    ...base,
+    investmentTransactions: [
+      trade("MSFT"),
+      trade("AAPL", "USD"),
+      trade("AAPL"),
+    ],
+  };
+  const older = await stagedJob(
+    { ...account, type: "brokerage" },
+    out,
+    "distinct-trades-older",
+  );
+  expect(
+    (await alice.imports.get({ id: older })).rows.map((r) => [
+      r.matchStatus,
+      r.decision,
+    ]),
+  ).toEqual([
+    ["new", "accept"],
+    ["new", "accept"],
+    ["duplicate", "skip"],
+  ]);
+  expect(
+    await alice.imports.commit({ jobId: older, asOf: "2026-09-30" }),
+  ).toMatchObject({ activity: 2 });
+  const replay = await stagedJob(
+    { ...account, type: "brokerage" },
+    out,
+    "distinct-trades-again",
+  );
+  expect(
+    (await alice.imports.get({ id: replay })).rows.map((r) => r.matchStatus),
+  ).toEqual(["duplicate", "duplicate", "duplicate"]);
+  await alice.imports.commit({ jobId: replay, asOf: "2026-09-30" });
+  expect(
+    await db.$count(
+      schema.investmentTransaction,
+      eq(schema.investmentTransaction.accountId, account.id),
+    ),
+  ).toBe(3);
+  // An additional identical trade must also get its own occurrence at commit.
+  const repeated = await stagedJob(
+    { ...account, type: "brokerage" },
+    { ...base, investmentTransactions: [trade("AAPL"), trade("AAPL")] },
+    "distinct-trades-repeated",
+  );
+  expect(
+    await alice.imports.commit({ jobId: repeated, asOf: "2026-09-30" }),
+  ).toMatchObject({ activity: 1, duplicates: 0 });
+  expect(
+    await db.$count(
+      schema.investmentTransaction,
+      eq(schema.investmentTransaction.accountId, account.id),
+    ),
+  ).toBe(4);
+});
+
 test("trades link to the listing the account holds, never a same-symbol listing in another currency", async () => {
   const account = await alice.accounts.create({
     name: "Trade broker",

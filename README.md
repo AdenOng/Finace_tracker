@@ -362,7 +362,10 @@ src/
   least one holding or cash balance. To explicitly record an empty account, enter a cash balance
   of `0`. Older blank entries are ignored when selecting current holdings. Imported statements
   retain their statement dates; the review explains when a newer account entry will remain
-  current, both before and after saving.
+  current, both before and after saving. If no statement end date was read, choose an **As of**
+  date before saving balances, holdings or trades. Saving another statement entry for the same
+  account and date replaces that date's statement holdings and balances; the review warns before
+  saving, and existing transactions and trades remain saved.
 - **Currency conversion for complete totals.** The overview converts holdings and cash into the
   display currency with daily reference rates from [Frankfurter](https://frankfurter.dev/).
   Rates refresh on demand, are cached for an hour, and persist in `fx_rate` for use during an

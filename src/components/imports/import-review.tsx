@@ -88,11 +88,17 @@ export function ImportReview({ id }: { id: string }) {
       },
     },
   );
-  // Defaults to the statement's last day once it has been read; today is only known in the browser.
+  // Balances, holdings and trade listings need an explicit date if extraction did not find one.
+  // Transaction-only imports keep their own row dates; the unused snapshot date can be today.
   const [today, setToday] = useState("");
   useEffect(() => setToday(todayIso()), []);
   const [asOfChoice, setAsOf] = useState<string | null>(null);
-  const asOf = asOfChoice ?? job.summary?.periodEnd ?? today;
+  const needsDate = job.rows.some(
+    (r) => r.decision === "accept" && r.kind !== "transaction",
+  );
+  const asOf = needsDate
+    ? (asOfChoice ?? job.summary?.periodEnd ?? "")
+    : (job.summary?.periodEnd ?? today);
   const [flash, setFlash] = useState<string | null>(null);
   const [removing, setRemoving] = useState<Row | null>(null);
 
@@ -396,6 +402,22 @@ export function ImportReview({ id }: { id: string }) {
               ) : null}
             </Notice>
           ) : null}
+          {job.status === "needs_review" && needsDate && !asOf ? (
+            <Notice tone="warn">
+              Choose the statement date before saving. Enter the date these
+              holdings, balances or trades belong to in &ldquo;As of&rdquo;
+              below.
+            </Notice>
+          ) : null}
+          {job.status === "needs_review" &&
+          hasHoldings &&
+          job.statementDates.includes(asOf) ? (
+            <Notice tone="warn">
+              Saving replaces the statement holdings or balance already saved
+              for {formatDate(asOf)}. The selected rows become the complete
+              entry for that date; existing transactions and trades stay saved.
+            </Notice>
+          ) : null}
 
           {group === "banking" ? (
             <>
@@ -413,7 +435,7 @@ export function ImportReview({ id }: { id: string }) {
               />
               <BalanceSection
                 rows={of("cash_balance")}
-                asOf={asOf}
+                asOf={holdingsDate ?? asOf}
                 disabled={job.status !== "needs_review"}
                 onDecision={setDecision}
               />
@@ -442,8 +464,7 @@ export function ImportReview({ id }: { id: string }) {
                 </span>{" "}
                 of {rows.length} selected
               </p>
-              {of("cash_balance").some((r) => r.decision === "accept") ||
-              of("position").some((r) => r.decision === "accept") ? (
+              {needsDate ? (
                 <label className="flex items-center gap-2 text-[13px]">
                   <span className="text-ink-2">As of</span>
                   <Input

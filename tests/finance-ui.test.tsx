@@ -13,6 +13,7 @@ import { SpendingView } from "../src/components/spending/spending-view";
 import { AccountRow } from "../src/components/overview/account-row";
 import { NetWorthChart } from "../src/components/overview/net-worth-chart";
 import { netWorthSeries } from "../src/lib/net-worth-series";
+import { formatDate } from "../src/lib/format";
 import { PortfolioSettings } from "../src/components/overview/portfolio-settings";
 import { createQueryClient } from "../src/trpc/query-client";
 import { api, type RouterOutputs } from "../src/trpc/react";
@@ -539,6 +540,7 @@ test("completed imports expose removal only for saved rows and keep removed evid
     institutionName: null,
     institutionKey: null,
     latestHoldingsAsOf: "2026-09-30",
+    statementDates: ["2026-09-30"],
     importedHoldingsAsOf: "2026-09-30",
     importedHoldingsAdjusted: false,
     stale: false,
@@ -613,6 +615,117 @@ test("completed imports expose removal only for saved rows and keep removed evid
   );
   expect(orphaned).toContain("The original account was deleted");
   expect(orphaned).not.toContain("Restore original account");
+});
+
+test("import review requires a missing statement date and warns about dated replacements", () => {
+  const id = "88888888-8888-4888-8888-888888888888";
+  const job: RouterOutputs["imports"]["get"] = {
+    id,
+    status: "needs_review",
+    error: null,
+    model: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    startedAt: null,
+    finishedAt: null,
+    documentId: "99999999-9999-4999-8999-999999999999",
+    fileName: "statement.pdf",
+    mimeType: "application/pdf",
+    periodStart: null,
+    periodEnd: null,
+    accountId,
+    accountName: "Broker",
+    accountArchivedAt: null,
+    accountType: "brokerage",
+    accountCurrency: "SGD",
+    institutionName: null,
+    institutionKey: null,
+    latestHoldingsAsOf: "2026-10-01",
+    statementDates: ["2026-10-01", "2026-09-30"],
+    importedHoldingsAsOf: null,
+    importedHoldingsAdjusted: false,
+    stale: false,
+    summary: null,
+    rows: [
+      {
+        id: "balance",
+        kind: "cash_balance",
+        data: { currency: "SGD", amount: "100", bucket: null },
+        matchStatus: "new",
+        decision: "accept",
+        committedRecordId: null,
+        removed: false,
+      },
+    ],
+  };
+  const review = (data: typeof job) =>
+    render(<ImportReview id={id} />, (client) =>
+      client.setQueryData(getQueryKey(api.imports.get, { id }, "query"), data),
+    );
+  const undated = review(job);
+  expect(undated).toContain("Choose the statement date before saving");
+  expect(undated).toMatch(/<input[^>]*type="date"[^>]*value=""/);
+  const save = undated
+    .match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
+    ?.find((button) => button.includes("Save "));
+  expect(save).toContain('disabled=""');
+
+  const dated = review({
+    ...job,
+    summary: {
+      documentType: "brokerage_statement",
+      institutionName: null,
+      accountLast4: null,
+      currency: "SGD",
+      periodStart: "2026-09-01",
+      periodEnd: "2026-09-30",
+      openingBalance: null,
+      closingBalance: null,
+      warnings: [],
+    },
+  });
+  expect(dated).not.toContain("Choose the statement date before saving");
+  expect(dated).toContain(
+    "Saving replaces the statement holdings or balance already saved for",
+  );
+  expect(dated).toContain("The newer entry remains the current account value");
+
+  const trades = review({
+    ...job,
+    rows: [
+      {
+        id: "trade",
+        kind: "investment_transaction",
+        data: {
+          tradeDate: "2026-09-15",
+          settleDate: null,
+          type: "buy",
+          symbol: "AAPL",
+          quantity: "1",
+          price: "100",
+          amount: "-100",
+          fees: null,
+          currency: "SGD",
+          description: null,
+        },
+        matchStatus: "new",
+        decision: "accept",
+        committedRecordId: null,
+        removed: false,
+      },
+    ],
+  });
+  // Even a trade-only document needs a dated context for linking its listings.
+  expect(trades).toContain('type="date"');
+  expect(trades).toContain("Choose the statement date before saving");
+  const saved = review({
+    ...job,
+    status: "completed",
+    accountType: "checking",
+    importedHoldingsAsOf: "2026-09-30",
+  });
+  expect(saved).toContain(`balance on ${formatDate("2026-09-30")}`);
+  expect(saved).not.toContain("balance on the statement date");
 });
 
 test("consolidated portfolio renders combined quantities, expandable broker dates, search, cash and missing-data labels", () => {
