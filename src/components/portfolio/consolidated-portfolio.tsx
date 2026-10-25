@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
+import { cardTools } from "~/components/ui/card-tools";
 import { Allocation } from "~/components/overview/allocation";
 import { HeroFigure } from "~/components/overview/hero-figure";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
@@ -150,7 +151,7 @@ export function ConsolidatedPortfolio() {
                     ? data.brokers.find((b) => b.id === brokerId)?.name
                     : "All brokers"}
                 </p>
-                <div className="flex items-center gap-1">
+                <div className={cardTools}>
                   <AmountsToggle />
                   <PortfolioSettings
                     currency={data.currency}
@@ -374,7 +375,7 @@ export function ConsolidatedPortfolio() {
             >
               <div className="border-ink/80 flex items-center justify-between border-b-2 pb-2">
                 <p className="eyebrow">Broker cash</p>
-                <p className="figures flex items-center gap-1 font-mono text-[13px] font-semibold">
+                <p className="figures -mr-2.5 flex items-center gap-1 font-mono text-[13px] font-semibold">
                   {amount(data.cash.total, data.currency)}
                   <AmountsToggle />
                 </p>

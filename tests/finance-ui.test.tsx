@@ -11,6 +11,8 @@ import { ImportReview } from "../src/components/imports/import-review";
 import { TransactionDrawer } from "../src/components/spending/transaction-drawer";
 import { SpendingView } from "../src/components/spending/spending-view";
 import { AccountRow } from "../src/components/overview/account-row";
+import { NetWorthChart } from "../src/components/overview/net-worth-chart";
+import { netWorthSeries } from "../src/lib/net-worth-series";
 import { PortfolioSettings } from "../src/components/overview/portfolio-settings";
 import { createQueryClient } from "../src/trpc/query-client";
 import { api, type RouterOutputs } from "../src/trpc/react";
@@ -73,9 +75,9 @@ test("net worth chart renders nearby large balances without hanging or invalid c
         ]) {
           const points = totals.map((total, i) => ({
             date: i ? "2026-10-19" : "2026-10-18",
-            total, estimated: false, partial: false,
+            total, estimated: false, backfilled: false, partial: false,
           }));
-          console.log(renderToStaticMarkup(createElement(NetWorthChart, { points, currency: "SGD" })));
+          console.log(renderToStaticMarkup(createElement(NetWorthChart, { series: [{ key: "all", label: "Net worth", points, headline: true }], currency: "SGD" })));
         }
       `,
     ],
@@ -89,6 +91,155 @@ test("net worth chart renders nearby large balances without hanging or invalid c
   expect(html.match(/<figure/g)).toHaveLength(5);
   expect(html).not.toMatch(/NaN|Infinity/);
   expect(html).toContain("9,007,199,254,740,994.00");
+});
+
+test("net worth chart marks backfilled days apart from estimates and recorded days", () => {
+  const point = (
+    date: string,
+    total: string,
+    kind: "backfilled" | "estimated" | "recorded",
+  ) => ({
+    date,
+    total,
+    partial: false,
+    estimated: kind !== "recorded",
+    backfilled: kind === "backfilled",
+  });
+  const html = renderToStaticMarkup(
+    <NetWorthChart
+      currency="SGD"
+      series={[
+        {
+          key: "all",
+          label: "Net worth",
+          headline: true,
+          points: [
+            point("2025-10-01", "900", "backfilled"),
+            point("2026-06-01", "950", "backfilled"),
+            point("2026-10-01", "1000", "estimated"),
+            point("2026-10-20", "1100", "recorded"),
+          ],
+        },
+      ]}
+    />,
+  );
+  // One line per kind: dotted for backfilled, dashed for estimated, solid for recorded.
+  expect(html.match(/<path/g)).toHaveLength(3);
+  expect(html).toContain('stroke-dasharray="1 4"');
+  expect(html).toContain('stroke-dasharray="5 5"');
+  // The change since the first, backfilled, day carries the asterisk.
+  expect(html).toContain('aria-label="backfilled">*</span>');
+  expect(html).toContain("Unable to determine the cost price or purchase date");
+  // The backfilled stretch is shaded and labelled, ending on its last backfilled day.
+  expect(html).toMatch(
+    /class="bg-wash absolute inset-y-0" style="left:0%;width:63\.\d+%">/,
+  );
+  expect(html).toContain(">Backfilled*</span>");
+  expect(html.match(/· backfilled\*/g)).toHaveLength(2);
+  expect(html.match(/· estimated/g)).toHaveLength(1);
+
+  // With one series there is nothing to pick between.
+  expect(html).not.toContain("Net worth chart data");
+
+  const recorded = (total: string) => [
+    point("2026-10-19", total, "recorded"),
+    point("2026-10-20", total, "recorded"),
+  ];
+  const groups = renderToStaticMarkup(
+    <NetWorthChart
+      currency="SGD"
+      series={[
+        {
+          key: "all",
+          label: "Net worth",
+          points: recorded("1000"),
+          headline: true,
+        },
+        { key: "investments", label: "Investments", points: recorded("700") },
+        { key: "banking", label: "Bank & cards", points: recorded("200") },
+        { key: "cpf_srs", label: "CPF & SRS", points: recorded("100") },
+      ]}
+    />,
+  );
+  expect(groups).not.toContain("backfilled");
+  expect(groups).toContain('aria-label="Net worth chart data"');
+  expect(groups.match(/aria-selected="true"/g)).toHaveLength(1);
+  expect(groups).toMatch(/aria-selected="true"[^>]*>Net worth</);
+  expect(groups).toContain(">Investments</button>");
+  expect(groups).toContain(">CPF &amp; SRS</button>");
+  // The whole net worth is the figure above the chart, so its caption shows only the change.
+  expect(groups).toContain(">Over time</span>");
+  // The first series is drawn until another is picked.
+  expect(groups).toContain("S$1,000.00");
+  expect(groups).not.toContain("S$700.00");
+});
+
+test("chart series keep an unknown figure unknown and show groups without a net worth total", () => {
+  const point = (date: string, total: string) => ({
+    date,
+    total,
+    partial: false,
+    estimated: true,
+    backfilled: false,
+  });
+  const none = { entered: false, total: null, partial: false };
+  // Nothing of the investments could be converted today: no drop to S$0, and too short to draw.
+  expect(
+    netWorthSeries({
+      trend: [point("2026-10-01", "100"), point("2026-10-25", "100")],
+      groups: {
+        investments: [point("2026-10-01", "100")],
+        banking: [],
+        cpf_srs: [],
+      },
+      today: "2026-10-25",
+      now: {
+        investments: { entered: true, total: null, partial: true },
+        banking: none,
+        cpf_srs: none,
+      },
+    }).map((s) => s.key),
+  ).toEqual(["all"]);
+
+  // Only CPF, not counted in net worth: there is no total, but CPF still has a chart.
+  const cpfOnly = netWorthSeries({
+    trend: [],
+    groups: {
+      investments: [],
+      banking: [],
+      cpf_srs: [point("2026-09-01", "600"), point("2026-10-25", "650")],
+    },
+    today: "2026-10-25",
+    now: {
+      investments: none,
+      banking: none,
+      cpf_srs: { entered: true, total: "700", partial: false },
+    },
+  });
+  expect(cpfOnly).toEqual([
+    {
+      key: "cpf_srs",
+      label: "CPF & SRS",
+      points: [
+        point("2026-09-01", "600"),
+        // Today's point replaces any recorded earlier today.
+        {
+          date: "2026-10-25",
+          total: "700",
+          partial: false,
+          estimated: false,
+          backfilled: false,
+        },
+      ],
+    },
+  ]);
+  // A group first in line is not the figure above the chart, so its caption shows its value.
+  const html = renderToStaticMarkup(
+    <NetWorthChart series={cpfOnly} currency="SGD" />,
+  );
+  expect(html).toContain('<span class="eyebrow mr-2">CPF &amp; SRS</span>');
+  expect(html).toContain("S$700.00");
+  expect(html).not.toContain("Net worth chart data");
 });
 
 test("broker rows show one converted holdings-and-cash total instead of currency balances", () => {

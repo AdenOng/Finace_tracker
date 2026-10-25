@@ -277,9 +277,19 @@
 /*
  * Hidden amounts. Money marked `sensitive` is drawn as a fixed row of dots in its own colour, so
  * neither the digits nor how many there are show. A card's own setting wins over the app's.
+ * Clicking the dots reveals that one amount (`data-revealed`, set by AmountsProvider), which
+ * `--masked` lets the click handler detect.
  */
-[data-amounts="hidden"] .sensitive:not([data-amounts-scope="shown"] .sensitive),
-[data-amounts-scope="hidden"] .sensitive {
+[data-amounts="hidden"]
+  .sensitive:not(
+    [data-amounts-scope="shown"] .sensitive,
+    [data-revealed],
+    [data-revealed] .sensitive
+  ),
+[data-amounts-scope="hidden"]
+  .sensitive:not([data-revealed], [data-revealed] .sensitive) {
+  --masked: 1;
+  cursor: pointer;
   /* Dots scale with the text but stay modest on headline figures. */
   --dot: min(0.6em, 30px);
   display: inline-block;

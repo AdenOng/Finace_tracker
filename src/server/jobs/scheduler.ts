@@ -10,6 +10,7 @@ import { sendReviewReminders } from "~/server/modules/imports/reminders";
 import { recoverImportJobs } from "~/server/modules/imports/runner";
 import { recordAllNetWorth } from "~/server/modules/portfolio/history";
 import {
+  backfillPriceHistory,
   refreshExchangeRates,
   refreshQuotes,
 } from "~/server/modules/portfolio/market-health";
@@ -98,6 +99,13 @@ const tasks: Task[] = [
     every: HOUR,
     firstAfter: 4 * MINUTE,
     run: () => refreshQuotes(db),
+  },
+  {
+    // Past closes for the net worth chart before the app recorded it; usually nothing to fetch.
+    name: "price history backfill",
+    every: 24 * HOUR,
+    firstAfter: 5 * MINUTE,
+    run: () => backfillPriceHistory(db),
   },
   {
     // After rates and prices have refreshed; a later run the same day replaces that day's figure.

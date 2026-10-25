@@ -17,6 +17,7 @@ import { createHTTPServer } from "@trpc/server/adapters/standalone";
 
 import { api, TRPCReactProvider } from "../src/trpc/react";
 
+import { todayIso } from "../src/lib/dates";
 import type { Database } from "../src/server/db";
 import * as schema from "../src/server/db/schema";
 import { exchangeRates } from "../src/server/modules/portfolio/exchange-rates";
@@ -54,11 +55,11 @@ const { resolveAccessScope, resolveWorkspaceScope } =
 const { latestHoldings } =
   await import("../src/server/modules/portfolio/holdings");
 const { createTRPCRouter } = await import("../src/server/api/trpc");
-const { refreshQuotes } =
+const { backfillPriceHistory, coversRange, refreshQuotes } =
   await import("../src/server/modules/portfolio/market-health");
 const { cachedInstanceSettings, setCachedInstanceSettings } =
   await import("../src/server/lib/instance-settings-cache");
-const { entryTimeline, recordNetWorth } =
+const { backfillFrom, estimatedTimeline, recordNetWorth } =
   await import("../src/server/modules/portfolio/history");
 
 function contextFor(id: string) {
@@ -156,51 +157,157 @@ const bank = {
 const broker = { ...bank, name: "Broker", type: "brokerage" as const };
 
 describe("net worth history", () => {
-  test("each entry date adds up every account's latest entry so far", () => {
+  test("each entry date adds up every account's latest entry per group, backfilling accounts not yet entered", () => {
     const amount = (value: string, currency = "SGD") => ({
       amount: value,
       currency,
     });
+    const cashEntry = (
+      accountId: string,
+      group: "banking" | "investments",
+      asOf: string,
+      ...cash: ReturnType<typeof amount>[]
+    ) => ({ accountId, group, asOf, positions: [], cash });
+    const tally = (
+      backfilled: boolean,
+      ...amounts: ReturnType<typeof amount>[]
+    ) => ({
+      amounts,
+      unpriced: 0,
+      backfilled,
+    });
     expect(
-      entryTimeline([
-        {
-          accountId: "a",
-          asOf: "2026-01-31",
-          totals: [amount("100")],
-          unpriced: 0,
-        },
-        {
-          accountId: "b",
-          asOf: "2026-02-28",
-          totals: [amount("5", "USD")],
-          unpriced: 1,
-        },
-        {
-          accountId: "a",
-          asOf: "2026-03-31",
-          totals: [amount("150")],
-          unpriced: 0,
-        },
+      estimatedTimeline([
+        cashEntry("a", "banking", "2026-01-31", amount("100")),
+        cashEntry("b", "investments", "2026-02-28", amount("5", "USD")),
+        cashEntry(
+          "c",
+          "banking",
+          "2026-02-28",
+          amount("20"),
+          amount("1", "USD"),
+        ),
+        cashEntry("a", "banking", "2026-03-31", amount("150")),
         // A second entry on the same day replaces the first.
-        {
-          accountId: "a",
-          asOf: "2026-03-31",
-          totals: [amount("160")],
-          unpriced: 0,
-        },
+        cashEntry("a", "banking", "2026-03-31", amount("160")),
       ]),
     ).toEqual([
-      { date: "2026-01-31", amounts: [amount("100")], unpriced: 0 },
+      // Accounts b and c are assumed to have held their first balances before they were entered.
+      {
+        date: "2026-01-31",
+        groups: {
+          banking: tally(true, amount("120"), amount("1", "USD")),
+          investments: tally(true, amount("5", "USD")),
+        },
+      },
       {
         date: "2026-02-28",
-        amounts: [amount("100"), amount("5", "USD")],
-        unpriced: 1,
+        groups: {
+          banking: tally(false, amount("120"), amount("1", "USD")),
+          investments: tally(false, amount("5", "USD")),
+        },
       },
       {
         date: "2026-03-31",
-        amounts: [amount("160"), amount("5", "USD")],
-        unpriced: 1,
+        groups: {
+          banking: tally(false, amount("180"), amount("1", "USD")),
+          investments: tally(false, amount("5", "USD")),
+        },
       },
+    ]);
+  });
+
+  test("market closes fill the days between and up to a year before the first entry", () => {
+    const holding = (securityId: string, quantity: string, price: string) => ({
+      securityId,
+      currency: "USD",
+      quantity,
+      statementPrice: price,
+      statementValue: null,
+    });
+    const close = (date: string, value: string, currency = "USD") => ({
+      date,
+      close: value,
+      currency,
+    });
+    const timeline = estimatedTimeline(
+      [
+        {
+          accountId: "broker",
+          group: "investments",
+          asOf: "2026-03-02",
+          positions: [holding("vt", "10", "100"), holding("fund", "1", "50")],
+          cash: [{ amount: "7", currency: "USD" }],
+        },
+        {
+          accountId: "broker",
+          group: "investments",
+          asOf: "2026-03-09",
+          positions: [holding("vt", "20", "110")],
+          cash: [],
+        },
+      ],
+      new Map([
+        [
+          "vt",
+          [
+            // More than a year before the first entry: not drawn.
+            close("2025-02-27", "60"),
+            close("2025-03-03", "80"),
+            close("2026-03-04", "105"),
+            // Older than the second entry, so its statement price wins on that day.
+            close("2026-03-06", "108"),
+            close("2026-03-10", "112"),
+          ],
+        ],
+        // Implausibly far from the statement price: probably a different instrument.
+        ["fund", [close("2026-03-04", "5000")]],
+      ]),
+    );
+    expect(
+      timeline.map(({ date, groups: { investments: p } }) => [
+        date,
+        p!.amounts,
+        p!.unpriced,
+        p!.backfilled,
+      ]),
+    ).toEqual([
+      ["2025-03-03", [{ amount: "857", currency: "USD" }], 0, true],
+      ["2026-03-02", [{ amount: "1057", currency: "USD" }], 0, false],
+      ["2026-03-04", [{ amount: "1107", currency: "USD" }], 0, false],
+      ["2026-03-06", [{ amount: "1137", currency: "USD" }], 0, false],
+      ["2026-03-09", [{ amount: "2200", currency: "USD" }], 0, false],
+      ["2026-03-10", [{ amount: "2240", currency: "USD" }], 0, false],
+    ]);
+    expect(backfillFrom("2026-03-02")).toBe("2025-03-02");
+  });
+
+  test("a close in another currency is used without comparing it to the statement price", () => {
+    // A coin recorded in yen is priced in US dollars: ¥15,000,000 against US$100,000 is no mismatch.
+    const [point] = estimatedTimeline(
+      [
+        {
+          accountId: "wallet",
+          group: "investments",
+          asOf: "2026-03-02",
+          positions: [
+            {
+              securityId: "btc",
+              currency: "JPY",
+              quantity: "0.1",
+              statementPrice: "15000000",
+              statementValue: null,
+            },
+          ],
+          cash: [],
+        },
+      ],
+      new Map([
+        ["btc", [{ date: "2026-03-02", close: "100000", currency: "USD" }]],
+      ]),
+    );
+    expect(point!.groups.investments!.amounts).toEqual([
+      { amount: "10000", currency: "USD" },
     ]);
   });
 
@@ -239,9 +346,22 @@ describe("net worth history", () => {
       source: "test",
     });
 
+    // The brokerage was entered later; before that it is backfilled from its first entry.
     expect((await alice.portfolio.netWorthHistory()).points).toEqual([
-      { date: "2026-08-01", total: "100", partial: false, estimated: true },
-      { date: "2026-09-01", total: "1350", partial: false, estimated: true },
+      {
+        date: "2026-08-01",
+        total: "1350",
+        partial: false,
+        estimated: true,
+        backfilled: true,
+      },
+      {
+        date: "2026-09-01",
+        total: "1350",
+        partial: false,
+        estimated: true,
+        backfilled: false,
+      },
     ]);
 
     expect(
@@ -267,11 +387,17 @@ describe("net worth history", () => {
     const history = await alice.portfolio.netWorthHistory();
     expect(history.currency).toBe("SGD");
     // A backdated entry from before recording began still shapes the estimate.
-    expect(history.points).toEqual([
-      { date: "2026-08-01", total: "100", partial: false, estimated: true },
-      { date: "2026-09-01", total: "1350", partial: false, estimated: true },
-      { date: "2026-10-01", total: "2249", partial: false, estimated: true },
-      { date: "2026-10-10", total: "1350", partial: false, estimated: false },
+    expect(history.points.map((p) => [p.date, p.total, p.backfilled])).toEqual([
+      ["2026-08-01", "1350", true],
+      ["2026-09-01", "1350", false],
+      ["2026-10-01", "2249", false],
+      ["2026-10-10", "1350", false],
+    ]);
+    expect(history.points.map((p) => p.estimated)).toEqual([
+      true,
+      true,
+      true,
+      false,
     ]);
     expect(await db.$count(schema.networthSnapshot)).toBe(1);
 
@@ -280,6 +406,75 @@ describe("net worth history", () => {
       await recordNetWorth(db as unknown as Database, "bob", "2026-10-10"),
     ).toBe(false);
     expect((await bob.portfolio.netWorthHistory()).points).toEqual([]);
+  });
+
+  test("each account group has its own history, CPF and SRS included even when not counted", async () => {
+    const settings = settingsRouter.createCaller(contextFor("alice"));
+    const savings = await alice.accounts.create(bank);
+    const brokerage = await alice.accounts.create(broker);
+    const cpf = await alice.accounts.create({
+      ...bank,
+      name: "CPF",
+      type: "cpf",
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: savings.id,
+      asOf: "2026-08-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: cpf.id,
+      asOf: "2026-09-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "600", bucket: "oa" }],
+    });
+    await alice.portfolio.recordSnapshot({
+      accountId: brokerage.id,
+      asOf: "2026-09-01",
+      cash: [{ currency: "USD", amount: "80" }],
+      positions: [],
+    });
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-09-01",
+      rate: "0.8",
+      source: "test",
+    });
+    await settings.setCountCpfSrs({ count: false });
+    await recordNetWorth(db as unknown as Database, "alice", "2026-10-10");
+
+    const history = await alice.portfolio.netWorthHistory();
+    const view = (points: typeof history.points) =>
+      points.map((p) => [p.date, p.total, p.estimated, p.backfilled]);
+    // The total leaves CPF out: S$100 of savings and US$80 (S$100) at the broker.
+    expect(view(history.points)).toEqual([
+      ["2026-08-01", "200", true, true],
+      ["2026-09-01", "200", true, false],
+      ["2026-10-10", "200", false, false],
+    ]);
+    expect(view(history.groups.banking)).toEqual([
+      ["2026-08-01", "100", true, false],
+      ["2026-09-01", "100", true, false],
+      ["2026-10-10", "100", false, false],
+    ]);
+    expect(view(history.groups.investments)).toEqual([
+      ["2026-08-01", "100", true, true],
+      ["2026-09-01", "100", true, false],
+      ["2026-10-10", "100", false, false],
+    ]);
+    expect(view(history.groups.cpf_srs)).toEqual([
+      ["2026-08-01", "600", true, true],
+      ["2026-09-01", "600", true, false],
+      ["2026-10-10", "600", false, false],
+    ]);
+    // Bob sees none of it.
+    expect((await bob.portfolio.netWorthHistory()).groups).toEqual({
+      investments: [],
+      banking: [],
+      cpf_srs: [],
+    });
   });
 
   test("CPF/SRS toggles normalize estimated and recorded history without changing saved figures", async () => {
@@ -370,8 +565,20 @@ describe("net worth history", () => {
     ).toBe(true);
     await settings.setCountCpfSrs({ count: true });
     const expected = [
-      { date: "2026-09-01", total: "150", partial: true, estimated: true },
-      { date: "2026-10-18", total: "150", partial: true, estimated: false },
+      {
+        date: "2026-09-01",
+        total: "150",
+        partial: true,
+        estimated: true,
+        backfilled: false,
+      },
+      {
+        date: "2026-10-18",
+        total: "150",
+        partial: true,
+        estimated: false,
+        backfilled: false,
+      },
     ];
     expect((await alice.portfolio.netWorthHistory()).points).toEqual(expected);
     // Existing records lack the new completeness flag; don't claim their added amounts are complete.
@@ -2996,6 +3203,224 @@ describe("market prices", () => {
     } finally {
       request.mockRestore();
     }
+  });
+
+  test("past closes backfill the chart before the first entry, once per security", async () => {
+    const request = spyOn(quotes, "closes").mockImplementation(
+      async (symbol) =>
+        symbol === "D05.SI"
+          ? {
+              currency: "SGD",
+              source: "yahoo",
+              closes: [
+                { date: "2025-10-01", close: "60" },
+                { date: "2026-09-30", close: "69" },
+                { date: "2026-10-02", close: "72" },
+              ],
+            }
+          : {
+              currency: "USD",
+              source: "yahoo",
+              closes: [{ date: "2025-10-01", close: "80000" }],
+            },
+    );
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-10-01",
+      rate: "0.8",
+      source: "test",
+    });
+    try {
+      const account = await alice.accounts.create(broker);
+      await alice.portfolio.addSnapshot({
+        accountId: account.id,
+        asOf: "2026-10-01",
+        positions: [
+          { ...holding, symbol: "D05", quantity: "10", price: "70" },
+          {
+            ...holding,
+            symbol: "BTC",
+            exchange: "",
+            assetClass: "crypto",
+            quantity: "0.01",
+            price: "120000",
+          },
+          {
+            ...holding,
+            symbol: "FUND",
+            exchange: "",
+            assetClass: "fund",
+            quantity: "1",
+            price: "5",
+          },
+        ],
+        cash: [],
+      });
+      const backfill = (ownerId: string) =>
+        backfillPriceHistory(db as unknown as Database, { ownerId });
+      expect(await backfill("bob")).toEqual({
+        checked: 0,
+        stored: 0,
+        failed: [],
+      });
+      expect(await backfill("alice")).toEqual({
+        checked: 2,
+        stored: 4,
+        failed: [],
+      });
+      expect(request).toHaveBeenCalledWith("D05.SI", "2025-10-01");
+      expect(request).toHaveBeenCalledWith("BTC-USD", "2025-10-01");
+      // These closes leave months uncovered, so they are asked for again; nothing is duplicated.
+      expect(await backfill("alice")).toMatchObject({ checked: 2, stored: 0 });
+
+      expect(
+        (await alice.portfolio.netWorthHistory()).points.map((p) => [
+          p.date,
+          p.total,
+          p.backfilled,
+        ]),
+      ).toEqual([
+        // S$600 of shares, US$800 of coin (S$1,000) and the unpriced fund at its S$5.
+        ["2025-10-01", "1605", true],
+        // The coin's only close is too old by now, so it keeps its statement value.
+        ["2026-09-30", "1895", true],
+        // On the entry date its own prices win over the previous day's close.
+        ["2026-10-01", "1905", false],
+        ["2026-10-02", "1925", false],
+      ]);
+
+      // Recording the entry's own day keeps the backfilled year before it.
+      await recordNetWorth(db as unknown as Database, "alice", "2026-10-01");
+      expect(
+        (await alice.portfolio.netWorthHistory()).points.map((p) => [
+          p.date,
+          p.estimated,
+          p.backfilled,
+        ]),
+      ).toEqual([
+        ["2025-10-01", true, true],
+        ["2026-09-30", true, true],
+        ["2026-10-01", false, false],
+      ]);
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("coin closes saved without a currency do not count as history, and a fetch repairs them", async () => {
+    const account = await alice.accounts.create(broker);
+    await alice.portfolio.addSnapshot({
+      accountId: account.id,
+      asOf: "2026-10-01",
+      positions: [
+        {
+          ...holding,
+          symbol: "BTC",
+          exchange: "",
+          assetClass: "crypto",
+          quantity: "0.01",
+          price: "120000",
+        },
+      ],
+      cash: [],
+    });
+    await db.insert(schema.fxRate).values({
+      base: "SGD",
+      quote: "USD",
+      date: "2026-10-01",
+      rate: "0.8",
+      source: "test",
+    });
+    const [coin] = await db
+      .select({ id: schema.security.id })
+      .from(schema.security)
+      .where(eq(schema.security.symbol, "BTC"));
+    // A week apart from a year before the entry until today: complete, but in unknown currency.
+    const dates: string[] = [];
+    for (
+      let d = new Date("2025-10-01T00:00:00Z");
+      d.toISOString().slice(0, 10) <= todayIso();
+      d.setUTCDate(d.getUTCDate() + 7)
+    )
+      dates.push(d.toISOString().slice(0, 10));
+    dates.push(todayIso());
+    await db.insert(schema.priceHistory).values(
+      [...new Set(dates)].map((date) => ({
+        securityId: coin!.id,
+        date,
+        close: "80000",
+        source: "yahoo",
+      })),
+    );
+    const before = await alice.portfolio.netWorthHistory();
+    expect(before.points.some((p) => p.backfilled)).toBe(false);
+
+    const request = spyOn(quotes, "closes").mockResolvedValue({
+      currency: "USD",
+      source: "yahoo",
+      closes: [{ date: "2025-10-01", close: "80000" }],
+    });
+    try {
+      expect(
+        await backfillPriceHistory(db as unknown as Database, {
+          ownerId: "alice",
+        }),
+      ).toEqual({ checked: 1, stored: 1, failed: [] });
+      const [repaired] = await db
+        .select()
+        .from(schema.priceHistory)
+        .where(eq(schema.priceHistory.date, "2025-10-01"));
+      expect(repaired).toMatchObject({
+        close: "80000.00000000",
+        currency: "USD",
+      });
+      // US$800 of coin is S$1,000, now drawn from a year before the entry.
+      expect((await alice.portfolio.netWorthHistory()).points[0]).toMatchObject(
+        {
+          date: "2025-10-01",
+          total: "1000",
+          backfilled: true,
+        },
+      );
+    } finally {
+      request.mockRestore();
+    }
+  });
+
+  test("stored closes only count as history when they cover the range without long gaps", () => {
+    const from = "2025-10-01";
+    const until = "2026-01-31";
+    const weekly = (start: string, weeks: number) =>
+      Array.from({ length: weeks }, (_, i) =>
+        new Date(Date.parse(`${start}T00:00:00Z`) + i * 7 * 86_400_000)
+          .toISOString()
+          .slice(0, 10),
+      );
+    expect(coversRange(weekly("2025-10-01", 18), from, until)).toBe(true);
+    // A week-long market holiday is not missing data.
+    expect(
+      coversRange(
+        ["2025-10-01", "2025-10-08", "2025-10-19", ...weekly("2025-10-26", 15)],
+        from,
+        until,
+      ),
+    ).toBe(true);
+    // A close from long before, with nothing since, does not cover the range.
+    expect(coversRange(["2024-03-01", "2024-03-04"], from, until)).toBe(false);
+    expect(
+      coversRange(["2024-03-01", ...weekly("2025-12-01", 9)], from, until),
+    ).toBe(false);
+    // Months missing in the middle, or at the end.
+    expect(
+      coversRange(
+        [...weekly("2025-10-01", 4), ...weekly("2026-01-01", 5)],
+        from,
+        until,
+      ),
+    ).toBe(false);
+    expect(coversRange(weekly("2025-10-01", 10), from, until)).toBe(false);
+    expect(coversRange([], from, until)).toBe(false);
   });
 
   test("the move since the previous close is hidden when any quoted holding lacks one", async () => {

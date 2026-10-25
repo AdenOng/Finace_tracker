@@ -153,3 +153,54 @@ test("market prices more than ten times away from the statement are implausible"
     }),
   ).toBeNull();
 });
+
+test("parses daily closes in the exchange's time zone, skipping gaps, and caches failures", async () => {
+  const day = (date: string) => Date.parse(`${date}T01:30:00Z`) / 1000;
+  let requests = 0;
+  const client = new QuoteClient(
+    async (url) => {
+      requests++;
+      expect(url).toBe(
+        `https://query1.finance.yahoo.com/v8/finance/chart/VOD.L?period1=${Date.parse("2025-10-20T00:00:00Z") / 1000}&period2=${now / 1000}&interval=1d`,
+      );
+      return Response.json({
+        chart: {
+          result: [
+            {
+              meta: { currency: "GBp", gmtoffset: 28800 },
+              timestamp: [
+                day("2026-10-15"),
+                day("2026-10-16"),
+                day("2026-10-19"),
+              ],
+              indicators: { quote: [{ close: [120.6, null, 118] }] },
+            },
+          ],
+          error: null,
+        },
+      });
+    },
+    () => now,
+  );
+  expect(await client.closes("VOD.L", "2025-10-20")).toEqual({
+    currency: "GBP",
+    source: "yahoo",
+    closes: [
+      { date: "2026-10-15", close: "1.206" },
+      { date: "2026-10-19", close: "1.18" },
+    ],
+  });
+  await client.closes("VOD.L", "2025-10-20");
+  expect(requests).toBe(1);
+
+  const down = new QuoteClient(
+    async () => {
+      requests++;
+      return new Response(null, { status: 503 });
+    },
+    () => now,
+  );
+  expect(await down.closes("VOD.L", "2025-10-20")).toBeNull();
+  expect(await down.closes("VOD.L", "2025-10-20")).toBeNull();
+  expect(requests).toBe(2);
+});

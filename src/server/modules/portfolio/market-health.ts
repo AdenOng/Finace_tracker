@@ -7,6 +7,7 @@ import {
   desc,
   eq,
   exists,
+  gte,
   inArray,
   isNull,
   max,
@@ -15,11 +16,13 @@ import {
   sql,
 } from "drizzle-orm";
 
+import { todayIso } from "~/lib/dates";
 import type { Database } from "~/server/db";
 import {
   accountSnapshot,
   financialAccount,
   fxRate,
+  networthSnapshot,
   position,
   priceHistory,
   security,
@@ -29,6 +32,7 @@ import {
 } from "~/server/db/schema";
 import { cachedInstanceSettings } from "~/server/lib/instance-settings-cache";
 import { exchangeRates } from "./exchange-rates";
+import { backfillFrom, usableClose } from "./history";
 import { hasSnapshotEntries } from "./holdings";
 import { quotes, yahooSymbol } from "./quotes";
 
@@ -174,11 +178,16 @@ export async function refreshQuotes(
           securityId: l.id,
           date: quote.date,
           close: quote.price,
+          currency: quote.currency,
           source: quote.source,
         })
         .onConflictDoUpdate({
           target: [priceHistory.securityId, priceHistory.date],
-          set: { close: sql`excluded.close`, source: sql`excluded.source` },
+          set: {
+            close: sql`excluded.close`,
+            currency: sql`excluded.currency`,
+            source: sql`excluded.source`,
+          },
         });
       result.updated++;
     }
@@ -187,6 +196,147 @@ export async function refreshQuotes(
   await Promise.all(Array.from({ length: 4 }, worker));
   for (const list of [result.unsupported, result.failed, result.mismatched])
     list.sort();
+  return result;
+}
+
+const shiftDays = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
+/** Longer than any market holiday, such as a week-long Lunar New Year close. */
+const MAX_GAP_DAYS = 14;
+
+/** Whether `dates` (oldest first) cover [from, until] with no gap longer than a market holiday. */
+export function coversRange(dates: string[], from: string, until: string) {
+  const inRange = dates.filter((d) => d >= from && d <= until);
+  if (inRange.length === 0) return false;
+  let previous = from;
+  for (const date of [...inRange, until]) {
+    if (date > shiftDays(previous, MAX_GAP_DAYS)) return false;
+    previous = date;
+  }
+  return true;
+}
+
+/**
+ * Stores past daily closes for every security in someone's entries, from a year before their
+ * first entry until their first recorded day, so the net worth chart can follow the market
+ * before the app recorded it. Days already stored are kept; securities whose stored closes
+ * already cover that range are skipped.
+ */
+export async function backfillPriceHistory(
+  db: Database,
+  options: { ownerId?: string } = {},
+) {
+  const result = { checked: 0, stored: 0, failed: [] as string[] };
+  if (!cachedInstanceSettings().priceQuotes) return result;
+  const owned = options.ownerId
+    ? eq(accountSnapshot.ownerId, options.ownerId)
+    : undefined;
+  const today = todayIso();
+  const firsts = db
+    .select({
+      ownerId: accountSnapshot.ownerId,
+      first: min(accountSnapshot.asOf).as("first"),
+      // Recorded days need no estimate, so closes are needed until the first of them.
+      until:
+        sql<string>`coalesce((select min(${networthSnapshot.date}) from ${networthSnapshot} where ${networthSnapshot.ownerId} = ${accountSnapshot.ownerId}), ${today}::date)`.as(
+          "until",
+        ),
+    })
+    .from(accountSnapshot)
+    .where(and(owned, hasSnapshotEntries(db)))
+    .groupBy(accountSnapshot.ownerId)
+    .as("firsts");
+  const listings = await db
+    .select({
+      ...listingColumns,
+      first: min(firsts.first),
+      until: sql<string>`max(${firsts.until})::text`,
+    })
+    .from(position)
+    .innerJoin(accountSnapshot, eq(accountSnapshot.id, position.snapshotId))
+    .innerJoin(
+      financialAccount,
+      eq(financialAccount.id, accountSnapshot.accountId),
+    )
+    .innerJoin(firsts, eq(firsts.ownerId, accountSnapshot.ownerId))
+    .innerJoin(security, eq(security.id, position.securityId))
+    .where(and(owned, isNull(financialAccount.archivedAt)))
+    .groupBy(security.id);
+
+  const candidates = listings.flatMap((l) => {
+    const symbol = yahooSymbol(l);
+    return l.first && symbol
+      ? [{ ...l, symbol, from: backfillFrom(l.first) }]
+      : [];
+  });
+  const stored = new Map<string, string[]>();
+  if (candidates.length) {
+    // Only closes the chart can use count; unusable ones are what a fetch replaces.
+    const rows = await db
+      .select({ securityId: priceHistory.securityId, date: priceHistory.date })
+      .from(priceHistory)
+      .innerJoin(security, eq(security.id, priceHistory.securityId))
+      .where(
+        and(
+          inArray(
+            priceHistory.securityId,
+            candidates.map((c) => c.id),
+          ),
+          gte(priceHistory.date, candidates.map((c) => c.from).sort()[0]!),
+          usableClose(),
+        ),
+      )
+      .orderBy(asc(priceHistory.date));
+    for (const { securityId, date } of rows)
+      stored.set(securityId, [...(stored.get(securityId) ?? []), date]);
+  }
+  const queue = candidates.filter(
+    (c) => !coversRange(stored.get(c.id) ?? [], c.from, c.until),
+  );
+  const worker = async () => {
+    for (let l = queue.shift(); l; l = queue.shift()) {
+      result.checked++;
+      const history = await quotes.closes(l.symbol, l.from);
+      // As with live quotes, a share priced in another currency is a different listing.
+      if (
+        !history ||
+        (history.currency !== l.currency && l.assetClass !== "crypto")
+      ) {
+        result.failed.push(l.exchange ? `${l.symbol} ${l.exchange}` : l.symbol);
+        continue;
+      }
+      if (history.closes.length === 0) continue;
+      const inserted = await db
+        .insert(priceHistory)
+        .values(
+          history.closes.map((c) => ({
+            securityId: l.id,
+            date: c.date,
+            close: c.close,
+            currency: history.currency,
+            source: history.source,
+          })),
+        )
+        // Stored days are kept, except ones saved before their currency was: those get this
+        // close with its currency, so a coin's legacy USD close becomes usable.
+        .onConflictDoUpdate({
+          target: [priceHistory.securityId, priceHistory.date],
+          set: {
+            close: sql`excluded.close`,
+            currency: sql`excluded.currency`,
+            source: sql`excluded.source`,
+          },
+          setWhere: isNull(priceHistory.currency),
+        })
+        .returning({ date: priceHistory.date });
+      result.stored += inserted.length;
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  result.failed.sort();
   return result;
 }
 

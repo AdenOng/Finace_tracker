@@ -34,7 +34,7 @@ using the same database and encrypted provider credentials. The Compose project 
 | Extraction: PDF text layer, scanned-PDF rasterising, admin playground                                                                                                                                         | Done  |
 | Accounts: bank, card, brokerage, wallet, CPF and SRS accounts; archive instead of delete when in use                                                                                                          | Done  |
 | Portfolio: manual balance and holdings entries, net worth in the display currency                                                                                                                             | Done  |
-| Net-worth history: daily figures plus an estimate from earlier entries, chart on the overview                                                                                                                 | Done  |
+| Net-worth history: daily figures, an estimate at past market prices backfilled a year before the first entry, filterable by group                                                                             | Done  |
 | Spending: manual transactions, monthly summary by category, transfers excluded, search and CSV export                                                                                                         | Done  |
 | Reconciliation: statement-period review, exact balance checks, protected entries and reopening                                                                                                                | Done  |
 | Merchant rules: per-user text matching, automatic categorization and previewed application                                                                                                                    | Done  |
@@ -299,8 +299,13 @@ when a retention period is set on **Admin → Data → Storage**. Only files who
 finished are deleted; the transactions they produced stay.
 
 Every 6 hours each person's net worth is saved for the day (`networth_snapshot`; the day's last
-run wins) for the overview chart. Every 5 minutes, imports a restart interrupted are marked
-failed so their owner can read them again, and uploads that never started reading are started.
+run wins) for the overview chart. Before the first saved day, the chart is estimated from account
+entries valued at past daily closes (`price_history`), fetched daily and when the overview opens,
+back to a year before someone's first entry. Before an account's first entry it assumes the
+holdings in that entry were already held, and marks those days as backfilled, because purchase
+dates and cost prices are unknown. Price lookups follow the market data switch. Every 5 minutes,
+imports a restart interrupted are marked failed so their owner can read them again, and uploads
+that never started reading are started.
 With email set up, a daily run sends the review reminders described above.
 
 ## Architecture

@@ -1,4 +1,6 @@
 frontend/
+finance_tracker/
+.tmp/
 node_modules/
 .next/
 out/

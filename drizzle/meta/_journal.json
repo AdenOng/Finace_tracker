@@ -92,6 +92,13 @@
       "when": 1792685957372,
       "tag": "0012_auth_security",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792897710579,
+      "tag": "0013_price_history_currency",
+      "breakpoints": true
     }
   ]
 }

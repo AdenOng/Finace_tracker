@@ -24,7 +24,7 @@ export function PortfolioSettings({
         type="button"
         variant="ghost"
         size="sm"
-        className="min-h-11 min-w-11"
+        className={iconOnly ? "min-h-11 min-w-9 px-2.5" : "min-h-11 px-2.5"}
         aria-label={
           iconOnly
             ? "Investment display settings"

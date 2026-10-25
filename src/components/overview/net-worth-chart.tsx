@@ -3,6 +3,7 @@
 import Decimal from "decimal.js";
 import { useMemo, useState } from "react";
 
+import { FilterTabs } from "~/components/ui/tabs";
 import { cn } from "~/lib/cn";
 import { formatDate, formatMoney } from "~/lib/format";
 
@@ -12,7 +13,13 @@ export type NetWorthPoint = {
   partial: boolean;
   /** Worked out from account entries, before the app recorded daily figures. */
   estimated: boolean;
+  /** Before an account's first entry: assumes its first holdings were already held. */
+  backfilled: boolean;
 };
+
+type Kind = "recorded" | "estimated" | "backfilled";
+const kindOf = (p: NetWorthPoint): Kind =>
+  p.backfilled ? "backfilled" : p.estimated ? "estimated" : "recorded";
 
 const RANGES = [
   { key: "3m", label: "3M", months: 3 },
@@ -50,19 +57,34 @@ function niceTicks(min: number, max: number) {
   return [...new Set(Array.from({ length: count }, (_, i) => low + i * step))];
 }
 
+export type NetWorthSeries = {
+  key: string;
+  label: string;
+  /** At least two points. */
+  points: NetWorthPoint[];
+  /** Already the big figure above the chart, so the caption leaves its value out. */
+  headline?: boolean;
+};
+
+/** `series` usually starts with the whole net worth; account groups can be picked instead. */
 export function NetWorthChart({
-  points,
+  series,
   currency,
 }: {
-  points: NetWorthPoint[];
+  series: NetWorthSeries[];
   currency: string;
 }) {
+  const [selected, setSelected] = useState(series[0]!.key);
+  const current = series.find((s) => s.key === selected) ?? series[0]!;
+  const points = current.points;
   const last = points.at(-1)!;
   const span = time(last.date) - time(points[0]!.date);
   const ranges = RANGES.filter(
     (r) => r.months === null || span > r.months * 31 * DAY_MS,
   );
-  const [range, setRange] = useState<RangeKey>("all");
+  const [chosenRange, setRange] = useState<RangeKey>("all");
+  // A shorter series may not reach back as far as the range picked for another one.
+  const range = ranges.some((r) => r.key === chosenRange) ? chosenRange : "all";
   const [active, setActive] = useState<number | null>(null);
 
   const shown = useMemo(() => {
@@ -85,16 +107,16 @@ export function NetWorthChart({
   const y = (value: number) =>
     yMax === yMin ? 50 : (1 - (value - yMin) / (yMax - yMin)) * 100;
 
-  // One path per run of estimated or recorded points; each run starts where the previous ended.
-  const runs: { estimated: boolean; d: string }[] = [];
+  // One path per run of points of the same kind; each run starts where the previous ended.
+  const runs: { kind: Kind; d: string }[] = [];
   shown.forEach((p, i) => {
     const point = `${x(p).toFixed(3)},${y(values[i]!).toFixed(3)}`;
     const current = runs.at(-1);
-    if (current?.estimated === p.estimated) current.d += ` L${point}`;
+    if (current?.kind === kindOf(p)) current.d += ` L${point}`;
     else {
       const previous = shown[i - 1];
       runs.push({
-        estimated: p.estimated,
+        kind: kindOf(p),
         d: previous
           ? `M${x(previous).toFixed(3)},${y(values[i - 1]!).toFixed(3)} L${point}`
           : `M${point}`,
@@ -105,7 +127,17 @@ export function NetWorthChart({
   const first = shown[0]!;
   const change = new Decimal(last.total).minus(first.total);
   const focus = active === null ? null : shown[active];
-  const anyEstimated = shown.some((p) => p.estimated);
+  const anyEstimated = shown.some((p) => p.estimated && !p.backfilled);
+  const anyBackfilled = shown.some((p) => p.backfilled);
+  const isGroup = !current.headline;
+  // Backfilled stretches are shaded, matching the dotted runs of the line.
+  const bands: { from: number; to: number }[] = [];
+  shown.forEach((p, i) => {
+    if (!p.backfilled) return;
+    const band = bands.at(-1);
+    if (band && shown[i - 1]?.backfilled) band.to = x(p);
+    else bands.push({ from: x(p), to: x(p) });
+  });
   const firstRecorded = points.find((p) => !p.estimated);
 
   function nearest(clientX: number, rect: DOMRect) {
@@ -120,52 +152,83 @@ export function NetWorthChart({
 
   return (
     <figure className="mt-8">
-      <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <p className="text-sm">
-          <span className="eyebrow mr-2">Over time</span>
-          {!change.isZero() ? (
-            <span
-              className={cn(
-                "figures font-semibold",
-                change.isPositive() ? "text-gain" : "text-loss",
-              )}
-            >
-              <span className="sensitive">
-                {formatMoney(change.toFixed(2), currency, { signed: true })}
-              </span>
-            </span>
-          ) : (
-            <span className="text-ink-2">No change</span>
-          )}{" "}
-          <span className="text-ink-2">since {formatDate(first.date)}</span>
-        </p>
-        {ranges.length > 1 ? (
-          <div
-            className="flex gap-1"
-            role="group"
-            aria-label="Net worth chart range"
-          >
-            {ranges.map((r) => (
-              <button
-                key={r.key}
-                type="button"
-                aria-pressed={range === r.key}
-                onClick={() => {
-                  setRange(r.key);
-                  setActive(null);
-                }}
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-[12px] font-semibold transition-colors",
-                  range === r.key
-                    ? "bg-ink text-on-brand"
-                    : "text-ink-2 hover:bg-wash",
-                )}
-              >
-                {r.label}
-              </button>
-            ))}
+      <figcaption>
+        {series.length > 1 ? (
+          <div className="mb-4">
+            <FilterTabs
+              label="Net worth chart data"
+              // Four options do not fit across a phone; a 2×2 grid keeps every one in view.
+              className="max-sm:grid max-sm:w-full max-sm:grid-cols-2 max-sm:rounded-[1.25rem] max-sm:[&>button]:justify-center"
+              value={current.key}
+              onChange={(key) => {
+                setSelected(key);
+                setActive(null);
+              }}
+              options={series.map((s) => ({ value: s.key, label: s.label }))}
+            />
           </div>
         ) : null}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+          <p className="text-sm">
+            {isGroup ? (
+              <>
+                <span className="eyebrow mr-2">{current.label}</span>
+                <span className="figures mr-2 font-semibold">
+                  <span className="sensitive">
+                    {formatMoney(last.total, currency)}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <span className="eyebrow mr-2">Over time</span>
+            )}
+            {!change.isZero() ? (
+              <span
+                className={cn(
+                  "figures font-semibold",
+                  change.isPositive() ? "text-gain" : "text-loss",
+                )}
+              >
+                <span className="sensitive">
+                  {formatMoney(change.toFixed(2), currency, { signed: true })}
+                </span>
+                {first.backfilled ? (
+                  <span aria-label="backfilled">*</span>
+                ) : null}
+              </span>
+            ) : (
+              <span className="text-ink-2">No change</span>
+            )}{" "}
+            <span className="text-ink-2">since {formatDate(first.date)}</span>
+          </p>
+          {ranges.length > 1 ? (
+            <div
+              className="flex gap-1"
+              role="group"
+              aria-label="Net worth chart range"
+            >
+              {ranges.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  aria-pressed={range === r.key}
+                  onClick={() => {
+                    setRange(r.key);
+                    setActive(null);
+                  }}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-[12px] font-semibold transition-colors",
+                    range === r.key
+                      ? "bg-ink text-on-brand"
+                      : "text-ink-2 hover:bg-wash",
+                  )}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </figcaption>
 
       <div className="mt-4 flex gap-3">
@@ -185,7 +248,7 @@ export function NetWorthChart({
           className="relative h-40 min-w-0 flex-1 touch-pan-y outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-art-cobalt)]"
           tabIndex={0}
           role="group"
-          aria-label={`Net worth from ${formatDate(first.date)} to ${formatDate(last.date)}: ${formatMoney(first.total, currency)} to ${formatMoney(last.total, currency)}. Use the left and right arrow keys to read each date.`}
+          aria-label={`${current.label} from ${formatDate(first.date)} to ${formatDate(last.date)}: ${formatMoney(first.total, currency)} to ${formatMoney(last.total, currency)}. Use the left and right arrow keys to read each date.`}
           onPointerMove={(e) =>
             setActive(
               nearest(e.clientX, e.currentTarget.getBoundingClientRect()),
@@ -205,6 +268,23 @@ export function NetWorthChart({
             );
           }}
         >
+          {bands.map((band, i) => (
+            <div
+              key={i}
+              aria-hidden
+              className="bg-wash absolute inset-y-0"
+              style={{
+                left: `${band.from}%`,
+                width: `${band.to - band.from}%`,
+              }}
+            >
+              {band.to - band.from > 12 ? (
+                <span className="text-ink-3 absolute top-1 left-1.5 text-[10px] font-medium">
+                  Backfilled*
+                </span>
+              ) : null}
+            </div>
+          ))}
           {ticks.map((tick) => (
             <div
               key={tick}
@@ -228,7 +308,14 @@ export function NetWorthChart({
                 strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeDasharray={run.estimated ? "5 5" : undefined}
+                strokeDasharray={
+                  run.kind === "backfilled"
+                    ? "1 4"
+                    : run.kind === "estimated"
+                      ? "5 5"
+                      : undefined
+                }
+                strokeOpacity={run.kind === "backfilled" ? 0.6 : undefined}
                 vectorEffect="non-scaling-stroke"
               />
             ))}
@@ -259,7 +346,10 @@ export function NetWorthChart({
               )}
               style={{ left: `${x(focus)}%` }}
             >
-              <p className="text-ink-2">{formatDate(focus.date)}</p>
+              <p className="text-ink-2">
+                {isGroup ? `${current.label} · ` : ""}
+                {formatDate(focus.date)}
+              </p>
               <p className="figures mt-0.5 text-[14px] font-semibold">
                 <span className="sensitive">
                   {formatMoney(focus.total, currency)}
@@ -268,7 +358,9 @@ export function NetWorthChart({
               {focus.estimated || focus.partial ? (
                 <p className="text-ink-3 mt-0.5">
                   {[
-                    focus.estimated && "Estimated from your entries",
+                    focus.backfilled
+                      ? "Backfilled*"
+                      : focus.estimated && "Estimated from your entries",
                     focus.partial && "partial total",
                   ]
                     .filter(Boolean)
@@ -302,10 +394,35 @@ export function NetWorthChart({
               strokeDasharray="4 3"
             />
           </svg>
-          Estimated from your account entries at their recorded values
+          Estimated from your account entries and past market prices
           {firstRecorded
             ? `, until daily figures began on ${formatDate(firstRecorded.date)}.`
             : ". Daily figures are recorded from today."}
+        </p>
+      ) : null}
+      {anyBackfilled ? (
+        <p className="text-ink-3 mt-1.5 text-[12px]">
+          <svg
+            aria-hidden
+            className="mr-1.5 inline-block align-middle"
+            width="18"
+            height="4"
+          >
+            <line
+              x1="1"
+              y1="2"
+              x2="17"
+              y2="2"
+              stroke="var(--color-art-cobalt)"
+              strokeOpacity="0.6"
+              strokeWidth="2"
+              strokeDasharray="1 3"
+            />
+          </svg>
+          * Data is backfilled before each account&rsquo;s first entry. Unable
+          to determine the cost price or purchase date of items, so that
+          entry&rsquo;s holdings are valued at past market prices. Shows market
+          movement, not your actual gains.
         </p>
       ) : null}
 
@@ -318,7 +435,7 @@ export function NetWorthChart({
             <thead>
               <tr className="text-ink-3 text-left">
                 <th className="py-1 font-medium">Date</th>
-                <th className="py-1 text-right font-medium">Net worth</th>
+                <th className="py-1 text-right font-medium">{current.label}</th>
               </tr>
             </thead>
             <tbody className="figures tabular-nums">
@@ -327,7 +444,9 @@ export function NetWorthChart({
                   <td className="py-1">
                     {formatDate(p.date)}
                     {p.estimated ? (
-                      <span className="text-ink-3"> · estimated</span>
+                      <span className="text-ink-3">
+                        {p.backfilled ? " · backfilled*" : " · estimated"}
+                      </span>
                     ) : null}
                   </td>
                   <td className="py-1 text-right">

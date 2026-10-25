@@ -40,8 +40,10 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
     slices.filter((s) => s.assetClass === k),
   );
   const bySize = [...slices].sort((a, b) => b.share - a.share);
+  // Columns follow the card's width, not the screen's: a half-width card on a wide screen
+  // has no room for two columns of label, amount and share.
   return (
-    <div>
+    <div className="@container">
       <div
         role="img"
         aria-label={bySize
@@ -60,7 +62,7 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
           />
         ))}
       </div>
-      <ul className="mt-4 grid gap-x-8 sm:grid-cols-2">
+      <ul className="mt-4 grid gap-x-8 @lg:grid-cols-2">
         {bySize.map((s) => (
           <li
             key={s.assetClass}
@@ -70,7 +72,9 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
               className="border-ink/25 size-3 shrink-0 rounded-[3px] border"
               style={{ background: FILLS[s.assetClass] }}
             />
-            <span className="flex-1">{assetClassLabels[s.assetClass]}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {assetClassLabels[s.assetClass]}
+            </span>
             <span className="figures sensitive font-mono text-[12px]">
               {s.display}
             </span>

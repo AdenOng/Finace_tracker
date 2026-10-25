@@ -33,6 +33,8 @@ imports
 exports
 tests
 docs
+.tmp
+tmp
 
 # Match private files at any depth in the Docker build context.
 **/.env

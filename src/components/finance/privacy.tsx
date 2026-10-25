@@ -4,6 +4,7 @@ import { Eye, EyeOff } from "lucide-react";
 import {
   createContext,
   useContext,
+  useEffect,
   useRef,
   useState,
   type HTMLAttributes,
@@ -43,6 +44,12 @@ const CardContext = createContext<Card | null>(null);
 
 const usePrefs = () => useContext(PrefsContext);
 
+/** Hides again every amount shown by clicking its dots. */
+function concealRevealed() {
+  for (const amount of document.querySelectorAll("[data-revealed]"))
+    amount.removeAttribute("data-revealed");
+}
+
 export function AmountsProvider({
   initial,
   children,
@@ -65,12 +72,43 @@ export function AmountsProvider({
     );
   }
 
+  // Clicking a hidden amount's dots shows just that amount, until it is clicked again or any
+  // eye is used. Capturing first means dots inside a link reveal rather than navigate.
+  useEffect(() => {
+    function onClick(event: MouseEvent) {
+      if (!(event.target instanceof Element)) return;
+      let amount = event.target.closest<HTMLElement>(".sensitive");
+      // Nested amounts reveal together, from the outermost.
+      for (
+        let outer = amount?.parentElement?.closest<HTMLElement>(".sensitive");
+        outer;
+        outer = outer.parentElement?.closest<HTMLElement>(".sensitive")
+      )
+        amount = outer;
+      if (!amount) return;
+      if (getComputedStyle(amount).getPropertyValue("--masked").trim()) {
+        event.preventDefault();
+        event.stopPropagation();
+        amount.setAttribute("data-revealed", "");
+      } else if (
+        amount.hasAttribute("data-revealed") &&
+        !amount.closest("a, button, summary, label")
+      ) {
+        amount.removeAttribute("data-revealed");
+      }
+    }
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
+
   function setHidden(hidden: boolean) {
     // The main switch is the quick way to cover everything, so it resets every card.
+    concealRevealed();
     setPrefs({ hidden, scopes: {} });
     save(() => saveHidden.mutateAsync({ hide: hidden }), true);
   }
   function setCard(card: Card, hidden: boolean) {
+    concealRevealed();
     setPrefs((current) => {
       const scopes = { ...current.scopes };
       if (hidden === current.hidden) delete scopes[keyOf(card)];
@@ -143,7 +181,9 @@ export function AmountsToggle({
       type="button"
       variant="ghost"
       size="sm"
-      className={className ?? "min-h-11 min-w-11"}
+      // 44px tall to tap, but only 10px either side of the icon so it lines up with a card's
+      // edge (see `cardTools` in ~/components/ui/card-tools) and sits evenly next to other icons.
+      className={className ?? "min-h-11 min-w-9 px-2.5"}
       aria-label={label}
       aria-pressed={hidden}
       title={label}

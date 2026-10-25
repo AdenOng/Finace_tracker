@@ -3,9 +3,11 @@ import Decimal from "decimal.js";
 import { Check, Minus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { after } from "next/server";
 import { Suspense } from "react";
 
 import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
+import { cardTools } from "~/components/ui/card-tools";
 import { Allocation } from "~/components/overview/allocation";
 import { AccountRow } from "~/components/overview/account-row";
 import { HeroFigure } from "~/components/overview/hero-figure";
@@ -20,6 +22,7 @@ import { SheetHeader } from "~/components/overview/sheet-header";
 import { accountGroupOf } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { currentMonth, shiftMonth, todayIso } from "~/lib/dates";
+import { type GroupToday, netWorthSeries } from "~/lib/net-worth-series";
 import {
   formatDate,
   formatMoney,
@@ -29,6 +32,7 @@ import {
 import { isAdmin, requireEnrolledSession } from "~/server/auth";
 import { db } from "~/server/db";
 import { llmProvider } from "~/server/db/schema";
+import { backfillPriceHistory } from "~/server/modules/portfolio/market-health";
 import { api, HydrateClient } from "~/trpc/server";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -83,6 +87,12 @@ export default async function OverviewPage() {
   ]);
   void api.catalog.currencies.prefetch();
   void api.settings.get.prefetch();
+  // Past closes for new entries draw the chart from the next visit, without slowing this one.
+  after(() =>
+    backfillPriceHistory(db, { ownerId: session.user.id }).catch((error) =>
+      console.error("[net worth] could not backfill prices", error),
+    ),
+  );
 
   const admin = isAdmin(session.user);
   const hasDefaultProvider = admin
@@ -105,6 +115,7 @@ export default async function OverviewPage() {
             total: worth.total,
             partial: worth.unconverted.length > 0 || worth.unpriced > 0,
             estimated: false,
+            backfilled: false,
           },
         ]
       : []),
@@ -144,6 +155,30 @@ export default async function OverviewPage() {
       a.total && new Decimal(a.total).isNegative() ? a.total : null,
     ),
   ).abs();
+
+  const groupToday = (
+    accounts: typeof investing,
+    total: string | null,
+  ): GroupToday => ({
+    entered: accounts.some((a) => a.asOf),
+    total,
+    partial: accounts.some((a) => a.unconverted.length > 0 || a.unpriced > 0),
+  });
+  const chartSeries = netWorthSeries({
+    trend,
+    groups: history.groups,
+    today,
+    now: {
+      investments: groupToday(
+        investing,
+        worth.allocation.some((a) => a.total !== null)
+          ? investTotal.toFixed()
+          : null,
+      ),
+      banking: groupToday(banking, worth.banking.total),
+      cpf_srs: groupToday(forLater, worth.cpfSrs.total),
+    },
+  });
 
   // This month's spending in the display currency, rolled up to top-level categories.
   const parentOf = new Map(categories.map((c) => [c.id, c.parentId ?? c.id]));
@@ -206,7 +241,7 @@ export default async function OverviewPage() {
         <div className="p-5 sm:p-10">
           <div className="flex items-center justify-between gap-4">
             <p className="eyebrow">Net worth · {firstName}</p>
-            <div className="flex items-center gap-1">
+            <div className={cardTools}>
               <AmountsToggle />
               <Suspense
                 fallback={<div className="bg-wash rounded-ctl h-8 w-20" />}
@@ -319,8 +354,9 @@ export default async function OverviewPage() {
               </p>
             ) : null}
           </div>
-          {trend.length > 1 && history.currency === currency ? (
-            <NetWorthChart points={trend} currency={currency} />
+          {/* Without a convertible total, e.g. only CPF that is not counted, groups still show. */}
+          {chartSeries.length > 0 && history.currency === currency ? (
+            <NetWorthChart series={chartSeries} currency={currency} />
           ) : null}
         </div>
 

@@ -10,7 +10,7 @@ export function HideAmounts() {
     <>
       <Checkbox
         label="Hide amounts"
-        description="Balances, totals and transaction amounts show as dots on every page. Use the eye on a card to show or hide just that card; changing this setting resets every card."
+        description="Balances, totals and transaction amounts show as dots on every page. Click the dots to see one amount, or use the eye on a card to show or hide just that card; changing this setting resets every card."
         checked={hidden}
         onChange={(event) => setHidden(event.target.checked)}
       />

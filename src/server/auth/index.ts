@@ -7,9 +7,7 @@ import { cache } from "react";
 import { needsTwoFactorEnrollment } from "./enrollment";
 import { getSessionFor } from "./session-policy";
 
-export { auth, APP_NAME, type Session } from "./config";
 export { needsTwoFactorEnrollment } from "./enrollment";
-export { getSessionFor } from "./session-policy";
 
 /** Session for the current request (deduplicated per render). */
 export const getSession = cache(async () => getSessionFor(await headers()));

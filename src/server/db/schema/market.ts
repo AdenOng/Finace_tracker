@@ -36,6 +36,8 @@ export const priceHistory = pgTable(
       .references(() => security.id, { onDelete: "cascade" }),
     date: date("date").notNull(),
     close: price("close").notNull(),
+    /** Currency of `close`; coins are priced in USD whatever the holding's currency. */
+    currency: varchar("currency", { length: 3 }),
     source: text("source").notNull(),
   },
   (t) => [primaryKey({ columns: [t.securityId, t.date] })],
