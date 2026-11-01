@@ -8,6 +8,7 @@ import {
   extractionJob,
   financialAccount,
   stagedRow,
+  user,
 } from "~/server/db/schema";
 import { resolveAccessScope } from "~/server/lib/access";
 import {
@@ -21,9 +22,105 @@ import { importProviders } from "~/server/modules/llm/routing";
 import { stageExtraction } from "./stage";
 import { readUpload } from "./storage";
 
+/** Process-wide worker slots, shared across route bundles and development reloads. */
+export const IMPORT_CONCURRENCY = 2;
+export const MAX_OUTSTANDING_IMPORTS = 10;
+export const MAX_USER_UPLOAD_BYTES = 250 * 1024 * 1024;
+const globalQueue = globalThis as typeof globalThis & {
+  finfolioImportQueue?: {
+    running: number;
+    waiting: Array<() => void>;
+    pending: Map<string, Promise<void>>;
+  };
+};
+const queue = (globalQueue.finfolioImportQueue ??= {
+  running: 0,
+  waiting: [],
+  pending: new Map<string, Promise<void>>(),
+});
+
+/** Resolves when this queued attempt finishes, keeping Next's after() task alive. */
+export function runImportJob(jobId: string): Promise<void> {
+  const pending = queue.pending.get(jobId);
+  if (pending) return pending;
+  let waiting = false;
+  const attempt = (async () => {
+    await new Promise<void>((resolve) => {
+      const start = () => {
+        queue.running++;
+        queue.pending.delete(jobId);
+        resolve();
+      };
+      if (queue.running < IMPORT_CONCURRENCY) start();
+      else {
+        waiting = true;
+        queue.waiting.push(start);
+      }
+    });
+    try {
+      await executeImportJob(jobId);
+    } finally {
+      queue.running--;
+      queue.waiting.shift()?.();
+    }
+  })();
+  // Deduplicate only waiting entries; a stopped running attempt may legitimately be retried.
+  if (waiting) {
+    queue.pending.set(jobId, attempt);
+  }
+  return attempt;
+}
+
+export class ImportLimitError extends Error {}
+
+/** Retry admission shares the owner's upload lock and outstanding-job budget. */
+export async function requeueImportJob(
+  database: typeof db,
+  jobId: string,
+  expectedStatus: string,
+) {
+  return database.transaction(async (tx) => {
+    const [job] = await tx
+      .select()
+      .from(extractionJob)
+      .where(eq(extractionJob.id, jobId));
+    if (!job) return false;
+    await tx
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.id, job.ownerId))
+      .for("update");
+    if (expectedStatus === "failed") {
+      const outstanding = await tx.$count(
+        extractionJob,
+        and(
+          eq(extractionJob.ownerId, job.ownerId),
+          inArray(extractionJob.status, ["queued", "running"]),
+        ),
+      );
+      if (outstanding >= MAX_OUTSTANDING_IMPORTS) {
+        throw new ImportLimitError(
+          `You already have ${MAX_OUTSTANDING_IMPORTS} queued or running imports. Wait for an import to finish before retrying.`,
+        );
+      }
+    }
+    const [updated] = await tx
+      .update(extractionJob)
+      .set({ status: "queued", error: null })
+      .where(
+        and(
+          eq(extractionJob.id, jobId),
+          sql`${extractionJob.status} = ${expectedStatus}`,
+        ),
+      )
+      .returning({ id: extractionJob.id });
+    return !!updated;
+  });
+}
+
 /** A read still running after this long lost its worker (e.g. a restart) and may be retried. */
 export const STALE_AFTER_MS = 6 * 60_000;
-/** The upload request starts its read straight away; one still queued after this was lost. */
+/** Recovery re-enqueues persisted waiting jobs through the shared worker slots. */
 const ORPHANED_AFTER_MS = 60_000;
 
 /** Long enough for a multi-page scanned statement on a slow model. */
@@ -40,7 +137,10 @@ export const isStaleJob = (
   (job.status === "running" &&
     !!job.startedAt &&
     now - job.startedAt.getTime() > STALE_AFTER_MS) ||
-  (job.status === "queued" && now - job.updatedAt.getTime() > STALE_AFTER_MS);
+  (job.status === "queued" &&
+    queue.running === 0 &&
+    queue.waiting.length === 0 &&
+    now - job.updatedAt.getTime() > STALE_AFTER_MS);
 
 /** SQL twin of `isStaleJob`. */
 export function staleJobCondition(now = Date.now()) {
@@ -52,6 +152,7 @@ export function staleJobCondition(now = Date.now()) {
     ),
     and(
       eq(extractionJob.status, "queued"),
+      sql`${queue.running === 0 && queue.waiting.length === 0}`,
       lt(extractionJob.updatedAt, before),
     ),
   );
@@ -73,7 +174,7 @@ function describeFailure(error: unknown) {
  * Runs after the upload response is sent; the client polls the job. Claiming the job with a
  * conditional update means a retry and a late duplicate call can never both run it.
  */
-export async function runImportJob(jobId: string) {
+async function executeImportJob(jobId: string) {
   const [job] = await db
     .update(extractionJob)
     .set({
@@ -252,7 +353,7 @@ export async function recoverImportJobs(now = Date.now()) {
       ),
     )
     .orderBy(extractionJob.updatedAt);
-  // One at a time, like uploads arriving one by one; each claims its job, so none runs twice.
-  for (const { id } of orphaned) await runImportJob(id);
+  // Recovery uses the same bounded queue as uploads and retries.
+  await Promise.all(orphaned.map(({ id }) => runImportJob(id)));
   return { interrupted: interrupted.length, started: orphaned.length };
 }

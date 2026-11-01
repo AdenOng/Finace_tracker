@@ -25,7 +25,11 @@ import {
 } from "~/lib/import-balance-check";
 import { categoryKind } from "~/lib/transaction-classification";
 import { isoDateInput, moneyInput } from "~/server/api/inputs";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  expensiveProcedure,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import {
   accountSnapshot,
   auditLog,
@@ -55,7 +59,12 @@ import {
   type StagedPosition,
   type StagedTransaction,
 } from "~/server/modules/imports/rows";
-import { isStaleJob, runImportJob } from "~/server/modules/imports/runner";
+import {
+  ImportLimitError,
+  isStaleJob,
+  requeueImportJob,
+  runImportJob,
+} from "~/server/modules/imports/runner";
 import { removeUpload } from "~/server/modules/imports/storage";
 import {
   importLinePreview,
@@ -607,7 +616,7 @@ export const importsRouter = createTRPCRouter({
     ),
 
   /** Write every accepted row into the account. All of it is saved, or none of it. */
-  commit: protectedProcedure
+  commit: expensiveProcedure
     .input(
       z.object({
         jobId: z.uuid(),
@@ -1032,7 +1041,7 @@ export const importsRouter = createTRPCRouter({
     ),
 
   /** Read the file again, e.g. after a provider error or a restart mid-way. */
-  retry: protectedProcedure
+  retry: expensiveProcedure
     .input(z.object({ jobId: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       const [job] = await ctx.db
@@ -1057,16 +1066,12 @@ export const importsRouter = createTRPCRouter({
       });
       if (job.status !== "failed" && !isStaleJob(job)) throw conflict;
       // A stale read that finished in the meantime keeps its result.
-      const [requeued] = await ctx.db
-        .update(extractionJob)
-        .set({ status: "queued", error: null })
-        .where(
-          and(
-            eq(extractionJob.id, job.id),
-            eq(extractionJob.status, job.status),
-          ),
-        )
-        .returning({ id: extractionJob.id });
+      const requeued = await requeueImportJob(ctx.db, job.id, job.status).catch(
+        (error: unknown) => {
+          if (!(error instanceof ImportLimitError)) throw error;
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
+        },
+      );
       if (!requeued) throw conflict;
       after(() => runImportJob(job.id));
       return { ok: true };

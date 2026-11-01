@@ -19,7 +19,9 @@ import {
   reviewReminderEmail,
 } from "~/server/modules/imports/reminders";
 import {
+  ImportLimitError,
   isStaleJob,
+  requeueImportJob,
   runImportJob,
   staleJobCondition,
 } from "~/server/modules/imports/runner";
@@ -151,15 +153,20 @@ export const adminJobsRouter = createTRPCRouter({
           message: "Only a failed or stuck import can be read again",
         });
       }
-      await ctx.db
-        .update(extractionJob)
-        .set({ status: "queued", error: null })
-        .where(
-          and(
-            eq(extractionJob.id, job.id),
-            inArray(extractionJob.status, ["failed", "running", "queued"]),
-          ),
-        );
+      const requeued = await requeueImportJob(ctx.db, job.id, job.status).catch(
+        (error: unknown) => {
+          if (!(error instanceof ImportLimitError)) throw error;
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: error.message,
+          });
+        },
+      );
+      if (!requeued)
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "The import changed before it could be retried",
+        });
       await recordAudit(ctx.db, {
         actorId: ctx.session.user.id,
         action: "job.retried",

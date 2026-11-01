@@ -346,6 +346,24 @@ const brokenKey = await provider("broken-key", {
   assert.equal(await db.$count(schema.cashBalance), 0);
 }
 
+// Queue slots cap simultaneous extraction, and release the next read on completion.
+{
+  const held = gate("slow-queue");
+  const queuedProvider = await provider("slow-queue");
+  await setProviders(queuedProvider.id, null);
+  const jobs = await Promise.all([job(), job(), job()]);
+  const reads = jobs.map((item) => runImportJob(item.id));
+  await waitUntilStarted("slow-queue");
+  // Let both admitted workers reach their held provider request.
+  for (let i = 0; i < 100 && (await read(jobs[1].id)).status !== "running"; i++)
+    await Bun.sleep(10);
+  assert.equal((await read(jobs[2].id)).status, "queued");
+  held.release();
+  await Promise.all(reads);
+  for (const item of jobs)
+    assert.equal((await read(item.id)).status, "needs_review");
+}
+
 // An in-flight reservation blocks another request before any actual usage has arrived.
 {
   const { reserveTokenBudget, reconcileTokenBudget } =
@@ -393,6 +411,54 @@ const brokenKey = await provider("broken-key", {
   await runImportJob(failed.id);
   assert.equal((await read(failed.id)).status, "failed");
   assert.equal((await monthlyTokenUsage(db)).get(failedProvider.id), 82);
+}
+
+// Upload admission checks outstanding jobs before writing the file.
+{
+  const outstanding = await Promise.all(
+    Array.from({ length: 10 }, () => job()),
+  );
+  await mock.module("~/server/auth/session-policy", () => ({
+    getSessionFor: async () => ({ user: { id: "owner" } }),
+  }));
+  await mock.module("~/server/auth/enrollment", () => ({
+    needsTwoFactorEnrollment: () => false,
+  }));
+  await mock.module("next/server", () => ({
+    after: () => undefined,
+    NextResponse: {
+      json: (body: unknown, init: ResponseInit) => Response.json(body, init),
+    },
+  }));
+  const { POST } = await import("../../src/app/api/imports/route");
+  const form = new FormData();
+  form.set("accountId", account!.id);
+  form.set(
+    "file",
+    new File([new Uint8Array([137, 80, 78, 71])], "upload.png", {
+      type: "image/png",
+    }),
+  );
+  const response = await POST(
+    new Request("http://localhost/api/imports", { method: "POST", body: form }),
+  );
+  assert.equal(response.status, 429);
+  assert.match(await response.text(), /queued or running/);
+  // The same admission path also enforces storage before saving any bytes.
+  for (const item of outstanding)
+    await db
+      .update(schema.extractionJob)
+      .set({ status: "failed" })
+      .where(eq(schema.extractionJob.id, item.id));
+  await db
+    .update(schema.document)
+    .set({ sizeBytes: 250 * 1024 * 1024 })
+    .where(eq(schema.document.id, outstanding[0]!.documentId));
+  const overStorage = await POST(
+    new Request("http://localhost/api/imports", { method: "POST", body: form }),
+  );
+  assert.equal(overStorage.status, 413);
+  assert.match(await overStorage.text(), /250 MiB/);
 }
 
 // 5. Spent tokens still count after the import is deleted.

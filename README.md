@@ -50,6 +50,12 @@ The full database schema for the later phases already exists (`src/server/db/sch
 
 ## Importing statements
 
+Imports share a process-wide FIFO queue with two worker slots. Each user may have up to
+10 queued or running imports and 250 MiB of unpurged stored uploads; uploads exceeding
+these budgets return 429 or 413 respectively. Retries use the same queue and outstanding
+limit. The scheduled recovery task picks up persisted queued jobs after a restart.
+These limits are fixed constants; no additional environment variables are required.
+
 Before each import provider request, a database reservation counts estimated input tokens
 (text length plus attachment bytes, with a 4,096-token minimum per attachment) and 16,384
 response tokens against any enforced monthly token limit. Provider-row locks serialize

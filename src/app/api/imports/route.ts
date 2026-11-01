@@ -1,19 +1,32 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { after, NextResponse } from "next/server";
 
 import { env } from "~/env";
 import { needsTwoFactorEnrollment } from "~/server/auth/enrollment";
 import { getSessionFor } from "~/server/auth/session-policy";
 import { db } from "~/server/db";
-import { document, extractionJob, financialAccount } from "~/server/db/schema";
+import {
+  document,
+  extractionJob,
+  financialAccount,
+  user,
+} from "~/server/db/schema";
 import { writableBy, resolveAccessScope } from "~/server/lib/access";
 import {
   parseExtractionUpload,
   UploadValidationError,
 } from "~/server/modules/extraction/upload";
 import { holdsSecurities } from "~/lib/accounts";
-import { runImportJob } from "~/server/modules/imports/runner";
-import { saveUpload, sha256 } from "~/server/modules/imports/storage";
+import {
+  MAX_OUTSTANDING_IMPORTS,
+  MAX_USER_UPLOAD_BYTES,
+  runImportJob,
+} from "~/server/modules/imports/runner";
+import {
+  removeUpload,
+  saveUpload,
+  sha256,
+} from "~/server/modules/imports/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -57,48 +70,103 @@ export async function POST(request: Request) {
 
     const data = new Uint8Array(await file.arrayBuffer());
     const hash = sha256(data);
-    const [seen] = await db
-      .select({ id: extractionJob.id })
-      .from(document)
-      .innerJoin(extractionJob, eq(extractionJob.documentId, document.id))
-      .where(and(eq(document.ownerId, scope.userId), eq(document.sha256, hash)))
-      .limit(1);
-    if (seen) {
+    let storedKey: string | undefined;
+    const jobId = await db
+      .transaction(async (tx) => {
+        // Serialize uploads for this owner so simultaneous requests cannot pass the same limits.
+        await tx
+          .select({ id: user.id })
+          .from(user)
+          .where(eq(user.id, scope.userId))
+          .for("update");
+        const outstanding = await tx.$count(
+          extractionJob,
+          and(
+            eq(extractionJob.ownerId, scope.userId),
+            inArray(extractionJob.status, ["queued", "running"]),
+          ),
+        );
+        if (outstanding >= MAX_OUTSTANDING_IMPORTS) {
+          throw new UploadValidationError(
+            `You already have ${MAX_OUTSTANDING_IMPORTS} queued or running imports. Wait for an import to finish before uploading again.`,
+            429,
+          );
+        }
+        const [stored] = await tx
+          .select({
+            bytes: sql<number>`coalesce(sum(${document.sizeBytes}), 0)`.mapWith(
+              Number,
+            ),
+          })
+          .from(document)
+          .where(
+            and(
+              eq(document.ownerId, scope.userId),
+              isNull(document.filePurgedAt),
+            ),
+          );
+        if ((stored?.bytes ?? 0) + file.size > MAX_USER_UPLOAD_BYTES) {
+          throw new UploadValidationError(
+            "Your stored uploads exceed the 250 MiB budget. Delete older imports before uploading again.",
+            413,
+          );
+        }
+        const [seen] = await tx
+          .select({ id: extractionJob.id })
+          .from(document)
+          .innerJoin(extractionJob, eq(extractionJob.documentId, document.id))
+          .where(
+            and(eq(document.ownerId, scope.userId), eq(document.sha256, hash)),
+          )
+          .limit(1);
+        if (seen) return { duplicate: seen.id };
+        const storageKey = await saveUpload(
+          scope.userId,
+          hash,
+          file.type,
+          data,
+        );
+        storedKey = storageKey;
+        const [doc] = await tx
+          .insert(document)
+          .values({
+            ownerId: scope.userId,
+            accountId: account.id,
+            institutionId: account.institutionId,
+            fileName: file.name.slice(0, 255),
+            mimeType: file.type,
+            sizeBytes: file.size,
+            sha256: hash,
+            storageKey,
+            kind: file.type.startsWith("image/")
+              ? "screenshot"
+              : holdsSecurities(account.type)
+                ? "brokerage_statement"
+                : "bank_statement",
+          })
+          .returning({ id: document.id });
+        const [job] = await tx
+          .insert(extractionJob)
+          .values({ ownerId: scope.userId, documentId: doc!.id })
+          .returning({ id: extractionJob.id });
+        return { created: job!.id };
+      })
+      .catch(async (error: unknown) => {
+        if (storedKey) await removeUpload(storedKey);
+        throw error;
+      });
+    if (jobId.duplicate) {
       return NextResponse.json(
-        { error: "This file has already been uploaded.", jobId: seen.id },
+        {
+          error: "This file has already been uploaded.",
+          jobId: jobId.duplicate,
+        },
         { status: 409 },
       );
     }
 
-    const storageKey = await saveUpload(scope.userId, hash, file.type, data);
-    const jobId = await db.transaction(async (tx) => {
-      const [doc] = await tx
-        .insert(document)
-        .values({
-          ownerId: scope.userId,
-          accountId: account.id,
-          institutionId: account.institutionId,
-          fileName: file.name.slice(0, 255),
-          mimeType: file.type,
-          sizeBytes: file.size,
-          sha256: hash,
-          storageKey,
-          kind: file.type.startsWith("image/")
-            ? "screenshot"
-            : holdsSecurities(account.type)
-              ? "brokerage_statement"
-              : "bank_statement",
-        })
-        .returning({ id: document.id });
-      const [job] = await tx
-        .insert(extractionJob)
-        .values({ ownerId: scope.userId, documentId: doc!.id })
-        .returning({ id: extractionJob.id });
-      return job!.id;
-    });
-
-    after(() => runImportJob(jobId));
-    return NextResponse.json({ jobId }, { status: 202 });
+    after(() => runImportJob(jobId.created!));
+    return NextResponse.json({ jobId: jobId.created }, { status: 202 });
   } catch (error) {
     if (error instanceof UploadValidationError) {
       return NextResponse.json(
