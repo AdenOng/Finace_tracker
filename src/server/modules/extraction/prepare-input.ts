@@ -28,6 +28,16 @@ export class UnreadableDocumentError extends Error {}
 export class NeedsVisionError extends UnreadableDocumentError {}
 
 /**
+ * Resolved at runtime from the working directory. Built from parts so Turbopack's dev
+ * server does not try to resolve the worker as a module (it fails on a literal path).
+ */
+function workerPath() {
+  const parts = [process.cwd()];
+  parts.push("src", "server", "modules", "extraction", "pdf-worker.mjs");
+  return path.join(...parts);
+}
+
+/**
  * Most vision models accept images but not PDFs, so scanned PDF pages are rendered to PNG here
  * rather than passed through as files. Coverage is judged per page: a mixed PDF sends its text
  * pages as text and only its scanned pages as images.
@@ -51,17 +61,13 @@ export async function prepareDocumentInput(
   // the heap flags cap it; Bun ignores V8 flags, so tests rely on the deadline and pixel budget.
   // The raw ESM worker is traced into the standalone output.
   return new Promise<PreparedInput>((resolve, reject) => {
-    const child = fork(
-      path.join(process.cwd(), "src/server/modules/extraction/pdf-worker.mjs"),
-      [],
-      {
-        execPath: process.execPath,
-        execArgv: process.versions.bun
-          ? []
-          : ["--max-old-space-size=256", "--max-semi-space-size=16"],
-        stdio: ["ignore", "ignore", "ignore", "ipc"],
-      },
-    );
+    const child = fork(workerPath(), [], {
+      execPath: process.execPath,
+      execArgv: process.versions.bun
+        ? []
+        : ["--max-old-space-size=256", "--max-semi-space-size=16"],
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
     let settled = false;
     const finish = (error?: Error, result?: PreparedInput) => {
       if (settled) return;
