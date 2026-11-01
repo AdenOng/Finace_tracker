@@ -22,7 +22,11 @@ import { importProviders } from "~/server/modules/llm/routing";
 import { stageExtraction } from "./stage";
 import { readUpload } from "./storage";
 
-/** Process-wide worker slots, shared across route bundles and development reloads. */
+/**
+ * Process-wide worker slots, shared across route bundles and development reloads. Assumes one
+ * app process per database (docker-compose runs one): which queued jobs are waiting, as opposed
+ * to stuck, is known only to this process. Several replicas would need persisted leases.
+ */
 export const IMPORT_CONCURRENCY = 2;
 export const MAX_OUTSTANDING_IMPORTS = 10;
 export const MAX_USER_UPLOAD_BYTES = 250 * 1024 * 1024;
@@ -129,17 +133,19 @@ const EXTRACTION_TIMEOUT_MS = 280_000;
 const PRIMARY_WITH_FALLBACK_TIMEOUT_MS = 180_000;
 const FALLBACK_TIMEOUT_MS = 160_000;
 
-/** Queued (or retried) and never started, or started and never finished, within the window. */
+/**
+ * Queued (or retried) and never started, or started and never finished, within the window.
+ * A job still waiting for a worker slot in this process is not stale, however long it waits.
+ */
 export const isStaleJob = (
-  job: { status: string; startedAt: Date | null; updatedAt: Date },
+  job: { id: string; status: string; startedAt: Date | null; updatedAt: Date },
   now = Date.now(),
 ) =>
   (job.status === "running" &&
     !!job.startedAt &&
     now - job.startedAt.getTime() > STALE_AFTER_MS) ||
   (job.status === "queued" &&
-    queue.running === 0 &&
-    queue.waiting.length === 0 &&
+    !queue.pending.has(job.id) &&
     now - job.updatedAt.getTime() > STALE_AFTER_MS);
 
 /** SQL twin of `isStaleJob`. */
@@ -152,7 +158,10 @@ export function staleJobCondition(now = Date.now()) {
     ),
     and(
       eq(extractionJob.status, "queued"),
-      sql`${queue.running === 0 && queue.waiting.length === 0}`,
+      // One text parameter (UUIDs never contain commas), however many jobs are waiting.
+      queue.pending.size
+        ? sql`${extractionJob.id} <> all(string_to_array(${[...queue.pending.keys()].join(",")}, ',')::uuid[])`
+        : undefined,
       lt(extractionJob.updatedAt, before),
     ),
   );

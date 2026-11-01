@@ -121,7 +121,7 @@ await mock.module("~/server/modules/imports/storage", () => ({
   sha256: () => "unused",
 }));
 
-const { isStaleJob, recoverImportJobs, runImportJob } =
+const { isStaleJob, recoverImportJobs, runImportJob, staleJobCondition } =
   await import("../../src/server/modules/imports/runner");
 const { monthlyTokenUsage } =
   await import("../../src/server/modules/llm/routing");
@@ -361,7 +361,29 @@ const brokenKey = await provider("broken-key", {
   // Let both admitted workers reach their held provider request.
   for (let i = 0; i < 100 && (await read(jobs[1].id)).status !== "running"; i++)
     await Bun.sleep(10);
-  assert.equal((await read(jobs[2].id)).status, "queued");
+  const waiting = await read(jobs[2].id);
+  assert.equal(waiting.status, "queued");
+  // Waiting for a slot is not "stuck", however long the queue takes, but a queued
+  // job this process is not holding is, even while other reads are running.
+  const longAgo = new Date(Date.now() - 7 * 60_000);
+  assert.equal(isStaleJob({ ...waiting, updatedAt: longAgo }), false);
+  assert.equal(
+    isStaleJob({ ...waiting, id: crypto.randomUUID(), updatedAt: longAgo }),
+    true,
+  );
+  // The SQL twin agrees: seven minutes on, a queued job no worker holds is stuck, a waiting one not.
+  const orphan = await job();
+  const stuck = await db
+    .select({ id: schema.extractionJob.id })
+    .from(schema.extractionJob)
+    .where(staleJobCondition(Date.now() + 7 * 60_000));
+  const stuckIds = new Set(stuck.map((row) => row.id));
+  assert.equal(stuckIds.has(orphan.id), true);
+  assert.equal(stuckIds.has(jobs[2].id), false);
+  await db
+    .update(schema.extractionJob)
+    .set({ status: "failed" })
+    .where(eq(schema.extractionJob.id, orphan.id));
   held.release();
   await Promise.all(reads);
   for (const item of jobs)
