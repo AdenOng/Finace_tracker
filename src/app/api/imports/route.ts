@@ -153,7 +153,8 @@ export async function POST(request: Request) {
         return { created: job!.id };
       })
       .catch(async (error: unknown) => {
-        if (storedKey) await removeUpload(storedKey);
+        // Keep the original error even if the cleanup itself fails.
+        if (storedKey) await removeUpload(storedKey).catch(() => undefined);
         throw error;
       });
     if (jobId.duplicate) {

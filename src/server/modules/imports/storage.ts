@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -25,16 +25,26 @@ function resolve(storageKey: string) {
   return full;
 }
 
+/**
+ * Each attempt gets its own file, so cleaning up a failed attempt can never delete another
+ * request's upload of the same bytes. The hash is kept only for duplicate detection.
+ */
 export async function saveUpload(
   ownerId: string,
   hash: string,
   mimeType: string,
   data: Uint8Array,
 ) {
-  const storageKey = `${ownerId}/${hash}.${EXTENSIONS[mimeType] ?? "bin"}`;
+  const storageKey = `${ownerId}/${hash}-${randomUUID()}.${EXTENSIONS[mimeType] ?? "bin"}`;
   const full = resolve(storageKey);
   await mkdir(path.dirname(full), { recursive: true, mode: 0o700 });
-  await writeFile(full, data, { mode: 0o600 });
+  try {
+    await writeFile(full, data, { mode: 0o600 });
+  } catch (error) {
+    // Drop a partial file; the write error is the one worth reporting.
+    await rm(full, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return storageKey;
 }
 
