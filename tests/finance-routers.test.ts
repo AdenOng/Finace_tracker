@@ -4675,6 +4675,105 @@ describe("recurring cash flow and card bills", () => {
     });
     expect(view.forecasts[0]?.projected).toBe("900");
   });
+  test("old ledger movements count from each snapshot while recurring suggestions stay in their inclusive window", async () => {
+    const first = await alice.accounts.create(bank);
+    const second = await alice.accounts.create({ ...bank, name: "Second" });
+    for (const [account, offset] of [
+      [first, -200],
+      [second, -100],
+    ] as const) {
+      await alice.portfolio.recordSnapshot({
+        accountId: account.id,
+        asOf: addDays(today, offset),
+        positions: [],
+        cash: [{ currency: "SGD", amount: "1000" }],
+      });
+      // Outside the match window: included only after this account's snapshot.
+      await spendingEntry(account.id, {
+        amount: "-100",
+        postedDate: addDays(today, -150),
+      });
+      // Snapshot day is already reflected in the opening balance.
+      await spendingEntry(account.id, {
+        amount: "-100",
+        postedDate: addDays(today, offset),
+      });
+      await spendingEntry(account.id, {
+        amount: "-100",
+        postedDate: addDays(today, 1),
+      });
+    }
+    const dueDate = addDays(today, -90);
+    await alice.planning.createSchedule({
+      ...scheduleValues(first.id),
+      startDate: dueDate,
+      endDate: dueDate,
+    });
+    const outside = await spendingEntry(first.id, {
+      amount: "-100",
+      postedDate: addDays(dueDate, -8),
+    });
+    const margin = await spendingEntry(first.id, {
+      amount: "-100.0000",
+      postedDate: addDays(dueDate, -7),
+    });
+    const view = await alice.planning.overview();
+    expect(view.occurrences[0]?.suggestions.map((t) => t.id)).toEqual([
+      margin.id,
+    ]);
+    expect(
+      view.occurrences[0]?.suggestions.some((t) => t.id === outside.id),
+    ).toBe(false);
+    expect(view.forecasts.find((f) => f.accountId === first.id)).toMatchObject({
+      balance: "700",
+      projected: "600",
+    });
+    expect(view.forecasts.find((f) => f.accountId === second.id)).toMatchObject(
+      { balance: "1000", projected: "1000" },
+    );
+  });
+  test("suggestions exclude matched rows and stay capped", async () => {
+    const source = await alice.accounts.create(bank);
+    const dueDate = addDays(today, -7);
+    const reserved = await spendingEntry(source.id, {
+      amount: "-100",
+      postedDate: today,
+    });
+    const matched = await alice.planning.createSchedule({
+      ...scheduleValues(source.id),
+      startDate: dueDate,
+      endDate: dueDate,
+    });
+    await alice.planning.decideOccurrence({
+      scheduleId: matched.id,
+      dueDate,
+      action: "match",
+      transactionId: reserved.id,
+    });
+    const pending = await alice.planning.createSchedule({
+      ...scheduleValues(source.id),
+      startDate: dueDate,
+      endDate: dueDate,
+    });
+    for (let i = 0; i < 12; i++) {
+      await spendingEntry(source.id, {
+        amount: "-100.0000",
+        postedDate: addDays(today, -i),
+      });
+    }
+    await spendingEntry(source.id, {
+      amount: "-100",
+      postedDate: dueDate,
+      isTransfer: true,
+    });
+    const view = await alice.planning.overview();
+    const suggestions = view.occurrences
+      .find((o) => o.scheduleId === pending.id)
+      ?.suggestions.map((row) => row.id);
+    // Capped at 10; the matched and transfer rows are never offered.
+    expect(suggestions).toHaveLength(10);
+    expect(suggestions).not.toContain(reserved.id);
+  });
   test("skips can be cleared and plans paused without modifying recorded spending", async () => {
     const source = await alice.accounts.create(bank);
     const schedule = await alice.planning.createSchedule({

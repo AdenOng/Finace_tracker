@@ -1,5 +1,5 @@
 import DecimalJs from "decimal.js";
-import { and, eq, gt, lt, lte } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import {
@@ -25,6 +25,29 @@ import { writableBy, type AccessScope } from "~/server/lib/access";
 import { latestHoldings } from "~/server/modules/portfolio/holdings";
 
 const Decimal = DecimalJs.clone({ precision: 40 });
+const transactionFields = {
+  id: transaction.id,
+  accountId: transaction.accountId,
+  postedDate: transaction.postedDate,
+  amount: transaction.amount,
+  currency: transaction.currency,
+  description: transaction.description,
+  isTransfer: transaction.isTransfer,
+};
+
+function candidateKey(
+  accountId: string,
+  currency: string,
+  amount: string,
+  date: string,
+) {
+  return JSON.stringify([
+    accountId,
+    currency,
+    new Decimal(amount).toFixed(),
+    date,
+  ]);
+}
 
 export async function loadPlanning(
   db: Database,
@@ -69,19 +92,13 @@ export async function loadPlanning(
         .where(writableBy(scope, cardStatement.ownerId))
         .orderBy(cardStatement.statementDate, cardStatement.id),
       db
-        .select({
-          id: transaction.id,
-          accountId: transaction.accountId,
-          postedDate: transaction.postedDate,
-          amount: transaction.amount,
-          currency: transaction.currency,
-          description: transaction.description,
-          isTransfer: transaction.isTransfer,
-        })
+        .select(transactionFields)
         .from(transaction)
         .where(
           and(
             writableBy(scope, transaction.ownerId),
+            gte(transaction.postedDate, addDays(from, -7)),
+            lte(transaction.postedDate, addDays(through, 7)),
             lte(transaction.postedDate, today),
           ),
         ),
@@ -115,15 +132,89 @@ export async function loadPlanning(
       ),
     );
 
+  const cashAccounts = accounts.filter(
+    (a) => !a.archivedAt && isCashFlowAccount(a.type),
+  );
+  const referencedIds = [
+    ...new Set(
+      decisions.flatMap((d) => (d.transactionId ? [d.transactionId] : [])),
+    ),
+  ];
+  const [holdings, referencedTransactions] = await Promise.all([
+    latestHoldings(
+      db,
+      scope,
+      cashAccounts.map((a) => a.id),
+    ),
+    referencedIds.length
+      ? db
+          .select(transactionFields)
+          .from(transaction)
+          .where(
+            and(
+              writableBy(scope, transaction.ownerId),
+              inArray(transaction.id, referencedIds),
+              lte(transaction.postedDate, today),
+            ),
+          )
+      : Promise.resolve([]),
+  ]);
+  // Each account has its own snapshot boundary; older movements still count even
+  // when they are outside the recurring-match window. SUM stays NUMERIC in SQL.
+  const snapshotBounds = [...holdings].map(([accountId, snapshot]) =>
+    and(
+      eq(transaction.accountId, accountId),
+      gt(transaction.postedDate, snapshot.asOf),
+    ),
+  );
+  const movements = snapshotBounds.length
+    ? await db
+        .select({
+          accountId: transaction.accountId,
+          currency: transaction.currency,
+          amount: sql<string>`sum(${transaction.amount})::text`,
+        })
+        .from(transaction)
+        .where(
+          and(
+            writableBy(scope, transaction.ownerId),
+            lte(transaction.postedDate, today),
+            or(...snapshotBounds),
+          ),
+        )
+        .groupBy(transaction.accountId, transaction.currency)
+    : [];
+  const movementOf = new Map(
+    movements.map((m) => [JSON.stringify([m.accountId, m.currency]), m.amount]),
+  );
+  const candidates = new Map<
+    string,
+    { row: (typeof transactions)[number]; index: number }[]
+  >();
+  transactions.forEach((row, index) => {
+    if (row.isTransfer) return;
+    const key = candidateKey(
+      row.accountId,
+      row.currency,
+      row.amount,
+      row.postedDate,
+    );
+    const bucket = candidates.get(key) ?? [];
+    bucket.push({ row, index });
+    candidates.set(key, bucket);
+  });
   const accountOf = new Map(accounts.map((a) => [a.id, a]));
-  const transactionOf = new Map(transactions.map((t) => [t.id, t]));
+  const scheduleOf = new Map(schedules.map((s) => [s.id, s]));
+  const transactionOf = new Map(
+    [...transactions, ...referencedTransactions].map((t) => [t.id, t]),
+  );
   const decisionOf = new Map(
     decisions.map((d) => [`${d.scheduleId}:${d.dueDate}`, d]),
   );
   // An edited ledger row that no longer fits restores the expected payment instead of hiding it.
   const used = new Set(
     decisions.flatMap((d) => {
-      const schedule = schedules.find((s) => s.id === d.scheduleId);
+      const schedule = scheduleOf.get(d.scheduleId);
       const row = d.transactionId ? transactionOf.get(d.transactionId) : null;
       return schedule && row && matchesOccurrence(schedule, d.dueDate, row)
         ? [row.id]
@@ -159,13 +250,24 @@ export async function loadPlanning(
           suggestions:
             matched || skipped
               ? []
-              : transactions
-                  .filter(
-                    (t) =>
-                      !used.has(t.id) &&
-                      matchesOccurrence(schedule, dueDate, t),
-                  )
-                  .slice(0, 10),
+              : Array.from(
+                  { length: 15 },
+                  (_, offset) =>
+                    candidates.get(
+                      candidateKey(
+                        schedule.accountId,
+                        schedule.currency,
+                        schedule.amount,
+                        addDays(dueDate, offset - 7),
+                      ),
+                    ) ?? [],
+                )
+                  .flat()
+                  .filter(({ row }) => !used.has(row.id))
+                  // Keep the ledger query's order across date buckets.
+                  .sort((a, b) => a.index - b.index)
+                  .slice(0, 10)
+                  .map(({ row }) => row),
         };
       }),
     )
@@ -180,14 +282,6 @@ export async function loadPlanning(
     ...statementPaymentStatus(bill, payments, today),
   }));
   const latestBill = new Map(bills.map((bill) => [bill.cardAccountId, bill]));
-  const cashAccounts = accounts.filter(
-    (a) => !a.archivedAt && isCashFlowAccount(a.type),
-  );
-  const holdings = await latestHoldings(
-    db,
-    scope,
-    cashAccounts.map((a) => a.id),
-  );
   const forecasts = cashAccounts.map((account) => {
     const snapshot = holdings.get(account.id);
     const recorded =
@@ -195,17 +289,11 @@ export async function loadPlanning(
     const opening = recorded.length
       ? recorded.reduce((sum, row) => sum.plus(row.amount), new Decimal(0))
       : null;
-    const posted = snapshot
-      ? transactions.filter(
-          (t) =>
-            t.accountId === account.id &&
-            t.currency === account.currency &&
-            t.postedDate > snapshot.asOf,
-        )
-      : [];
     const balance =
       opening
-        ?.plus(posted.reduce((sum, t) => sum.plus(t.amount), new Decimal(0)))
+        ?.plus(
+          movementOf.get(JSON.stringify([account.id, account.currency])) ?? "0",
+        )
         .toFixed() ?? null;
     const events = [
       ...occurrences
