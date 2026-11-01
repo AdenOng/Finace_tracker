@@ -1,12 +1,12 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import type { ReactNode } from "react";
 
 import type { Locale } from "./config";
-
-const EnglishProvider = dynamic(() => import("./providers/admin-en"));
-const ChineseProvider = dynamic(() => import("./providers/admin-zh"));
+// Static on purpose: a next/dynamic provider broke hydration of useId-based IDs at the root,
+// and admin pages render useId consumers (drawers) beneath this one. Only /admin loads these.
+import EnglishProvider from "./providers/admin-en";
+import ChineseProvider from "./providers/admin-zh";
 
 export function AdminLocaleProvider({
   locale,
