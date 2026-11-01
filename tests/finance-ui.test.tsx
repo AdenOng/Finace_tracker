@@ -1703,6 +1703,7 @@ test("transfer review renders three suggested pairs once, two unpaired sides and
     excluded: [
       { ...outgoing, id: "excluded", accountName: "External account payment" },
     ],
+    suggestionsLimited: false,
     moreLinks: false,
     moreExcluded: false,
   };
@@ -1712,6 +1713,17 @@ test("transfer review renders three suggested pairs once, two unpaired sides and
       review,
     ),
   );
+  expect(html).not.toContain("Too many unmatched transfers");
+  // Over the matching budget: an explanation, not "No suggested matches".
+  const limited = render(<TransferReview />, (client) =>
+    client.setQueryData(getQueryKey(api.transfers.list, undefined, "query"), {
+      ...review,
+      suggestions: [],
+      suggestionsLimited: true,
+    }),
+  );
+  expect(limited).toContain("Too many unmatched transfers");
+  expect(limited).not.toContain("No suggested matches.");
   expect(html).toContain("Suggested matches (3 pairs)");
   expect(html).toContain("Without a match (2)");
   expect(html).toContain("Linked transfers (1)");

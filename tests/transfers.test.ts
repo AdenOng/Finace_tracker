@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  boundedTransferSuggestions,
   candidateMatch,
   suggestTransfers,
   type TransferSide,
@@ -29,6 +30,20 @@ const incoming: TransferSide = {
 };
 
 describe("transfer suggestions", () => {
+  test("pairs every one of many identical transfers, and over budget suggests none rather than a partial set", () => {
+    const sides = Array.from({ length: 6 }, (_, i) => [
+      { ...out, id: `out-${i}` },
+      { ...incoming, id: `in-${i}` },
+    ]).flat();
+    const full = boundedTransferSuggestions(sides);
+    expect(full.limited).toBe(false);
+    expect(full.suggestions).toHaveLength(6);
+    expect(full.suggestions).toEqual(suggestTransfers(sides));
+    expect(boundedTransferSuggestions(sides, new Map(), 10)).toEqual({
+      suggestions: [],
+      limited: true,
+    });
+  });
   test("allows different posting dates at both boundaries and requires opposite directions and accounts", () => {
     expect(candidateMatch(out, { ...incoming, date: "2026-10-02" })?.days).toBe(
       -1,

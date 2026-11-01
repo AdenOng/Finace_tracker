@@ -213,6 +213,8 @@ const spending = {
     transfers: "Transfers",
     matchExistingEntriesAcrossYourAccountsFees:
       "Match existing entries across your accounts. Fees here are notes on the link; no transactions are created.",
+    tooManyToSuggest:
+      "Too many unmatched transfers to suggest pairs automatically. Pair them below with “Choose another / fee”, or mark entries “No counterpart in Finfolio” to narrow them down.",
     noSuggestedMatches: "No suggested matches.",
     from: "From",
     to: "to",

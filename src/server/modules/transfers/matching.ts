@@ -68,11 +68,33 @@ export function candidateMatch(
   };
 }
 
+/** Above these, a request stops matching rather than grow unboundedly with adversarial data. */
+export const MAX_MATCH_SIDES = 10_000;
+export const MAX_MATCH_WORK = 100_000;
+
 /** Best amount fit wins globally before date distance, with stable IDs breaking ties. */
 export function suggestTransfers(
   sides: TransferSide[],
   rates: ReadonlyMap<string, string> = new Map(),
 ) {
+  return boundedTransferSuggestions(sides, rates, Infinity).suggestions;
+}
+
+/**
+ * `suggestTransfers` with a budget on pairs examined. Over budget there are no suggestions at
+ * all (`limited`), never a partial set: greedy one-to-one assignment over a subset of pairs
+ * would quietly differ from the full result.
+ */
+export function boundedTransferSuggestions(
+  sides: TransferSide[],
+  rates: ReadonlyMap<string, string> = new Map(),
+  maxWork = MAX_MATCH_WORK,
+): { suggestions: TransferSuggestion[]; limited: boolean } {
+  const limited = { suggestions: [], limited: true };
+  if (Number.isFinite(maxWork) && sides.length > MAX_MATCH_SIDES)
+    return limited;
+  let work = 0;
+  const charge = () => ++work > maxWork;
   const candidates: TransferSuggestion[] = [];
   // Partition once by currency and account so ineligible accounts never enter
   // the date search. Parse dates once, then binary-search each eligible bucket.
@@ -101,11 +123,13 @@ export function suggestTransfers(
     const from = date + MIN_MATCH_DAYS * DAY_MS;
     const through = date + MAX_MATCH_DAYS * DAY_MS;
     for (const [currency, accounts] of incomingByCurrency) {
+      if (charge()) return limited;
       const rate = rates.get(`${outgoing.currency}:${currency}`);
       if (currency !== outgoing.currency && (!rate || !new Decimal(rate).gt(0)))
         continue;
       for (const [accountId, bucket] of accounts) {
         if (accountId === outgoing.accountId) continue;
+        if (charge()) return limited;
         let low = 0;
         let high = bucket.length;
         while (low < high) {
@@ -116,6 +140,7 @@ export function suggestTransfers(
         for (let i = low; i < bucket.length; i++) {
           const incoming = bucket[i]!;
           if (incoming.date > through) break;
+          if (charge()) return limited;
           const match = candidateMatch(outgoing, incoming.side, rate);
           if (match) candidates.push(match);
         }
@@ -130,10 +155,11 @@ export function suggestTransfers(
       sideKey(a.incoming).localeCompare(sideKey(b.incoming)),
   );
   const used = new Set<string>();
-  return candidates.filter((match) => {
+  const suggestions = candidates.filter((match) => {
     const keys = [sideKey(match.outgoing), sideKey(match.incoming)];
     if (keys.some((key) => used.has(key))) return false;
     keys.forEach((key) => used.add(key));
     return true;
   });
+  return { suggestions, limited: false };
 }

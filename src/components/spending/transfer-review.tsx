@@ -199,7 +199,11 @@ export function TransferReview() {
             data.fxAsOf ? formatDate(data.fxAsOf, locale) : null,
           )}
         </p>
-        {suggestions.length === 0 ? (
+        {data.suggestionsLimited ? (
+          <Notice tone="info">
+            {t.spending.transferReview.tooManyToSuggest}
+          </Notice>
+        ) : suggestions.length === 0 ? (
           <p className="text-ink-3 mb-6">
             {t.spending.transferReview.noSuggestedMatches}
           </p>

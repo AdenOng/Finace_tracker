@@ -205,6 +205,8 @@ const spending: Translation<typeof en> = {
     transfers: "转账",
     matchExistingEntriesAcrossYourAccountsFees:
       "为不同账户中已有的记录配对。此处的手续费仅作为配对备注，不会创建交易。",
+    tooManyToSuggest:
+      "未配对的转账过多，无法自动建议配对。请在下方使用“另选记录／手续费”手动配对，或标记“Finfolio 中无另一方记录”以缩小范围。",
     noSuggestedMatches: "暂无建议配对。",
     from: "转出方",
     to: "转入",

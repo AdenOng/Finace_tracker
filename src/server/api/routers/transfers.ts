@@ -20,7 +20,7 @@ import { lockAccounts } from "~/server/modules/spending/guards";
 import {
   candidateMatch,
   sideKey,
-  suggestTransfers,
+  boundedTransferSuggestions,
 } from "~/server/modules/transfers/matching";
 import {
   loadTransferHistory,
@@ -65,9 +65,15 @@ export const transfersRouter = createTRPCRouter({
         rates.set(`${source}:${target}`, rate);
       if (result.asOf) dates.push(result.asOf);
     }
+    const { suggestions, limited } = boundedTransferSuggestions(
+      unmatched,
+      rates,
+    );
     return {
       unmatched,
-      suggestions: suggestTransfers(unmatched, rates),
+      suggestions,
+      // Too many unmatched entries to pair automatically; manual pairing still works.
+      suggestionsLimited: limited,
       fxAsOf: dates.sort().at(0) ?? null,
       links: history.links,
       excluded: history.excluded,
