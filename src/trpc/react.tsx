@@ -8,6 +8,7 @@ import { useState } from "react";
 import SuperJSON from "superjson";
 
 import { type AppRouter } from "~/server/api/root";
+import { MAX_TRPC_BATCH_SIZE } from "~/server/lib/request-limits";
 import { createQueryClient } from "./query-client";
 
 let clientQueryClientSingleton: QueryClient | undefined = undefined;
@@ -52,6 +53,8 @@ export function TRPCReactProvider(props: { children: React.ReactNode }) {
         httpBatchStreamLink({
           transformer: SuperJSON,
           methodOverride: "POST",
+          // The API rejects larger batches outright; split them instead.
+          maxItems: MAX_TRPC_BATCH_SIZE,
           url: getBaseUrl() + "/api/trpc",
           headers: () => {
             const headers = new Headers();
