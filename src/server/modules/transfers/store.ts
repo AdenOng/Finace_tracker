@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, notExists, or } from "drizzle-orm";
 
 import {
   financialAccount,
@@ -16,6 +16,7 @@ export async function loadTransferSides(
   db: FinanceDatabase,
   scope: AccessScope,
   refs?: SideRef[],
+  unreviewedOnly = false,
 ): Promise<TransferSide[]> {
   const transactionIds = refs
     ?.filter((s) => s.kind === "transaction")
@@ -44,6 +45,41 @@ export async function loadTransferSides(
           writableBy(scope, transaction.ownerId),
           writableBy(scope, financialAccount.ownerId),
           eq(transaction.isTransfer, true),
+          unreviewedOnly
+            ? and(
+                notExists(
+                  db
+                    .select({ id: transferLink.id })
+                    .from(transferLink)
+                    .where(
+                      and(
+                        readableBy(scope, transferLink.ownerId),
+                        or(
+                          eq(
+                            transferLink.outgoingTransactionId,
+                            transaction.id,
+                          ),
+                          eq(
+                            transferLink.incomingTransactionId,
+                            transaction.id,
+                          ),
+                        ),
+                      ),
+                    ),
+                ),
+                notExists(
+                  db
+                    .select({ id: transferExclusion.id })
+                    .from(transferExclusion)
+                    .where(
+                      and(
+                        readableBy(scope, transferExclusion.ownerId),
+                        eq(transferExclusion.transactionId, transaction.id),
+                      ),
+                    ),
+                ),
+              )
+            : undefined,
           ne(transaction.amount, "0"),
           transactionIds ? inArray(transaction.id, transactionIds) : undefined,
         ),
@@ -68,6 +104,44 @@ export async function loadTransferSides(
         and(
           writableBy(scope, investmentTransaction.ownerId),
           writableBy(scope, financialAccount.ownerId),
+          unreviewedOnly
+            ? and(
+                notExists(
+                  db
+                    .select({ id: transferLink.id })
+                    .from(transferLink)
+                    .where(
+                      and(
+                        readableBy(scope, transferLink.ownerId),
+                        or(
+                          eq(
+                            transferLink.outgoingInvestmentId,
+                            investmentTransaction.id,
+                          ),
+                          eq(
+                            transferLink.incomingInvestmentId,
+                            investmentTransaction.id,
+                          ),
+                        ),
+                      ),
+                    ),
+                ),
+                notExists(
+                  db
+                    .select({ id: transferExclusion.id })
+                    .from(transferExclusion)
+                    .where(
+                      and(
+                        readableBy(scope, transferExclusion.ownerId),
+                        eq(
+                          transferExclusion.investmentTransactionId,
+                          investmentTransaction.id,
+                        ),
+                      ),
+                    ),
+                ),
+              )
+            : undefined,
           inArray(investmentTransaction.type, [
             "deposit",
             "withdrawal",
@@ -163,4 +237,59 @@ export async function clearTransactionTransferReview(
         eq(transferExclusion.transactionId, id),
       ),
     );
+}
+
+/** Each history collection is bounded independently, newest review first. */
+export async function loadTransferHistory(
+  db: FinanceDatabase,
+  scope: AccessScope,
+  limit: number,
+  offset = 0,
+) {
+  const [linkRows, exclusionRows] = await Promise.all([
+    db
+      .select()
+      .from(transferLink)
+      .where(readableBy(scope, transferLink.ownerId))
+      .orderBy(desc(transferLink.createdAt), desc(transferLink.id))
+      .limit(limit + 1)
+      .offset(offset),
+    db
+      .select()
+      .from(transferExclusion)
+      .where(readableBy(scope, transferExclusion.ownerId))
+      .orderBy(desc(transferExclusion.createdAt), desc(transferExclusion.id))
+      .limit(limit + 1)
+      .offset(offset),
+  ]);
+  const links = linkRows.slice(0, limit);
+  const exclusions = exclusionRows.slice(0, limit);
+  const excludedRefs = exclusions.map((row): SideRef =>
+    row.transactionId
+      ? { kind: "transaction", id: row.transactionId }
+      : { kind: "investment", id: row.investmentTransactionId! },
+  );
+  const refs = [...links.flatMap(linkSides), ...excludedRefs];
+  const sides = refs.length ? await loadTransferSides(db, scope, refs) : [];
+  const byKey = new Map(sides.map((side) => [sideKey(side), side]));
+  return {
+    links: links.map((link) => {
+      const [outgoing, incoming] = linkSides(link);
+      return {
+        id: link.id,
+        outgoing: byKey.get(sideKey(outgoing!)),
+        incoming: byKey.get(sideKey(incoming!)),
+        feeAmount: link.feeAmount,
+        feeCurrency: link.feeCurrency,
+      };
+    }),
+    excluded: excludedRefs.flatMap((ref) => {
+      const side = byKey.get(sideKey(ref));
+      return side ? [side] : [];
+    }),
+    nextCursor:
+      linkRows.length > limit || exclusionRows.length > limit
+        ? offset + limit
+        : null,
+  };
 }

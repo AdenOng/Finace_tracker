@@ -41,6 +41,24 @@ export function TransferReview() {
   const t = useT();
   const locale = useLocale();
   const [data] = api.transfers.list.useSuspenseQuery();
+  const history = api.transfers.history.useInfiniteQuery(
+    { limit: 50 },
+    {
+      getNextPageParam: (page) => page.nextCursor ?? undefined,
+      initialData: {
+        pages: [
+          {
+            links: data.links,
+            excluded: data.excluded,
+            nextCursor: data.nextCursor ?? null,
+          },
+        ],
+        pageParams: [null],
+      },
+    },
+  );
+  const links = history.data.pages.flatMap((page) => page.links);
+  const excluded = history.data.pages.flatMap((page) => page.excluded);
   const utils = api.useUtils();
   const [error, setError] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<string | null>(null);
@@ -294,10 +312,10 @@ export function TransferReview() {
           ))}
         </ul>
         <h2 className="mt-8 mb-3 text-lg font-semibold">
-          {t.spending.transferReview.linked(data.links.length)}
+          {t.spending.transferReview.linked(links.length)}
         </h2>
         <ul className="space-y-3">
-          {data.links.map((item) => (
+          {links.map((item) => (
             <li key={item.id} className="border-line rounded-xl border p-4">
               {item.outgoing ? <SideLabel side={item.outgoing} /> : null}
               <p className="text-ink-3 my-1">{t.spending.transferReview.to}</p>
@@ -323,13 +341,13 @@ export function TransferReview() {
             </li>
           ))}
         </ul>
-        {data.excluded.length ? (
+        {excluded.length ? (
           <details className="mt-8">
             <summary className="cursor-pointer text-sm font-semibold">
-              {t.spending.transferReview.excluded(data.excluded.length)}
+              {t.spending.transferReview.excluded(excluded.length)}
             </summary>
             <ul className="mt-3 space-y-3">
-              {data.excluded.map((side) => (
+              {excluded.map((side) => (
                 <li
                   key={key(side)}
                   className="border-line rounded-xl border p-4"
@@ -348,6 +366,19 @@ export function TransferReview() {
               ))}
             </ul>
           </details>
+        ) : null}
+        {history.error ? (
+          <Notice tone="error">{history.error.message}</Notice>
+        ) : null}
+        {history.hasNextPage ? (
+          <Button
+            className="mt-4"
+            variant="secondary"
+            loading={history.isFetchingNextPage}
+            onClick={() => void history.fetchNextPage()}
+          >
+            {t.common.actions.showMore}
+          </Button>
         ) : null}
       </AmountsScope>
     </>

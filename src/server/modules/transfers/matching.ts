@@ -24,6 +24,10 @@ export function sideKey(side: SideRef) {
   return `${side.kind}:${side.id}`;
 }
 
+const DAY_MS = 86_400_000;
+const MIN_MATCH_DAYS = -1;
+const MAX_MATCH_DAYS = 5;
+
 /** Latest FX is only an approximation for review, never evidence of a booked fee. */
 export function candidateMatch(
   outgoing: TransferSide,
@@ -36,9 +40,8 @@ export function candidateMatch(
     outgoing.accountId === incoming.accountId
   )
     return null;
-  const days =
-    (Date.parse(incoming.date) - Date.parse(outgoing.date)) / 86_400_000;
-  if (days < -1 || days > 5) return null;
+  const days = (Date.parse(incoming.date) - Date.parse(outgoing.date)) / DAY_MS;
+  if (days < MIN_MATCH_DAYS || days > MAX_MATCH_DAYS) return null;
   const sent = new Decimal(outgoing.amount).abs();
   const received = new Decimal(incoming.amount).abs();
   if (sent.isZero() || received.isZero()) return null;
@@ -71,14 +74,52 @@ export function suggestTransfers(
   rates: ReadonlyMap<string, string> = new Map(),
 ) {
   const candidates: TransferSuggestion[] = [];
-  for (const outgoing of sides.filter((s) => s.direction === "out")) {
-    for (const incoming of sides.filter((s) => s.direction === "in")) {
-      const match = candidateMatch(
-        outgoing,
-        incoming,
-        rates.get(`${outgoing.currency}:${incoming.currency}`),
-      );
-      if (match) candidates.push(match);
+  // Partition once by currency and account so ineligible accounts never enter
+  // the date search. Parse dates once, then binary-search each eligible bucket.
+  const incomingByCurrency = new Map<
+    string,
+    Map<string, { side: TransferSide; date: number }[]>
+  >();
+  for (const side of sides) {
+    if (side.direction !== "in") continue;
+    let accounts = incomingByCurrency.get(side.currency);
+    if (!accounts) {
+      accounts = new Map<string, { side: TransferSide; date: number }[]>();
+      incomingByCurrency.set(side.currency, accounts);
+    }
+    let bucket = accounts.get(side.accountId);
+    if (!bucket) accounts.set(side.accountId, (bucket = []));
+    bucket.push({ side, date: Date.parse(side.date) });
+  }
+  for (const accounts of incomingByCurrency.values())
+    for (const bucket of accounts.values())
+      bucket.sort((a, b) => a.date - b.date);
+
+  for (const outgoing of sides) {
+    if (outgoing.direction !== "out") continue;
+    const date = Date.parse(outgoing.date);
+    const from = date + MIN_MATCH_DAYS * DAY_MS;
+    const through = date + MAX_MATCH_DAYS * DAY_MS;
+    for (const [currency, accounts] of incomingByCurrency) {
+      const rate = rates.get(`${outgoing.currency}:${currency}`);
+      if (currency !== outgoing.currency && (!rate || !new Decimal(rate).gt(0)))
+        continue;
+      for (const [accountId, bucket] of accounts) {
+        if (accountId === outgoing.accountId) continue;
+        let low = 0;
+        let high = bucket.length;
+        while (low < high) {
+          const mid = Math.floor((low + high) / 2);
+          if (bucket[mid]!.date < from) low = mid + 1;
+          else high = mid;
+        }
+        for (let i = low; i < bucket.length; i++) {
+          const incoming = bucket[i]!;
+          if (incoming.date > through) break;
+          const match = candidateMatch(outgoing, incoming.side, rate);
+          if (match) candidates.push(match);
+        }
+      }
     }
   }
   candidates.sort(

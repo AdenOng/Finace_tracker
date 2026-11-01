@@ -4,7 +4,11 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { currencyInput, moneyInput } from "~/server/api/inputs";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  expensiveProcedure,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import { transferExclusion, transferLink } from "~/server/db/schema";
 import { writableBy } from "~/server/lib/access";
 import { ratesInto } from "~/server/modules/portfolio/holdings";
@@ -15,7 +19,7 @@ import {
   suggestTransfers,
 } from "~/server/modules/transfers/matching";
 import {
-  linkSides,
+  loadTransferHistory,
   loadTransferSides,
   transferDecisions,
 } from "~/server/modules/transfers/store";
@@ -41,16 +45,11 @@ const linkInput = z.object({
 });
 
 export const transfersRouter = createTRPCRouter({
-  list: protectedProcedure.query(async ({ ctx }) => {
-    const [sides, decisions] = await Promise.all([
-      loadTransferSides(ctx.db, ctx.scope),
-      transferDecisions(ctx.db, ctx.scope),
+  list: expensiveProcedure.query(async ({ ctx }) => {
+    const [unmatched, history] = await Promise.all([
+      loadTransferSides(ctx.db, ctx.scope, undefined, true),
+      loadTransferHistory(ctx.db, ctx.scope, 50),
     ]);
-    const unmatched = sides.filter(
-      (s) =>
-        !decisions.linked.has(sideKey(s)) &&
-        !decisions.excluded.has(sideKey(s)),
-    );
     const currencies = [...new Set(unmatched.map((s) => s.currency))].sort();
     const rates = new Map<string, string>();
     const dates: string[] = [];
@@ -64,21 +63,23 @@ export const transfersRouter = createTRPCRouter({
       unmatched,
       suggestions: suggestTransfers(unmatched, rates),
       fxAsOf: dates.sort().at(0) ?? null,
-      excluded: sides.filter((s) => decisions.excluded.has(sideKey(s))),
-      links: decisions.links.map((link) => {
-        const [outgoing, incoming] = linkSides(link).map((ref) =>
-          sides.find((s) => sideKey(s) === sideKey(ref)),
-        );
-        return {
-          id: link.id,
-          outgoing,
-          incoming,
-          feeAmount: link.feeAmount,
-          feeCurrency: link.feeCurrency,
-        };
-      }),
+      links: history.links,
+      excluded: history.excluded,
+      // Omit the cursor on the last page, preserving the original list shape.
+      ...(history.nextCursor === null ? {} : { nextCursor: history.nextCursor }),
     };
   }),
+
+  history: protectedProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(100).default(50),
+        cursor: z.number().int().min(0).nullish(),
+      }),
+    )
+    .query(({ ctx, input }) =>
+      loadTransferHistory(ctx.db, ctx.scope, input.limit, input.cursor ?? 0),
+    ),
 
   /** Confirm a proposed pair, or explicitly choose any valid counterpart outside the window. */
   link: protectedProcedure.input(linkInput).mutation(async ({ ctx, input }) => {

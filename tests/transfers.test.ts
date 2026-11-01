@@ -107,3 +107,59 @@ describe("transfer suggestions", () => {
     expect(fx).toHaveLength(1);
   });
 });
+
+test("windowed matching agrees with brute force across FX, accounts, ties and date boundaries", async () => {
+  const { default: Decimal } = await import("decimal.js");
+  const { sideKey } = await import("../src/server/modules/transfers/matching");
+  const rates = new Map([
+    ["SGD:USD", "0.75"],
+    ["USD:SGD", "1.3333333333"],
+  ]);
+  const sides: TransferSide[] = [
+    out,
+    { ...out, id: "better", amount: "-999" },
+    { ...out, id: "tie", amount: "-999" },
+    { ...out, id: "usd-out", currency: "USD", amount: "-750" },
+    { ...out, id: "eur-out", currency: "EUR" },
+    { ...out, id: "zero", amount: "0" },
+    incoming,
+    { ...incoming, id: "fee", amount: "999" },
+    { ...incoming, id: "same-account", accountId: out.accountId },
+    { ...incoming, id: "before-window", date: "2026-10-01" },
+    { ...incoming, id: "lower-bound", date: "2026-10-02" },
+    { ...incoming, id: "upper-bound", date: "2026-10-08" },
+    { ...incoming, id: "after-window", date: "2026-10-09" },
+    { ...incoming, id: "usd-in", currency: "USD", amount: "750" },
+    { ...incoming, id: "fx-bound", currency: "USD", amount: "727.5" },
+    { ...incoming, id: "no-rate", currency: "GBP" },
+    { ...incoming, id: "too-much-fee", amount: "989" },
+    { ...incoming, id: "too-much-fx", currency: "USD", amount: "727.4999" },
+  ];
+  const candidates = sides
+    .flatMap((outgoing) =>
+      sides.flatMap((incoming) => {
+        const match = candidateMatch(
+          outgoing,
+          incoming,
+          rates.get(`${outgoing.currency}:${incoming.currency}`),
+        );
+        return match ? [match] : [];
+      }),
+    )
+    .sort(
+      (a, b) =>
+        new Decimal(a.differenceRatio).comparedTo(b.differenceRatio) ||
+        Math.abs(a.days) - Math.abs(b.days) ||
+        sideKey(a.outgoing).localeCompare(sideKey(b.outgoing)) ||
+        sideKey(a.incoming).localeCompare(sideKey(b.incoming)),
+    );
+  const used = new Set<string>();
+  const expected = candidates.filter((match) => {
+    const keys = [sideKey(match.outgoing), sideKey(match.incoming)];
+    if (keys.some((key) => used.has(key))) return false;
+    keys.forEach((key) => used.add(key));
+    return true;
+  });
+  expect(suggestTransfers(sides, rates)).toEqual(expected);
+  expect(suggestTransfers([...sides].reverse(), rates)).toEqual(expected);
+});
