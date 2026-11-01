@@ -38,7 +38,7 @@
     "decimal.js": "^10.6.0",
     "drizzle-orm": "^0.45.3",
     "lucide-react": "^1.50.0",
-    "next": "^15.2.3",
+    "next": "~15.5.28",
     "nodemailer": "^10.1.7",
     "postgres": "^3.4.4",
     "react": "^19.0.0",
@@ -48,7 +48,7 @@
     "superjson": "^2.2.1",
     "tailwind-merge": "^3.7.0",
     "unpdf": "^1.8.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -61,7 +61,7 @@
     "@types/react-dom": "^19.0.0",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9.23.0",
-    "eslint-config-next": "^15.2.3",
+    "eslint-config-next": "~15.5.28",
     "eslint-plugin-drizzle": "^0.2.3",
     "postcss": "^8.5.3",
     "prettier": "^3.5.3",
@@ -72,6 +72,7 @@
   },
   "overrides": {
     "esbuild": "^0.25.12",
-    "postcss": "^8.5.28"
+    "postcss": "^8.5.28",
+    "undici": "^7.30.1"
   }
 }
