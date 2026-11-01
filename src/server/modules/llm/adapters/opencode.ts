@@ -34,6 +34,7 @@ export function createOpencodeAdapter(config: LlmProviderConfig): LlmAdapter {
     async generateStructured<T>(
       request: StructuredRequest<T>,
     ): Promise<StructuredResult<T>> {
+      request.signal?.throwIfAborted();
       const modelRef = request.model ?? config.defaultModel;
       const [providerID, ...rest] = modelRef.split("/");
       const modelID = rest.join("/");
@@ -41,15 +42,18 @@ export function createOpencodeAdapter(config: LlmProviderConfig): LlmAdapter {
         throw new LlmError('opencode model must look like "provider/model"');
       }
 
-      const created = await client.session.create({
-        title: `finfolio:${request.schemaName}`,
-      });
+      const created = await client.session.create(
+        { title: `finfolio:${request.schemaName}` },
+        { signal: request.signal },
+      );
       if (!created.data) {
+        request.signal?.throwIfAborted();
         throw new LlmError("opencode: failed to create session", created.error);
       }
       const sessionID = created.data.id;
 
       try {
+        request.signal?.throwIfAborted();
         const response = await client.session.prompt(
           {
             sessionID,
@@ -76,6 +80,7 @@ export function createOpencodeAdapter(config: LlmProviderConfig): LlmAdapter {
           { signal: request.signal },
         );
 
+        request.signal?.throwIfAborted();
         const info = response.data?.info;
         if (!info)
           throw new LlmError("opencode: empty response", response.error);
@@ -101,7 +106,10 @@ export function createOpencodeAdapter(config: LlmProviderConfig): LlmAdapter {
           },
         };
       } finally {
-        void client.session.delete({ sessionID }).catch(() => undefined);
+        // Cleanup must still run after request cancellation, but cannot hang indefinitely.
+        void client.session
+          .delete({ sessionID }, { signal: AbortSignal.timeout(5_000) })
+          .catch(() => undefined);
       }
     },
 

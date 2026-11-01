@@ -1,4 +1,5 @@
-import { extractText, getDocumentProxy, renderPageAsImage } from "unpdf";
+import { fork } from "node:child_process";
+import path from "node:path";
 
 import type { LlmFile } from "../llm";
 
@@ -9,12 +10,9 @@ export const SUPPORTED_MIME_TYPES = [
   "image/webp",
 ] as const;
 
-/** A page with fewer characters than this in its text layer is treated as scanned. */
-const MIN_TEXT_CHARS_PER_PAGE = 80;
-/** Scanned pages are rasterised one by one; cap it so one upload cannot run up a huge bill. */
+/** Keep the scanned-page limit in sync with the standalone pdf-worker.mjs. */
 export const MAX_IMAGE_PAGES = 15;
-/** ~150 DPI for A4/Letter — legible for vision models without oversized images. */
-const RENDER_SCALE = 2;
+export const PDF_TIMEOUT_MS = 30_000;
 
 export type PreparedInput = {
   /** Text layer of the pages that have a usable one. Cheaper and more accurate than vision. */
@@ -38,7 +36,9 @@ export async function prepareDocumentInput(
   data: Uint8Array,
   mediaType: string,
   filename?: string,
+  signal?: AbortSignal,
 ): Promise<PreparedInput> {
+  signal?.throwIfAborted();
   if (mediaType !== "application/pdf") {
     return {
       text: null,
@@ -47,59 +47,97 @@ export async function prepareDocumentInput(
     };
   }
 
-  // pdf.js may detach the buffer it is given, so hand it a copy.
-  const pdf = await getDocumentProxy(data.slice()).catch(() => {
-    throw new UnreadableDocumentError(
-      "This PDF could not be read. Upload an unlocked, valid PDF.",
+  // Run the worker on the current runtime so it never depends on PATH. In production (Node)
+  // the heap flags cap it; Bun ignores V8 flags, so tests rely on the deadline and pixel budget.
+  // The raw ESM worker is traced into the standalone output.
+  return new Promise<PreparedInput>((resolve, reject) => {
+    const child = fork(
+      path.join(process.cwd(), "src/server/modules/extraction/pdf-worker.mjs"),
+      [],
+      {
+        execPath: process.execPath,
+        execArgv: process.versions.bun
+          ? []
+          : ["--max-old-space-size=256", "--max-semi-space-size=16"],
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
+      },
+    );
+    let settled = false;
+    const finish = (error?: Error, result?: PreparedInput) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      signal?.removeEventListener("abort", onAbort);
+      child.kill("SIGKILL");
+      if (error) reject(error);
+      else resolve(result!);
+    };
+    const onAbort = () => {
+      const reason: unknown = signal?.reason;
+      finish(
+        reason instanceof Error
+          ? reason
+          : new DOMException("Aborted", "AbortError"),
+      );
+    };
+    const deadline = setTimeout(
+      () =>
+        finish(
+          new UnreadableDocumentError(
+            "PDF processing exceeded the 30 second limit. Split it and upload the parts.",
+          ),
+        ),
+      PDF_TIMEOUT_MS,
+    );
+    child.once("error", () =>
+      finish(new UnreadableDocumentError("PDF processing could not start.")),
+    );
+    child.once("exit", () =>
+      finish(
+        new UnreadableDocumentError(
+          "PDF processing exceeded its memory limit or stopped unexpectedly.",
+        ),
+      ),
+    );
+    child.once(
+      "message",
+      (message: {
+        error?: string;
+        result?: Omit<PreparedInput, "files"> & {
+          files: { data: string; mediaType: string; filename: string }[];
+        };
+      }) => {
+        if (message.error || !message.result) {
+          finish(
+            new UnreadableDocumentError(
+              message.error ?? "This PDF could not be read.",
+            ),
+          );
+          return;
+        }
+        const result = message.result;
+        finish(undefined, {
+          ...result,
+          files: result.files.map((file) => ({
+            ...file,
+            data: new Uint8Array(Buffer.from(file.data, "base64")),
+          })),
+        });
+      },
+    );
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    child.send(
+      { data: Buffer.from(data).toString("base64"), filename },
+      (error) => {
+        if (error)
+          finish(
+            new UnreadableDocumentError("PDF processing could not start."),
+          );
+      },
     );
   });
-  try {
-    const { totalPages, text } = await extractText(pdf, { mergePages: false });
-    const pages = Array.from(
-      { length: totalPages },
-      (_, i) => text[i]?.trim() ?? "",
-    );
-    const scannedPages = pages.flatMap((page, i) =>
-      page.length < MIN_TEXT_CHARS_PER_PAGE ? [i + 1] : [],
-    );
-
-    if (scannedPages.length > MAX_IMAGE_PAGES) {
-      throw new UnreadableDocumentError(
-        `This PDF has ${scannedPages.length} scanned pages (no text layer); the limit is ${MAX_IMAGE_PAGES}. Split it and upload the parts.`,
-      );
-    }
-
-    const files: LlmFile[] = [];
-    for (const page of scannedPages) {
-      const png = await renderPageAsImage(pdf, page, {
-        canvasImport: () => import("@napi-rs/canvas"),
-        scale: RENDER_SCALE,
-      });
-      files.push({
-        data: new Uint8Array(png),
-        mediaType: "image/png",
-        filename: `${filename ?? "document"}-page-${page}.png`,
-      });
-    }
-
-    const hasText = scannedPages.length < totalPages;
-    return {
-      text: hasText
-        ? pages
-            .map(
-              (page, i) =>
-                `--- page ${i + 1} ---\n${
-                  scannedPages.includes(i + 1)
-                    ? "[scanned page, attached as an image]"
-                    : page
-                }`,
-            )
-            .join("\n\n")
-        : null,
-      files,
-      pageCount: totalPages,
-    };
-  } finally {
-    await pdf.loadingTask.destroy();
-  }
 }

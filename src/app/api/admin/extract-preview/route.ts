@@ -25,6 +25,10 @@ export async function POST(request: Request) {
   const { denied } = await requireAdminRequest(request);
   if (denied) return denied;
 
+  const signal = AbortSignal.any([
+    request.signal,
+    AbortSignal.timeout(280_000),
+  ]);
   try {
     const { file, providerId, model, institutionId } =
       await parseExtractionUpload(request);
@@ -48,7 +52,7 @@ export async function POST(request: Request) {
       institutionId: institutionId ?? null,
       model,
       llm,
-      signal: AbortSignal.timeout(280_000),
+      signal,
     });
     return NextResponse.json(result);
   } catch (error) {

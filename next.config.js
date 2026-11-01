@@ -11,7 +11,13 @@ const config = {
   serverExternalPackages: ["@napi-rs/canvas"],
   // Migrations are read from disk at boot (src/server/db/bootstrap.ts).
   outputFileTracingIncludes: {
-    "/*": ["./drizzle/**/*"],
+    "/*": [
+      "./drizzle/**/*",
+      "./src/server/modules/extraction/pdf-worker.mjs",
+      "./node_modules/unpdf/**/*",
+      "./node_modules/@napi-rs/canvas/**/*",
+      "./node_modules/@napi-rs/canvas-*/**/*",
+    ],
   },
   experimental: {
     serverActions: { bodySizeLimit: "20mb" },

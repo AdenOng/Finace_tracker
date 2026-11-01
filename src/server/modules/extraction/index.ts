@@ -69,6 +69,7 @@ export async function extractDocument(
     input.data,
     input.mediaType,
     input.filename,
+    input.signal,
   );
   let llm = input.llm;
   if (!llm) {
