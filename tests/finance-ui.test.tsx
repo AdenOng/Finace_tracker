@@ -1703,6 +1703,8 @@ test("transfer review renders three suggested pairs once, two unpaired sides and
     excluded: [
       { ...outgoing, id: "excluded", accountName: "External account payment" },
     ],
+    moreLinks: false,
+    moreExcluded: false,
   };
   const html = render(<TransferReview />, (client) =>
     client.setQueryData(

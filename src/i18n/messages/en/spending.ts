@@ -191,8 +191,10 @@ const spending = {
     suggested: (n: number) =>
       `Suggested matches (${n} ${n === 1 ? "pair" : "pairs"})`,
     unmatched: (n: number) => `Without a match (${n})`,
-    linked: (n: number) => `Linked transfers (${n})`,
-    excluded: (n: number) => `No counterpart in Finfolio (${n})`,
+    linked: (n: number, more = false) =>
+      `Linked transfers (${n}${more ? "+" : ""})`,
+    excluded: (n: number, more = false) =>
+      `No counterpart in Finfolio (${n}${more ? "+" : ""})`,
     fx: (out: string, rate: string, incoming: string) =>
       `Approximate FX: 1 ${out} = ${rate} ${incoming}`,
     suggestionPolicy: (date: string | null) =>

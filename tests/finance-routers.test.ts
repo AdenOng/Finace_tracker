@@ -4597,6 +4597,37 @@ describe("transfer review", () => {
       alice.transfers.link({ ...rows, fee: { amount: "-1", currency: "SGD" } }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+  test("review history pages by keyset, unaffected by reviews added between pages", async () => {
+    const account = await alice.accounts.create(bank);
+    const exclude = async (n: number) => {
+      const entry = await spendingEntry(account.id, {
+        isTransfer: true,
+        amount: `-${n}`,
+        description: `Transfer ${n}`,
+      });
+      await alice.transfers.noCounterpart({
+        id: entry.id,
+        kind: "transaction",
+      });
+      return entry.id;
+    };
+    const original = [await exclude(1), await exclude(2), await exclude(3)];
+    const first = await alice.transfers.history({ limit: 2 });
+    expect(first.excluded).toHaveLength(2);
+    expect(first).toMatchObject({ moreExcluded: true, moreLinks: false });
+    // An empty list is exhausted from the start; only exclusions continue.
+    expect(first.nextCursor).toMatchObject({ links: null });
+    // A newer review would shift an offset by one and repeat a row; a keyset does not.
+    await exclude(4);
+    const second = await alice.transfers.history({
+      limit: 2,
+      cursor: first.nextCursor,
+    });
+    expect(second.nextCursor).toBeNull();
+    const seen = [...first.excluded, ...second.excluded].map((s) => s.id);
+    expect(seen).toHaveLength(3);
+    expect([...seen].sort()).toEqual([...original].sort());
+  });
 });
 
 describe("recurring cash flow and card bills", () => {

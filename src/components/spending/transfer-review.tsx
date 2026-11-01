@@ -40,7 +40,7 @@ function SideLabel({ side }: { side: Side }) {
 export function TransferReview() {
   const t = useT();
   const locale = useLocale();
-  const [data] = api.transfers.list.useSuspenseQuery();
+  const [data, listQuery] = api.transfers.list.useSuspenseQuery();
   const history = api.transfers.history.useInfiniteQuery(
     { limit: 50 },
     {
@@ -50,15 +50,20 @@ export function TransferReview() {
           {
             links: data.links,
             excluded: data.excluded,
+            moreLinks: data.moreLinks,
+            moreExcluded: data.moreExcluded,
             nextCursor: data.nextCursor ?? null,
           },
         ],
         pageParams: [null],
       },
+      // The seed is as old as the list it came from, not as new as this mount.
+      initialDataUpdatedAt: listQuery.dataUpdatedAt,
     },
   );
   const links = history.data.pages.flatMap((page) => page.links);
   const excluded = history.data.pages.flatMap((page) => page.excluded);
+  const lastPage = history.data.pages.at(-1);
   const utils = api.useUtils();
   const [error, setError] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<string | null>(null);
@@ -312,7 +317,7 @@ export function TransferReview() {
           ))}
         </ul>
         <h2 className="mt-8 mb-3 text-lg font-semibold">
-          {t.spending.transferReview.linked(links.length)}
+          {t.spending.transferReview.linked(links.length, lastPage?.moreLinks)}
         </h2>
         <ul className="space-y-3">
           {links.map((item) => (
@@ -344,7 +349,10 @@ export function TransferReview() {
         {excluded.length ? (
           <details className="mt-8">
             <summary className="cursor-pointer text-sm font-semibold">
-              {t.spending.transferReview.excluded(excluded.length)}
+              {t.spending.transferReview.excluded(
+                excluded.length,
+                lastPage?.moreExcluded,
+              )}
             </summary>
             <ul className="mt-3 space-y-3">
               {excluded.map((side) => (
@@ -375,6 +383,7 @@ export function TransferReview() {
             className="mt-4"
             variant="secondary"
             loading={history.isFetchingNextPage}
+            disabled={history.isFetching}
             onClick={() => void history.fetchNextPage()}
           >
             {t.common.actions.showMore}

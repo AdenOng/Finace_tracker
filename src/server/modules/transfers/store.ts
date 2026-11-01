@@ -1,5 +1,15 @@
 import Decimal from "decimal.js";
-import { and, desc, eq, inArray, ne, notExists, or } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  ne,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import {
   financialAccount,
@@ -239,31 +249,81 @@ export async function clearTransactionTransferReview(
     );
 }
 
-/** Each history collection is bounded independently, newest review first. */
+/** Where each history list stopped: its last row's `created_at::text` and id. */
+export type HistoryPosition = { createdAt: string; id: string };
+/** `null` for a list means it is exhausted; no cursor at all means the first page. */
+export type TransferHistoryCursor = {
+  links: HistoryPosition | null;
+  excluded: HistoryPosition | null;
+};
+
+/**
+ * Each history collection is paged by its own keyset, newest review first, so reviews added or
+ * removed between pages never shift the other rows into duplicates or gaps.
+ */
 export async function loadTransferHistory(
   db: FinanceDatabase,
   scope: AccessScope,
   limit: number,
-  offset = 0,
+  cursor?: TransferHistoryCursor | null,
 ) {
   const [linkRows, exclusionRows] = await Promise.all([
-    db
-      .select()
-      .from(transferLink)
-      .where(readableBy(scope, transferLink.ownerId))
-      .orderBy(desc(transferLink.createdAt), desc(transferLink.id))
-      .limit(limit + 1)
-      .offset(offset),
-    db
-      .select()
-      .from(transferExclusion)
-      .where(readableBy(scope, transferExclusion.ownerId))
-      .orderBy(desc(transferExclusion.createdAt), desc(transferExclusion.id))
-      .limit(limit + 1)
-      .offset(offset),
+    cursor?.links === null
+      ? []
+      : db
+          .select({
+            ...getTableColumns(transferLink),
+            position: sql<string>`${transferLink.createdAt}::text`,
+          })
+          .from(transferLink)
+          .where(
+            and(
+              readableBy(scope, transferLink.ownerId),
+              cursor?.links
+                ? sql`(${transferLink.createdAt}, ${transferLink.id}) < (${cursor.links.createdAt}::timestamptz, ${cursor.links.id}::uuid)`
+                : undefined,
+            ),
+          )
+          .orderBy(desc(transferLink.createdAt), desc(transferLink.id))
+          .limit(limit + 1),
+    cursor?.excluded === null
+      ? []
+      : db
+          .select({
+            ...getTableColumns(transferExclusion),
+            position: sql<string>`${transferExclusion.createdAt}::text`,
+          })
+          .from(transferExclusion)
+          .where(
+            and(
+              readableBy(scope, transferExclusion.ownerId),
+              cursor?.excluded
+                ? sql`(${transferExclusion.createdAt}, ${transferExclusion.id}) < (${cursor.excluded.createdAt}::timestamptz, ${cursor.excluded.id}::uuid)`
+                : undefined,
+            ),
+          )
+          .orderBy(
+            desc(transferExclusion.createdAt),
+            desc(transferExclusion.id),
+          )
+          .limit(limit + 1),
   ]);
   const links = linkRows.slice(0, limit);
   const exclusions = exclusionRows.slice(0, limit);
+  const moreLinks = linkRows.length > limit;
+  const moreExcluded = exclusionRows.length > limit;
+  // Positions come from the raw rows, even if a side can no longer be shown below.
+  const at = (row: { position: string; id: string }): HistoryPosition => ({
+    createdAt: row.position,
+    id: row.id,
+  });
+  const nextCursor: TransferHistoryCursor | null =
+    moreLinks || moreExcluded
+      ? {
+          links: moreLinks ? at(links.at(-1)!) : null,
+          excluded: moreExcluded ? at(exclusions.at(-1)!) : null,
+        }
+      : null;
   const excludedRefs = exclusions.map((row): SideRef =>
     row.transactionId
       ? { kind: "transaction", id: row.transactionId }
@@ -287,9 +347,8 @@ export async function loadTransferHistory(
       const side = byKey.get(sideKey(ref));
       return side ? [side] : [];
     }),
-    nextCursor:
-      linkRows.length > limit || exclusionRows.length > limit
-        ? offset + limit
-        : null,
+    moreLinks,
+    moreExcluded,
+    nextCursor,
   };
 }

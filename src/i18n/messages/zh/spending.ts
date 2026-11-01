@@ -183,8 +183,10 @@ const spending: Translation<typeof en> = {
     toLabel: "转入方",
     suggested: (n: number) => `建议配对（${n} 组）`,
     unmatched: (n: number) => `未配对（${n} 笔）`,
-    linked: (n: number) => `已配对转账（${n} 笔）`,
-    excluded: (n: number) => `Finfolio 中无另一方记录（${n} 笔）`,
+    linked: (n: number, more = false) =>
+      `已配对转账（${n}${more ? "+" : ""} 笔）`,
+    excluded: (n: number, more = false) =>
+      `Finfolio 中无另一方记录（${n}${more ? "+" : ""} 笔）`,
     fx: (out: string, rate: string, incoming: string) =>
       `近似汇率：1 ${out} = ${rate} ${incoming}`,
     suggestionPolicy: (date: string | null) =>

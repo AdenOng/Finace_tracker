@@ -3,7 +3,11 @@ import Decimal from "decimal.js";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { currencyInput, moneyInput } from "~/server/api/inputs";
+import {
+  currencyInput,
+  moneyInput,
+  pgTimestampText,
+} from "~/server/api/inputs";
 import {
   createTRPCRouter,
   expensiveReadProcedure,
@@ -44,6 +48,8 @@ const linkInput = z.object({
   manual: z.boolean().default(false),
 });
 
+const historyPosition = z.object({ createdAt: pgTimestampText, id: z.uuid() });
+
 export const transfersRouter = createTRPCRouter({
   list: expensiveReadProcedure.query(async ({ ctx }) => {
     const [unmatched, history] = await Promise.all([
@@ -65,8 +71,12 @@ export const transfersRouter = createTRPCRouter({
       fxAsOf: dates.sort().at(0) ?? null,
       links: history.links,
       excluded: history.excluded,
+      moreLinks: history.moreLinks,
+      moreExcluded: history.moreExcluded,
       // Omit the cursor on the last page, preserving the original list shape.
-      ...(history.nextCursor === null ? {} : { nextCursor: history.nextCursor }),
+      ...(history.nextCursor === null
+        ? {}
+        : { nextCursor: history.nextCursor }),
     };
   }),
 
@@ -74,11 +84,16 @@ export const transfersRouter = createTRPCRouter({
     .input(
       z.object({
         limit: z.number().int().min(1).max(100).default(50),
-        cursor: z.number().int().min(0).nullish(),
+        cursor: z
+          .object({
+            links: historyPosition.nullable(),
+            excluded: historyPosition.nullable(),
+          })
+          .nullish(),
       }),
     )
     .query(({ ctx, input }) =>
-      loadTransferHistory(ctx.db, ctx.scope, input.limit, input.cursor ?? 0),
+      loadTransferHistory(ctx.db, ctx.scope, input.limit, input.cursor),
     ),
 
   /** Confirm a proposed pair, or explicitly choose any valid counterpart outside the window. */
