@@ -1,4 +1,5 @@
 import { transfersRouter } from "./routers/transfers";
+import { planningRouter } from "./routers/planning";
 import { workspacesRouter } from "./routers/workspaces";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 import { accountsRouter } from "./routers/accounts";
@@ -13,6 +14,7 @@ import { reconciliationRouter } from "./routers/reconciliation";
 import { importsRouter } from "./routers/imports";
 
 export const appRouter = createTRPCRouter({
+  planning: planningRouter,
   workspaces: workspacesRouter,
   catalog: catalogRouter,
   settings: settingsRouter,

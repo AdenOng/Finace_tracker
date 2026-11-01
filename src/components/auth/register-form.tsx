@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { Field, Input } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
@@ -26,6 +27,7 @@ export function RegisterForm({
   submitLabel: string;
 }) {
   const router = useRouter();
+  const t = useT();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -35,7 +37,7 @@ export function RegisterForm({
     const form = new FormData(event.currentTarget);
     const password = formText(form, "password");
     if (password !== formText(form, "confirm")) {
-      return setError("Passwords do not match");
+      return setError(t.auth.register.mismatch);
     }
     setError(null);
     setPending(true);
@@ -54,7 +56,7 @@ export function RegisterForm({
             : undefined,
     );
     setPending(false);
-    if (error) return setError(error.message ?? "Could not create the account");
+    if (error) return setError(error.message ?? t.auth.register.failed);
     queryClient.clear();
     router.replace("/settings?welcome=1");
     router.refresh();
@@ -65,9 +67,9 @@ export function RegisterForm({
       {error ? <Notice tone="error">{error}</Notice> : null}
       {setup ? (
         <Field
-          label="Setup token"
+          label={t.auth.register.setupToken}
           htmlFor="setupToken"
-          hint="Ask the instance operator for this token."
+          hint={t.auth.register.tokenHint}
         >
           <Input
             id="setupToken"
@@ -78,10 +80,10 @@ export function RegisterForm({
           />
         </Field>
       ) : null}
-      <Field label="Name" htmlFor="name">
+      <Field label={t.auth.register.name} htmlFor="name">
         <Input id="name" name="name" autoComplete="name" required autoFocus />
       </Field>
-      <Field label="Email" htmlFor="email">
+      <Field label={t.common.fields.email} htmlFor="email">
         <Input
           id="email"
           name="email"
@@ -92,7 +94,11 @@ export function RegisterForm({
           disabled={!!lockedEmail}
         />
       </Field>
-      <Field label="Password" htmlFor="password" hint="At least 10 characters.">
+      <Field
+        label={t.auth.register.password}
+        htmlFor="password"
+        hint={t.auth.register.passwordHint}
+      >
         <Input
           id="password"
           name="password"
@@ -102,7 +108,7 @@ export function RegisterForm({
           required
         />
       </Field>
-      <Field label="Confirm password" htmlFor="confirm">
+      <Field label={t.auth.register.confirm} htmlFor="confirm">
         <Input
           id="confirm"
           name="confirm"

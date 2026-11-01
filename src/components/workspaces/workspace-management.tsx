@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useT, useLocale } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Field, Input, Select } from "~/components/ui/field";
@@ -20,6 +21,8 @@ export function WorkspaceManagement({
   workspace: Workspace;
   accounts: RouterOutputs["accounts"]["list"];
 }) {
+  const t = useT();
+  const locale = useLocale();
   const router = useRouter();
   const utils = api.useUtils();
   const personal = api.accounts.list.useQuery();
@@ -50,7 +53,9 @@ export function WorkspaceManagement({
       router.refresh();
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : "The action could not be completed",
+        e instanceof Error
+          ? e.message
+          : t.workspaces.workspaceManagement.theActionCouldNotBeCompleted,
       );
     } finally {
       setPending(false);
@@ -62,8 +67,11 @@ export function WorkspaceManagement({
     <div className="space-y-10">
       {error ? <Notice tone="error">{error}</Notice> : null}
       <Section
-        title="Account sharing"
-        description="Sharing includes balances, holdings, and transaction history for everyone in this workspace. Uploaded statements and credentials stay private."
+        title={t.workspaces.workspaceManagement.accountSharing}
+        description={
+          t.workspaces.workspaceManagement
+            .sharingIncludesBalancesHoldingsAndTransactionHistory
+        }
       >
         {w.role !== "viewer" ? (
           <form
@@ -80,13 +88,16 @@ export function WorkspaceManagement({
           >
             <Select
               name="accountId"
-              aria-label="Account to share"
+              aria-label={t.workspaces.workspaceManagement.accountToShare}
               className="max-w-md"
               required
               defaultValue=""
             >
               <option value="" disabled>
-                Choose one of your private accounts
+                {
+                  t.workspaces.workspaceManagement
+                    .chooseOneOfYourPrivateAccounts
+                }
               </option>
               {(personal.data ?? [])
                 .filter((a) => !shared.has(a.id) && !a.archivedAt)
@@ -97,28 +108,34 @@ export function WorkspaceManagement({
                 ))}
             </Select>
             <Button type="submit" disabled={pending || !personal.data}>
-              Share account
+              {t.workspaces.workspaceManagement.shareAccount}
             </Button>
           </form>
         ) : (
           <p className="text-ink-2 mb-4 text-sm">
-            Viewers can read shared accounts. Account sharing is available to
-            members.
+            {
+              t.workspaces.workspaceManagement
+                .viewersCanReadSharedAccountsAccountSharing
+            }
           </p>
         )}
         {personal.error ? (
           <Notice tone="error">{personal.error.message}</Notice>
         ) : null}
         {accounts.length === 0 ? (
-          <p className="text-ink-2 text-sm">No accounts shared yet.</p>
+          <p className="text-ink-2 text-sm">
+            {t.workspaces.workspaceManagement.noAccountsSharedYet}
+          </p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Account</Th>
-                <Th>Owner</Th>
+                <Th>{t.workspaces.workspaceManagement.account}</Th>
+                <Th>{t.workspaces.workspaceManagement.owner}</Th>
                 <Th>
-                  <span className="sr-only">Sharing actions</span>
+                  <span className="sr-only">
+                    {t.workspaces.workspaceManagement.sharingActions}
+                  </span>
                 </Th>
               </tr>
             </thead>
@@ -127,7 +144,9 @@ export function WorkspaceManagement({
                 <Tr key={a.id}>
                   <Td>
                     {a.name}
-                    {a.archivedAt ? " (archived)" : ""}
+                    {a.archivedAt
+                      ? t.workspaces.workspaceManagement.archived
+                      : ""}
                   </Td>
                   <Td>{a.ownerName}</Td>
                   <Td className="text-right">
@@ -145,10 +164,12 @@ export function WorkspaceManagement({
                           )
                         }
                       >
-                        Stop sharing
+                        {t.workspaces.workspaceManagement.stopSharing}
                       </ConfirmButton>
                     ) : (
-                      <Tag tone="outline">Read-only</Tag>
+                      <Tag tone="outline">
+                        {t.workspaces.workspaceManagement.readonly}
+                      </Tag>
                     )}
                   </Td>
                 </Tr>
@@ -158,8 +179,11 @@ export function WorkspaceManagement({
         )}
       </Section>
       <Section
-        title="Members"
-        description="Owner manages membership. Members can share their own accounts. Viewers have read-only access. Financial edits always stay with account owners."
+        title={t.workspaces.workspaceManagement.members}
+        description={
+          t.workspaces.workspaceManagement
+            .ownerManagesMembershipMembersCanShareTheir
+        }
       >
         <ul className="divide-line divide-y">
           {w.members.map((m) => (
@@ -169,9 +193,11 @@ export function WorkspaceManagement({
             >
               <span className="mr-auto font-semibold">
                 {m.name}
-                {m.userId === w.userId ? " (you)" : ""}
+                {m.userId === w.userId
+                  ? t.workspaces.workspaceManagement.you
+                  : ""}
               </span>
-              <Tag>{m.role}</Tag>
+              <Tag>{t.workspaces.roles[m.role]}</Tag>
               {owner && m.role !== "owner" ? (
                 <>
                   <ConfirmButton
@@ -189,8 +215,9 @@ export function WorkspaceManagement({
                     }
                   >
                     {m.role === "member"
-                      ? "Make viewer & unshare accounts"
-                      : "Make member"}
+                      ? t.workspaces.workspaceManagement
+                          .makeViewerUnshareAccounts
+                      : t.workspaces.workspaceManagement.makeMember}
                   </ConfirmButton>
                   <ConfirmButton
                     size="sm"
@@ -202,7 +229,7 @@ export function WorkspaceManagement({
                       )
                     }
                   >
-                    Transfer ownership
+                    {t.workspaces.workspaceManagement.transferOwnership}
                   </ConfirmButton>
                   <ConfirmButton
                     size="sm"
@@ -217,7 +244,7 @@ export function WorkspaceManagement({
                       )
                     }
                   >
-                    Remove member
+                    {t.workspaces.workspaceManagement.removeMember}
                   </ConfirmButton>
                 </>
               ) : null}
@@ -237,15 +264,17 @@ export function WorkspaceManagement({
               )
             }
           >
-            Leave workspace
+            {t.workspaces.workspaceManagement.leaveWorkspace}
           </ConfirmButton>
         ) : null}
       </Section>
       {owner ? (
         <>
           <Section
-            title="Invite someone"
-            description="Links work once and expire in seven days. Share the link directly with the invited person."
+            title={t.workspaces.workspaceManagement.inviteSomeone}
+            description={
+              t.workspaces.workspaceManagement.linksWorkOnceAndExpireInSeven
+            }
           >
             <form
               className="flex flex-wrap items-end gap-3"
@@ -263,24 +292,32 @@ export function WorkspaceManagement({
                 });
               }}
             >
-              <Field label="Email" htmlFor="invite-email">
+              <Field label={t.common.fields.email} htmlFor="invite-email">
                 <Input id="invite-email" name="email" type="email" required />
               </Field>
-              <Field label="Access" htmlFor="invite-role">
+              <Field
+                label={t.workspaces.workspaceManagement.access}
+                htmlFor="invite-role"
+              >
                 <Select id="invite-role" name="role" defaultValue="viewer">
-                  <option value="viewer">Viewer</option>
+                  <option value="viewer">
+                    {t.workspaces.workspaceManagement.viewer}
+                  </option>
                   <option value="member">
-                    Member (can share own accounts)
+                    {t.workspaces.workspaceManagement.memberCanShareOwnAccounts}
                   </option>
                 </Select>
               </Field>
               <Button type="submit" disabled={pending}>
-                Create invitation link
+                {t.workspaces.workspaceManagement.createInvitationLink}
               </Button>
             </form>
             {inviteUrl ? (
               <div className="mt-4 space-y-2">
-                <Field label="Invitation link" htmlFor="invitation-link">
+                <Field
+                  label={t.workspaces.workspaceManagement.invitationLink}
+                  htmlFor="invitation-link"
+                >
                   <Input
                     id="invitation-link"
                     readOnly
@@ -296,12 +333,13 @@ export function WorkspaceManagement({
                       .writeText(inviteUrl)
                       .catch(() =>
                         setError(
-                          "Copy the invitation link from the field above.",
+                          t.workspaces.workspaceManagement
+                            .copyTheInvitationLinkFromTheField,
                         ),
                       )
                   }
                 >
-                  Copy link
+                  {t.common.actions.copyLink}
                 </Button>
               </div>
             ) : null}
@@ -313,7 +351,11 @@ export function WorkspaceManagement({
                     className="flex flex-wrap items-center gap-3 py-3"
                   >
                     <span className="mr-auto text-sm">
-                      {i.email} · {i.role} · expires {formatDate(i.expiresAt)}
+                      {t.workspaces.workspaceManagement.invitation(
+                        i.email,
+                        t.workspaces.roles[i.role],
+                        formatDate(i.expiresAt, locale),
+                      )}
                     </span>
                     <ConfirmButton
                       size="sm"
@@ -329,14 +371,14 @@ export function WorkspaceManagement({
                         );
                       }}
                     >
-                      Revoke invitation
+                      {t.workspaces.workspaceManagement.revokeInvitation}
                     </ConfirmButton>
                   </li>
                 ))}
               </ul>
             ) : null}
           </Section>
-          <Section title="Workspace settings">
+          <Section title={t.workspaces.workspaceManagement.workspaceSettings}>
             <form
               key={`${w.name}-${w.kind}-${w.displayCurrency}`}
               className="max-w-md space-y-4"
@@ -354,7 +396,10 @@ export function WorkspaceManagement({
                 );
               }}
             >
-              <Field label="Workspace name" htmlFor="edit-workspace-name">
+              <Field
+                label={t.workspaces.workspaceManagement.workspaceName}
+                htmlFor="edit-workspace-name"
+              >
                 <Input
                   id="edit-workspace-name"
                   name="name"
@@ -363,18 +408,30 @@ export function WorkspaceManagement({
                   defaultValue={w.name}
                 />
               </Field>
-              <Field label="Purpose" htmlFor="edit-workspace-kind">
+              <Field
+                label={t.workspaces.workspaceManagement.purpose}
+                htmlFor="edit-workspace-kind"
+              >
                 <Select
                   id="edit-workspace-kind"
                   name="kind"
                   defaultValue={w.kind}
                 >
-                  <option value="family">Family</option>
-                  <option value="fund">Fund</option>
-                  <option value="custom">Other</option>
+                  <option value="family">
+                    {t.workspaces.workspaceManagement.family}
+                  </option>
+                  <option value="fund">
+                    {t.workspaces.workspaceManagement.fund}
+                  </option>
+                  <option value="custom">
+                    {t.workspaces.workspaceManagement.other}
+                  </option>
                 </Select>
               </Field>
-              <Field label="Display currency" htmlFor="edit-workspace-currency">
+              <Field
+                label={t.workspaces.workspaceManagement.displayCurrency}
+                htmlFor="edit-workspace-currency"
+              >
                 <Select
                   id="edit-workspace-currency"
                   name="currency"
@@ -396,12 +453,14 @@ export function WorkspaceManagement({
                 </Select>
               </Field>
               <Button type="submit" disabled={pending}>
-                Save workspace
+                {t.workspaces.workspaceManagement.saveWorkspace}
               </Button>
             </form>
             <p className="text-ink-2 mt-6 mb-3 text-sm">
-              Deleting this workspace revokes sharing and invitations. Personal
-              accounts and financial records are retained.
+              {
+                t.workspaces.workspaceManagement
+                  .deletingThisWorkspaceRevokesSharingAndInvitations
+              }
             </p>
             <ConfirmButton
               variant="danger"
@@ -410,7 +469,7 @@ export function WorkspaceManagement({
                 void run(() => remove.mutateAsync(identity), true)
               }
             >
-              Delete workspace
+              {t.workspaces.workspaceManagement.deleteWorkspace}
             </ConfirmButton>
           </Section>
         </>

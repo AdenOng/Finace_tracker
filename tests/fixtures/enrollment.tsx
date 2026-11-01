@@ -34,6 +34,7 @@ const query = new Proxy(
 await mock.module("server-only", () => ({}));
 await mock.module("next/headers", () => ({
   headers: async () => new Headers(),
+  cookies: async () => ({ get: () => undefined }),
 }));
 await mock.module("next/navigation", () => ({
   redirect: (url: string) => {
@@ -60,6 +61,7 @@ const pages = [
   "accounts/[id]/page",
   "page",
   "spending/page",
+  "cash-flow/page",
   "portfolio/page",
   "workspaces/page",
   "workspaces/[id]/page",

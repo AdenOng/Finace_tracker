@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import { COLORED_COMPANY_LOGOS } from "./company-logo";
 import { money } from "./poster";
 import { SAMPLE_YEAR } from "./sample-year";
@@ -102,6 +103,7 @@ export function GatherGlyph() {
 }
 
 function TotalCard({ total }: { total: string }) {
+  const t = useT();
   return (
     <>
       <rect
@@ -123,7 +125,7 @@ function TotalCard({ total }: { total: string }) {
         fontSize="4.6"
         letterSpacing="0.8"
       >
-        NET WORTH
+        {t.landing.glyphs.netWorth}
       </text>
       <text
         y="5"
@@ -307,11 +309,12 @@ export function KeepGlyph() {
 
 /** Rotating circular seal; used as a sign-in button. */
 export function Seal({ onClick }: { onClick: () => void }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label="Sign in"
+      aria-label={t.landing.glyphs.signIn}
       className="group bg-paper text-paper-ink relative grid size-28 place-items-center rounded-full shadow-[0_14px_40px_-12px_rgb(0_0_0/0.8)] transition-transform duration-300 hover:scale-105 focus-visible:outline-offset-4"
     >
       <svg
@@ -331,9 +334,7 @@ export function Seal({ onClick }: { onClick: () => void }) {
           className="font-mono"
           fill="currentColor"
         >
-          <textPath href="#seal-ring">
-            SIGN IN · FINFOLIO · INVITE ONLY ·
-          </textPath>
+          <textPath href="#seal-ring">{t.landing.glyphs.seal}</textPath>
         </text>
       </svg>
       <span className="bg-art-red group-hover:bg-art-cobalt grid size-10 place-items-center rounded-full text-white transition-colors">

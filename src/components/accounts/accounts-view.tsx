@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "~/i18n/client";
+
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,65 +15,61 @@ import { Button } from "~/components/ui/button";
 import { Notice, Section, Tag } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
 import { FilterTabs } from "~/components/ui/tabs";
-import {
-  type AccountGroup,
-  accountGroupOf,
-  accountTypeLabels,
-} from "~/lib/accounts";
+import { type AccountGroup, accountGroupOf } from "~/lib/accounts";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type Filter = "open" | "archived";
 type Row = RouterOutputs["accounts"]["list"][number];
-
-const GROUPS: {
-  group: AccountGroup;
-  title: string;
-  description: string;
-  empty: string;
-  add: string;
-  institution: string;
-  value: string;
-}[] = [
-  {
-    group: "investments",
-    title: "Investments",
-    description:
-      "Brokerage, retirement and crypto accounts, valued from their holdings.",
-    empty:
-      "Add a brokerage, robo-adviser or crypto account and list what it holds.",
-    add: "Add investment account",
-    institution: "Broker",
-    value: "Value",
-  },
-  {
-    group: "banking",
-    title: "Bank & cards",
-    description:
-      "Savings, current and credit card accounts. Their transactions feed Spending.",
-    empty:
-      "Add a bank account or credit card, record its balance, then add transactions.",
-    add: "Add bank or card",
-    institution: "Bank",
-    value: "Balance",
-  },
-  {
-    group: "cpf_srs",
-    title: "CPF & SRS",
-    description:
-      "Retirement money you can't spend yet. Shown apart on the overview.",
-    empty:
-      "Add your CPF balances, or an SRS account with your bank or platform.",
-    add: "Add CPF or SRS",
-    institution: "Held with",
-    value: "Value",
-  },
-];
 
 export function AccountsView({
   initialAdd,
 }: {
   initialAdd?: AccountGroup | null;
 }) {
+  const t = useT();
+
+  const GROUPS: {
+    group: AccountGroup;
+    title: string;
+    description: string;
+    empty: string;
+    add: string;
+    institution: string;
+    value: string;
+  }[] = [
+    {
+      group: "investments",
+      title: t.accounts.view.investments,
+      description:
+        t.accounts.view
+          .brokerageRetirementAndCryptoAccountsValuedFromTheirHoldings,
+      empty: t.accounts.view.addABrokerageRoboAdviserOrCryptoAccountAndList,
+      add: t.accounts.view.addInvestmentAccount,
+      institution: t.accounts.view.broker,
+      value: t.accounts.view.value,
+    },
+    {
+      group: "banking",
+      title: t.accounts.view.bankCards,
+      description:
+        t.accounts.view
+          .savingsCurrentAndCreditCardAccountsTheirTransactionsFeedSpending,
+      empty: t.accounts.view.addABankAccountOrCreditCardRecordItsBalance,
+      add: t.accounts.view.addBankOrCard,
+      institution: t.accounts.view.bank,
+      value: t.accounts.view.balance,
+    },
+    {
+      group: "cpf_srs",
+      title: t.accounts.view.cPFSRS,
+      description: t.accounts.view.retirementMoneyYouCanTSpendYetShownApartOn,
+      empty: t.accounts.view.addYourCPFBalancesOrAnSRSAccountWithYour,
+      add: t.accounts.view.addCPFOrSRS,
+      institution: t.accounts.view.heldWith,
+      value: t.accounts.view.value,
+    },
+  ];
+
   const router = useRouter();
   const utils = api.useUtils();
   const [rows] = api.accounts.list.useSuspenseQuery();
@@ -101,17 +99,21 @@ export function AccountsView({
     <>
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <FilterTabs
-          label="Filter accounts"
+          label={t.accounts.view.filterAccounts}
           value={filter}
           onChange={setFilter}
           options={[
-            { value: "open", label: "Open", count: open.length },
-            { value: "archived", label: "Archived", count: archived.length },
+            { value: "open", label: t.accounts.view.open, count: open.length },
+            {
+              value: "archived",
+              label: t.accounts.view.archived,
+              count: archived.length,
+            },
           ]}
         />
         <Button className="ml-auto" onClick={() => setAdding("choose")}>
           <Plus className="size-4" />
-          Add account
+          {t.accounts.view.addAccount}
         </Button>
       </div>
 
@@ -145,7 +147,7 @@ export function AccountsView({
                         href="/portfolio"
                         className="inline-flex min-h-10 items-center px-2 text-sm font-semibold underline underline-offset-4"
                       >
-                        Consolidated view
+                        {t.accounts.view.consolidatedView}
                       </Link>
                     ) : null}
                     {offered(g.group) ? (
@@ -183,7 +185,7 @@ export function AccountsView({
         })}
         {filter === "archived" && archived.length === 0 ? (
           <p className="text-ink-3 text-sm">
-            Accounts you remove that still have history end up here.
+            {t.accounts.view.accountsYouRemoveThatStillHaveHistoryEndUpHere}
           </p>
         ) : null}
       </div>
@@ -225,17 +227,19 @@ function AccountTable({
   restoring: string | undefined;
   onRestore: (id: string) => void;
 }) {
+  const t = useT();
+
   return (
     <Table>
       <thead>
         <tr>
-          <Th>Account</Th>
+          <Th>{t.accounts.view.account}</Th>
           <Th>{institution}</Th>
           <Th className="text-right">{value}</Th>
-          <Th className="text-right">As of</Th>
+          <Th className="text-right">{t.accounts.view.asOf}</Th>
           {archived ? (
             <Th className="text-right">
-              <span className="sr-only">Actions</span>
+              <span className="sr-only">{t.accounts.view.actions}</span>
             </Th>
           ) : null}
         </tr>
@@ -263,10 +267,10 @@ function AccountTable({
                     </span>
                   ) : null}
                   <span className="text-ink-3 block text-[12px]">
-                    {accountTypeLabels[r.type]}
+                    {t.common.accountTypes[r.type]}
                     {r.unpriced > 0 ? (
                       <Tag tone="warn" className="ml-2">
-                        {r.unpriced} unpriced
+                        {t.accounts.view.unpriced(r.unpriced)}
                       </Tag>
                     ) : null}
                   </span>
@@ -275,7 +279,7 @@ function AccountTable({
             </Td>
             <Td className="text-ink-2">{r.institutionName ?? "—"}</Td>
             <Td className="text-right font-mono text-[13px]">
-              <Amounts totals={r.totals} empty="Not recorded" />
+              <Amounts totals={r.totals} empty={t.accounts.view.notRecorded} />
             </Td>
             <Td className="text-ink-2 text-right">
               <BalanceDate asOf={r.asOf} />
@@ -288,7 +292,7 @@ function AccountTable({
                   loading={restoring === r.id}
                   onClick={() => onRestore(r.id)}
                 >
-                  Restore
+                  {t.accounts.view.restore}
                 </Button>
               </Td>
             ) : null}

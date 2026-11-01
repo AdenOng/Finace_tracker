@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { useT } from "~/i18n/client";
 import { AuthHeading } from "~/components/auth/auth-heading";
 import { Button } from "~/components/ui/button";
 import { Checkbox, Field, Input } from "~/components/ui/field";
@@ -14,6 +15,7 @@ import { safeNextPath } from "~/lib/navigation";
 import { formText } from "~/lib/form";
 
 export default function TwoFactorPage() {
+  const t = useT();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"totp" | "backup">("totp");
@@ -32,7 +34,7 @@ export default function TwoFactorPage() {
         ? await authClient.twoFactor.verifyTotp({ code, trustDevice })
         : await authClient.twoFactor.verifyBackupCode({ code, trustDevice });
     setPending(false);
-    if (error) return setError(error.message ?? "That code did not work");
+    if (error) return setError(error.message ?? t.auth.twoFactor.failed);
     queryClient.clear();
     router.replace(
       safeNextPath(new URL(window.location.href).searchParams.get("next")),
@@ -42,14 +44,21 @@ export default function TwoFactorPage() {
 
   return (
     <>
-      <AuthHeading title="Two-step check">
+      <AuthHeading title={t.auth.twoFactor.title}>
         {mode === "totp"
-          ? "Enter the 6-digit code from your authenticator app."
-          : "Enter one of the backup codes you saved when you turned on two-step sign-in."}
+          ? t.auth.twoFactor.totpHint
+          : t.auth.twoFactor.backupHint}
       </AuthHeading>
       <form onSubmit={onSubmit} className="space-y-5">
         {error ? <Notice tone="error">{error}</Notice> : null}
-        <Field label={mode === "totp" ? "Code" : "Backup code"} htmlFor="code">
+        <Field
+          label={
+            mode === "totp"
+              ? t.auth.twoFactor.code
+              : t.auth.twoFactor.backupCode
+          }
+          htmlFor="code"
+        >
           <Input
             key={mode}
             id="code"
@@ -61,9 +70,9 @@ export default function TwoFactorPage() {
             className="figures h-12 text-center text-xl tracking-[0.3em]"
           />
         </Field>
-        <Checkbox name="trust" label="Trust this device for 30 days" />
+        <Checkbox name="trust" label={t.auth.twoFactor.trust} />
         <Button type="submit" size="lg" className="w-full" loading={pending}>
-          Verify
+          {t.auth.twoFactor.verify}
         </Button>
       </form>
       <button
@@ -71,9 +80,7 @@ export default function TwoFactorPage() {
         onClick={() => setMode(mode === "totp" ? "backup" : "totp")}
         className="text-brand mt-6 text-sm font-semibold underline underline-offset-4"
       >
-        {mode === "totp"
-          ? "Use a backup code instead"
-          : "Use authenticator app instead"}
+        {mode === "totp" ? t.auth.twoFactor.useBackup : t.auth.twoFactor.useApp}
       </button>
     </>
   );

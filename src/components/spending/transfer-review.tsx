@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
+import { useT, useLocale } from "~/i18n/client";
 import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
 import { Button } from "~/components/ui/button";
 import { Input, Select } from "~/components/ui/field";
@@ -18,20 +19,27 @@ const pairKey = (match: Suggestion) =>
   `${key(match.outgoing)}:${key(match.incoming)}`;
 
 function SideLabel({ side }: { side: Side }) {
+  const t = useT();
+  const locale = useLocale();
   return (
     <span>
       <span className="font-semibold">{side.accountName}</span> ·{" "}
-      {formatDate(side.date)} ·{" "}
+      {formatDate(side.date, locale)} ·{" "}
       <span className="sensitive">
         {formatMoney(side.amount, side.currency)}
       </span>{" "}
-      {side.currency} · {side.direction === "out" ? "Outgoing" : "Incoming"}
+      {side.currency} ·{" "}
+      {side.direction === "out"
+        ? t.spending.transferReview.outgoing
+        : t.spending.transferReview.incoming}
       <span className="text-ink-3 block text-sm">{side.description}</span>
     </span>
   );
 }
 
 export function TransferReview() {
+  const t = useT();
+  const locale = useLocale();
   const [data] = api.transfers.list.useSuspenseQuery();
   const utils = api.useUtils();
   const [error, setError] = useState<string | null>(null);
@@ -80,13 +88,13 @@ export function TransferReview() {
     return (
       <div className="mt-3 space-y-3">
         <label className="block text-sm">
-          Counterpart
+          {t.spending.transferReview.counterpart}
           <Select
             className="mt-1"
             value={counterpart}
             onChange={(e) => setCounterpart(e.target.value)}
           >
-            <option value="">Choose an entry</option>
+            <option value="">{t.spending.transferReview.chooseAnEntry}</option>
             {candidates.map((s) => (
               <option key={key(s)} value={key(s)}>
                 {s.accountName} · {s.date} · {s.amount} {s.currency} ·{" "}
@@ -97,7 +105,7 @@ export function TransferReview() {
         </label>
         <div className="flex flex-wrap gap-3">
           <label className="text-sm">
-            Fee amount (optional)
+            {t.spending.transferReview.feeAmountOptional}
             <Input
               inputMode="decimal"
               value={feeAmount}
@@ -105,7 +113,7 @@ export function TransferReview() {
             />
           </label>
           <label className="text-sm">
-            Fee currency
+            {t.spending.transferReview.feeCurrency}
             <Input
               maxLength={3}
               value={feeCurrency}
@@ -114,8 +122,7 @@ export function TransferReview() {
           </label>
         </div>
         <p className="text-ink-3 text-xs">
-          Use a fee printed separately or an implied difference. This records
-          metadata only.
+          {t.spending.transferReview.useAFeePrintedSeparatelyOrAn}
         </p>
         <Button
           size="sm"
@@ -132,10 +139,10 @@ export function TransferReview() {
               });
           }}
         >
-          Link selected entries
+          {t.spending.transferReview.linkSelectedEntries}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => setChoosing(null)}>
-          Cancel
+          {t.common.actions.cancel}
         </Button>
       </div>
     );
@@ -143,14 +150,18 @@ export function TransferReview() {
   return (
     <>
       <Link href="/spending" className="text-sm underline underline-offset-4">
-        Back to spending
+        {t.spending.transferReview.backToSpending}
       </Link>
       <header className="my-5 flex items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-semibold">Transfers</h1>
+          <h1 className="font-display text-3xl font-semibold">
+            {t.spending.transferReview.transfers}
+          </h1>
           <p className="text-ink-3 mt-1 text-sm">
-            Match existing entries across your accounts. Fees here are notes on
-            the link; no transactions are created.
+            {
+              t.spending.transferReview
+                .matchExistingEntriesAcrossYourAccountsFees
+            }
           </p>
         </div>
         <AmountsToggle />
@@ -158,17 +169,17 @@ export function TransferReview() {
       {error ? <Notice tone="error">{error}</Notice> : null}
       <AmountsScope scope="spending-transactions">
         <h2 className="mb-3 text-lg font-semibold">
-          Suggested matches ({suggestions.length}{" "}
-          {suggestions.length === 1 ? "pair" : "pairs"})
+          {t.spending.transferReview.suggested(suggestions.length)}
         </h2>
         <p className="text-ink-3 mb-4 text-sm">
-          Suggestions allow −1 to +5 days, fees up to 1% (capped at 10), and 3%
-          FX variance. FX uses approximate latest rates
-          {data.fxAsOf ? ` as of ${formatDate(data.fxAsOf)}` : ""}; any FX
-          difference is not an inferred fee.
+          {t.spending.transferReview.suggestionPolicy(
+            data.fxAsOf ? formatDate(data.fxAsOf, locale) : null,
+          )}
         </p>
         {suggestions.length === 0 ? (
-          <p className="text-ink-3 mb-6">No suggested matches.</p>
+          <p className="text-ink-3 mb-6">
+            {t.spending.transferReview.noSuggestedMatches}
+          </p>
         ) : null}
         <ul className="space-y-4">
           {suggestions.map((match) => (
@@ -178,16 +189,18 @@ export function TransferReview() {
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                 <div>
-                  From <SideLabel side={match.outgoing} />
+                  {t.spending.transferReview.from}{" "}
+                  <SideLabel side={match.outgoing} />
                 </div>
                 <span aria-hidden="true">→</span>
                 <div>
-                  To <SideLabel side={match.incoming} />
+                  {t.spending.transferReview.toLabel}{" "}
+                  <SideLabel side={match.incoming} />
                 </div>
               </div>
               {match.feeAmount ? (
                 <p className="mt-2 text-sm">
-                  Implied fee:{" "}
+                  {t.spending.transferReview.impliedFee}{" "}
                   <span className="sensitive">
                     {formatMoney(match.feeAmount, match.feeCurrency!)}
                   </span>{" "}
@@ -196,8 +209,11 @@ export function TransferReview() {
               ) : null}
               {match.fxRate ? (
                 <p className="mt-2 text-sm">
-                  Approximate FX: 1 {match.outgoing.currency} = {match.fxRate}{" "}
-                  {match.incoming.currency}
+                  {t.spending.transferReview.fx(
+                    match.outgoing.currency,
+                    match.fxRate,
+                    match.incoming.currency,
+                  )}
                 </p>
               ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
@@ -211,7 +227,7 @@ export function TransferReview() {
                     })
                   }
                 >
-                  Confirm
+                  {t.common.actions.confirm}
                 </Button>
                 <Button
                   size="sm"
@@ -219,7 +235,7 @@ export function TransferReview() {
                   disabled={busy}
                   onClick={() => choose(match.outgoing, match)}
                 >
-                  Choose another / fee
+                  {t.spending.transferReview.chooseAnotherFee}
                 </Button>
                 <Button
                   size="sm"
@@ -230,7 +246,7 @@ export function TransferReview() {
                     setChoosing(null);
                   }}
                 >
-                  Not a pair
+                  {t.spending.transferReview.notAPair}
                 </Button>
               </div>
               {renderChooser(match.outgoing)}
@@ -238,18 +254,22 @@ export function TransferReview() {
           ))}
         </ul>
         <h2 className="mt-8 mb-3 text-lg font-semibold">
-          Without a match ({withoutMatch.length})
+          {t.spending.transferReview.unmatched(withoutMatch.length)}
         </h2>
         {withoutMatch.length === 0 ? (
-          <p className="text-ink-3 mb-6">No transfers without a match.</p>
+          <p className="text-ink-3 mb-6">
+            {t.spending.transferReview.noTransfersWithoutAMatch}
+          </p>
         ) : null}
         <ul className="space-y-4">
           {withoutMatch.map((side) => (
             <li key={key(side)} className="border-line rounded-xl border p-4">
               <SideLabel side={side} />
               <p className="text-ink-3 my-3 text-sm">
-                No suggested counterpart yet. Import the other statement or
-                choose an existing entry.
+                {
+                  t.spending.transferReview
+                    .noSuggestedCounterpartYetImportTheOther
+                }
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
@@ -258,7 +278,7 @@ export function TransferReview() {
                   disabled={busy}
                   onClick={() => choose(side)}
                 >
-                  Choose another / fee
+                  {t.spending.transferReview.chooseAnotherFee}
                 </Button>
                 <Button
                   size="sm"
@@ -266,7 +286,7 @@ export function TransferReview() {
                   disabled={busy}
                   onClick={() => exclude.mutate({ ...side, excluded: true })}
                 >
-                  No counterpart in Finfolio
+                  {t.spending.transferReview.noCounterpartInFinfolio}
                 </Button>
               </div>
               {renderChooser(side)}
@@ -274,17 +294,17 @@ export function TransferReview() {
           ))}
         </ul>
         <h2 className="mt-8 mb-3 text-lg font-semibold">
-          Linked transfers ({data.links.length})
+          {t.spending.transferReview.linked(data.links.length)}
         </h2>
         <ul className="space-y-3">
           {data.links.map((item) => (
             <li key={item.id} className="border-line rounded-xl border p-4">
               {item.outgoing ? <SideLabel side={item.outgoing} /> : null}
-              <p className="text-ink-3 my-1">to</p>
+              <p className="text-ink-3 my-1">{t.spending.transferReview.to}</p>
               {item.incoming ? <SideLabel side={item.incoming} /> : null}
               {item.feeAmount ? (
                 <p className="mt-2 text-sm">
-                  Fee:{" "}
+                  {t.spending.transferReview.fee}{" "}
                   <span className="sensitive">
                     {formatMoney(item.feeAmount, item.feeCurrency!)}
                   </span>{" "}
@@ -298,7 +318,7 @@ export function TransferReview() {
                 disabled={busy}
                 onClick={() => unlink.mutate({ id: item.id })}
               >
-                Unlink
+                {t.spending.transferReview.unlink}
               </Button>
             </li>
           ))}
@@ -306,7 +326,7 @@ export function TransferReview() {
         {data.excluded.length ? (
           <details className="mt-8">
             <summary className="cursor-pointer text-sm font-semibold">
-              No counterpart in Finfolio ({data.excluded.length})
+              {t.spending.transferReview.excluded(data.excluded.length)}
             </summary>
             <ul className="mt-3 space-y-3">
               {data.excluded.map((side) => (
@@ -322,7 +342,7 @@ export function TransferReview() {
                     disabled={busy}
                     onClick={() => exclude.mutate({ ...side, excluded: false })}
                   >
-                    Review again
+                    {t.spending.transferReview.reviewAgain}
                   </Button>
                 </li>
               ))}

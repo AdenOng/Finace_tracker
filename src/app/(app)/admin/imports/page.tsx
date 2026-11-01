@@ -1,3 +1,4 @@
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 
 import { ImportJobsAdmin } from "~/components/admin/import-jobs-admin";
@@ -6,17 +7,21 @@ import { requireAdminSession } from "~/server/auth";
 import { isEmailConfigured } from "~/server/lib/mailer";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Import jobs" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.adminManage.pages.imports.meta };
+}
 
 export default async function AdminImportsPage() {
+  const t = await getT();
   await requireAdminSession();
   void api.admin.jobs.counts.prefetch();
 
   return (
     <HydrateClient>
       <PageHeader
-        title="Import jobs"
-        description="Every statement read across the instance: retry failures, stop stuck reads and nudge people with statements waiting for review."
+        title={t.adminManage.pages.imports.title}
+        description={t.adminManage.pages.imports.description}
       />
       <ImportJobsAdmin emailConfigured={isEmailConfigured()} />
     </HydrateClient>

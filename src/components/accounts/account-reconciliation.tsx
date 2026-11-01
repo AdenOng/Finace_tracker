@@ -1,5 +1,7 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+
 import Decimal from "decimal.js";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
@@ -20,6 +22,8 @@ export function AccountReconciliation({
   accountId: string;
   currency: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const utils = api.useUtils();
   const history = api.reconciliation.list.useQuery({ accountId });
   const reopen = api.reconciliation.reopen.useMutation();
@@ -38,11 +42,14 @@ export function AccountReconciliation({
     <Section
       amounts="account-reconciliation"
       amountsFor={accountId}
-      title="Reconciliation"
-      description="Verify statement balances and protect the entries you have checked."
+      title={t.accounts.reconciliation.reconciliation}
+      description={
+        t.accounts.reconciliation
+          .verifyStatementBalancesAndProtectTheEntriesYouHaveChecked
+      }
       actions={
         <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
-          Reconcile statement
+          {t.accounts.reconciliation.reconcileStatement}
         </Button>
       }
     >
@@ -57,28 +64,35 @@ export function AccountReconciliation({
         </Notice>
       ) : null}
       {history.isLoading ? (
-        <p className="text-ink-2 text-sm">Loading statement periods…</p>
+        <p className="text-ink-2 text-sm">
+          {t.accounts.reconciliation.loadingStatementPeriods}
+        </p>
       ) : null}
       {history.data?.length === 0 ? (
         <p className="text-ink-2 text-sm">
-          No reconciled statements yet. Enter a statement’s opening and closing
-          balances, then check its transactions.
+          {
+            t.accounts.reconciliation
+              .noReconciledStatementsYetEnterAStatementSOpeningAnd
+          }
         </p>
       ) : null}
       {history.data?.length ? (
         <Table>
           <thead>
             <tr>
-              <Th>Period</Th>
-              <Th className="text-right">Closing balance</Th>
-              <Th>Actions</Th>
+              <Th>{t.accounts.reconciliation.period}</Th>
+              <Th className="text-right">
+                {t.accounts.reconciliation.closingBalance}
+              </Th>
+              <Th>{t.accounts.reconciliation.actions}</Th>
             </tr>
           </thead>
           <tbody>
             {history.data.map((record) => (
               <Tr key={record.id}>
                 <Td>
-                  {formatDate(record.startDate)} – {formatDate(record.endDate)}
+                  {formatDate(record.startDate, locale)} –{" "}
+                  {formatDate(record.endDate, locale)}
                 </Td>
                 <Td className="figures text-right">
                   <span className="sensitive">
@@ -103,14 +117,17 @@ export function AccountReconciliation({
                           .then(async () => {
                             setReopening(null);
                             setFlash(
-                              "Statement reopened. Its entries can be changed and reconciled again.",
+                              t.accounts.reconciliation
+                                .statementReopenedItsEntriesCanBeChangedAndReconciledAgain,
                             );
                             await refresh();
                           })
                           .catch(() => undefined);
                       }}
                     >
-                      {reopening === record.id ? "Confirm reopen" : "Reopen"}
+                      {reopening === record.id
+                        ? t.accounts.reconciliation.confirmReopen
+                        : t.accounts.reconciliation.reopen}
                     </Button>
                     {reopening === record.id ? (
                       <Button
@@ -118,7 +135,7 @@ export function AccountReconciliation({
                         variant="ghost"
                         onClick={() => setReopening(null)}
                       >
-                        Cancel
+                        {t.common.actions.cancel}
                       </Button>
                     ) : null}
                   </div>
@@ -136,7 +153,8 @@ export function AccountReconciliation({
           onSaved={async () => {
             setOpen(false);
             setFlash(
-              "Statement reconciled. Its transactions are cleared and protected.",
+              t.accounts.reconciliation
+                .statementReconciledItsTransactionsAreClearedAndProtected,
             );
             await refresh();
           }}
@@ -157,6 +175,8 @@ function ReconciliationDrawer({
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const [currencies] = api.catalog.currencies.useSuspenseQuery();
   const [period, setPeriod] = useState<
     RouterInputs["reconciliation"]["preview"] | null
@@ -214,13 +234,16 @@ function ReconciliationDrawer({
     <Drawer
       open
       onClose={onClose}
-      title="Reconcile statement"
+      title={t.accounts.reconciliation.reconcileStatement}
       className="max-w-2xl"
-      description="Opening balance + all signed transactions = closing balance. Transfers are included. Reconcile each currency separately."
+      description={
+        t.accounts.reconciliation
+          .openingBalanceAllSignedTransactionsClosingBalanceTransfersAreIncluded
+      }
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             loading={finish.isPending}
@@ -237,7 +260,7 @@ function ReconciliationDrawer({
                   .catch(() => undefined);
             }}
           >
-            Finish reconciliation
+            {t.accounts.reconciliation.finishReconciliation}
           </Button>
         </>
       }
@@ -254,7 +277,10 @@ function ReconciliationDrawer({
           }}
         >
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Statement start" htmlFor="reconcile-start">
+            <Field
+              label={t.accounts.reconciliation.statementStart}
+              htmlFor="reconcile-start"
+            >
               <Input
                 id="reconcile-start"
                 name="startDate"
@@ -263,7 +289,10 @@ function ReconciliationDrawer({
                 defaultValue={`${currentMonth()}-01`}
               />
             </Field>
-            <Field label="Statement end" htmlFor="reconcile-end">
+            <Field
+              label={t.accounts.reconciliation.statementEnd}
+              htmlFor="reconcile-end"
+            >
               <Input
                 id="reconcile-end"
                 name="endDate"
@@ -273,7 +302,10 @@ function ReconciliationDrawer({
               />
             </Field>
           </div>
-          <Field label="Statement currency" htmlFor="reconcile-currency">
+          <Field
+            label={t.accounts.reconciliation.statementCurrency}
+            htmlFor="reconcile-currency"
+          >
             <Select
               id="reconcile-currency"
               name="currency"
@@ -287,7 +319,10 @@ function ReconciliationDrawer({
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Opening balance" htmlFor="reconcile-opening">
+            <Field
+              label={t.accounts.reconciliation.openingBalance}
+              htmlFor="reconcile-opening"
+            >
               <Input
                 id="reconcile-opening"
                 name="openingBalance"
@@ -296,7 +331,10 @@ function ReconciliationDrawer({
                 placeholder="0.00"
               />
             </Field>
-            <Field label="Closing balance" htmlFor="reconcile-closing">
+            <Field
+              label={t.accounts.reconciliation.closingBalance}
+              htmlFor="reconcile-closing"
+            >
               <Input
                 id="reconcile-closing"
                 name="closingBalance"
@@ -307,35 +345,38 @@ function ReconciliationDrawer({
             </Field>
           </div>
           <p className="text-ink-2 text-sm">
-            Use the balance before the first day and after the last day. Amounts
-            owed on a credit card are negative. This check does not update your
-            portfolio balance snapshot.
+            {
+              t.accounts.reconciliation
+                .useTheBalanceBeforeTheFirstDayAndAfterThe
+            }
           </p>
           <Button
             type="submit"
             variant="secondary"
             loading={preview.isFetching}
           >
-            Review transactions
+            {t.accounts.reconciliation.reviewTransactions}
           </Button>
         </form>
         {data && period ? (
           <>
             {data.overlaps ? (
               <Notice tone="warn">
-                This period overlaps a reconciled statement. Reopen it before
-                continuing.
+                {
+                  t.accounts.reconciliation
+                    .thisPeriodOverlapsAReconciledStatementReopenItBeforeContinuing
+                }
               </Notice>
             ) : null}
             <dl className="bg-wash grid grid-cols-2 gap-4 p-4 text-sm">
               <div>
-                <dt>Expected closing balance</dt>
+                <dt>{t.accounts.reconciliation.expectedClosingBalance}</dt>
                 <dd className="figures font-semibold">
                   {formatMoney(data.expectedClosing, period.currency)}
                 </dd>
               </div>
               <div>
-                <dt>Difference</dt>
+                <dt>{t.accounts.reconciliation.difference}</dt>
                 <dd className="figures font-semibold">
                   {formatMoney(data.difference, period.currency, {
                     signed: true,
@@ -345,16 +386,18 @@ function ReconciliationDrawer({
             </dl>
             {!matching ? (
               <Notice tone="warn">
-                Balances do not match. Check for missing or duplicate
-                transactions, incorrect amounts, and the statement dates.
-                Correct the entries in Spending, then review again. Exact
-                difference: {data.difference} {period.currency}.
+                {t.accounts.reconciliation.mismatch(
+                  data.difference,
+                  period.currency,
+                )}
               </Notice>
             ) : null}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm">
-                {verified.size} of {data.rows.length} entries verified against
-                the statement.
+                {t.accounts.reconciliation.verifiedCount(
+                  verified.size,
+                  data.rows.length,
+                )}
               </p>
               <Button
                 size="sm"
@@ -371,17 +414,17 @@ function ReconciliationDrawer({
                 }
               >
                 {verified.size === data.rows.length && data.rows.length > 0
-                  ? "Uncheck all"
-                  : "Verify all entries"}
+                  ? t.accounts.reconciliation.uncheckAll
+                  : t.accounts.reconciliation.verifyAllEntries}
               </Button>
             </div>
             {data.rows.length ? (
               <Table>
                 <thead>
                   <tr>
-                    <Th>Verified</Th>
-                    <Th>Date / description</Th>
-                    <Th className="text-right">Amount</Th>
+                    <Th>{t.accounts.reconciliation.verified}</Th>
+                    <Th>{t.accounts.reconciliation.dateDescription}</Th>
+                    <Th className="text-right">{t.common.fields.amount}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -391,7 +434,10 @@ function ReconciliationDrawer({
                         <input
                           type="checkbox"
                           className="accent-brand size-4"
-                          aria-label={`Verify ${row.description} on ${row.postedDate}`}
+                          aria-label={t.accounts.reconciliation.verify(
+                            row.description,
+                            row.postedDate,
+                          )}
                           checked={verified.has(row.id)}
                           disabled={data.overlaps || finish.isPending}
                           onChange={(e) => {
@@ -404,7 +450,7 @@ function ReconciliationDrawer({
                       </Td>
                       <Td>
                         <span className="text-ink-3 block text-[13px]">
-                          {formatDate(row.postedDate)}
+                          {formatDate(row.postedDate, locale)}
                         </span>
                         {row.merchant ?? row.description}
                       </Td>
@@ -419,8 +465,10 @@ function ReconciliationDrawer({
               </Table>
             ) : (
               <p className="text-ink-2 text-sm">
-                No entries in this period and currency. Only finish if the
-                unchanged balance matches your statement.
+                {
+                  t.accounts.reconciliation
+                    .noEntriesInThisPeriodAndCurrencyOnlyFinishIf
+                }
               </p>
             )}
           </>

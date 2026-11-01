@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { categoryLabel, useT, useLocale } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { Select } from "~/components/ui/field";
 import { Notice, Section } from "~/components/ui/panel";
@@ -18,6 +19,8 @@ export function WorkspaceSpending({
   initialMonth: string;
   accounts: RouterOutputs["accounts"]["list"];
 }) {
+  const t = useT();
+  const locale = useLocale();
   const [month, setMonth] = useState(initialMonth);
   const [accountId, setAccountId] = useState<string | null>(null);
   const summary = api.spending.summary.useQuery(
@@ -34,26 +37,30 @@ export function WorkspaceSpending({
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
-          aria-label="Previous month"
+          aria-label={t.workspaces.workspaceSpending.previousMonth}
           onClick={() => setMonth(shiftMonth(month, -1))}
         >
           ←
         </Button>
-        <p className="font-semibold">{formatMonth(month)}</p>
+        <p className="font-semibold">{formatMonth(month, locale)}</p>
         <Button
           variant="ghost"
-          aria-label="Next month"
+          aria-label={t.workspaces.workspaceSpending.nextMonth}
           onClick={() => setMonth(shiftMonth(month, 1))}
         >
           →
         </Button>
         <Select
-          aria-label="Filter shared transactions by account"
+          aria-label={
+            t.workspaces.workspaceSpending.filterSharedTransactionsByAccount
+          }
           className="ml-auto w-auto"
           value={accountId ?? ""}
           onChange={(e) => setAccountId(e.target.value || null)}
         >
-          <option value="">All shared accounts</option>
+          <option value="">
+            {t.workspaces.workspaceSpending.allSharedAccounts}
+          </option>
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name} · {a.ownerName}
@@ -64,29 +71,42 @@ export function WorkspaceSpending({
       <Section
         amounts="workspace-spending"
         amountsFor={workspaceId}
-        title="Spending summary"
-        description="Marked transfers are excluded. Amounts are grouped by their original currency."
+        title={t.workspaces.workspaceSpending.spendingSummary}
+        description={
+          t.workspaces.workspaceSpending
+            .markedTransfersAreExcludedAmountsAreGrouped
+        }
       >
         {summary.error ? (
           <Notice tone="error">{summary.error.message}</Notice>
         ) : !summary.data ? (
-          <p>Loading summary…</p>
+          <p>{t.workspaces.workspaceSpending.loadingSummary}</p>
         ) : !summary.data.length ? (
-          <p className="text-ink-2 text-sm">No spending recorded this month.</p>
+          <p className="text-ink-2 text-sm">
+            {t.workspaces.workspaceSpending.noSpendingRecordedThisMonth}
+          </p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Category</Th>
-                <Th>Currency</Th>
-                <Th className="text-right">Spent</Th>
-                <Th className="text-right">Received</Th>
+                <Th>{t.workspaces.workspaceSpending.category}</Th>
+                <Th>{t.common.fields.currency}</Th>
+                <Th className="text-right">
+                  {t.workspaces.workspaceSpending.spent}
+                </Th>
+                <Th className="text-right">
+                  {t.workspaces.workspaceSpending.received}
+                </Th>
               </tr>
             </thead>
             <tbody>
               {summary.data.map((r) => (
                 <Tr key={`${r.categoryId}-${r.currency}`}>
-                  <Td>{r.categoryName ?? "Uncategorised"}</Td>
+                  <Td>
+                    {r.categoryName
+                      ? categoryLabel(t, r.categoryName)
+                      : t.workspaces.workspaceSpending.uncategorised}
+                  </Td>
                   <Td>{r.currency}</Td>
                   <Td className="figures text-right">
                     <span className="sensitive">
@@ -107,45 +127,52 @@ export function WorkspaceSpending({
       <Section
         amounts="workspace-transactions"
         amountsFor={workspaceId}
-        title="Shared transactions"
-        description="Read-only. Account owners manage entries in Personal view."
+        title={t.workspaces.workspaceSpending.sharedTransactions}
+        description={
+          t.workspaces.workspaceSpending
+            .readonlyAccountOwnersManageEntriesInPersonal
+        }
       >
         {list.error ? (
           <Notice tone="error">{list.error.message}</Notice>
         ) : !list.data ? (
-          <p>Loading transactions…</p>
+          <p>{t.workspaces.workspaceSpending.loadingTransactions}</p>
         ) : !list.data.length ? (
-          <p className="text-ink-2 text-sm">No transactions match.</p>
+          <p className="text-ink-2 text-sm">
+            {t.workspaces.workspaceSpending.noTransactionsMatch}
+          </p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Date</Th>
-                <Th>Description</Th>
-                <Th>Account / owner</Th>
-                <Th>Category</Th>
-                <Th className="text-right">Amount</Th>
+                <Th>{t.common.fields.date}</Th>
+                <Th>{t.workspaces.workspaceSpending.description}</Th>
+                <Th>{t.workspaces.workspaceSpending.accountOwner}</Th>
+                <Th>{t.workspaces.workspaceSpending.category}</Th>
+                <Th className="text-right">{t.common.fields.amount}</Th>
               </tr>
             </thead>
             <tbody>
-              {list.data.map((t) => (
-                <Tr key={t.id}>
-                  <Td>{formatDate(t.postedDate)}</Td>
-                  <Td>{t.merchant ?? t.description}</Td>
+              {list.data.map((row) => (
+                <Tr key={row.id}>
+                  <Td>{formatDate(row.postedDate, locale)}</Td>
+                  <Td>{row.merchant ?? row.description}</Td>
                   <Td>
-                    {t.accountName}
+                    {row.accountName}
                     <span className="text-ink-3 block text-[13px]">
-                      {owners.get(t.accountId)}
+                      {owners.get(row.accountId)}
                     </span>
                   </Td>
                   <Td>
-                    {t.isTransfer
-                      ? "Transfer"
-                      : (t.categoryName ?? "Uncategorised")}
+                    {row.isTransfer
+                      ? t.workspaces.workspaceSpending.transfer
+                      : row.categoryName
+                        ? categoryLabel(t, row.categoryName)
+                        : t.workspaces.workspaceSpending.uncategorised}
                   </Td>
                   <Td className="figures text-right">
                     <span className="sensitive">
-                      {formatMoney(t.amount, t.currency, { signed: true })}
+                      {formatMoney(row.amount, row.currency, { signed: true })}
                     </span>
                   </Td>
                 </Tr>

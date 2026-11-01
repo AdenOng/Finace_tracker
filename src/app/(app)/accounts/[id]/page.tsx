@@ -1,3 +1,4 @@
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 import { requireEnrolledSession } from "~/server/auth";
 import { notFound } from "next/navigation";
@@ -6,7 +7,10 @@ import { z } from "zod";
 import { AccountDetail } from "~/components/accounts/account-detail";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Account" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.accounts.meta.detailTitle };
+}
 
 export default async function AccountPage({
   params,

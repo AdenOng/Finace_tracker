@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { Button } from "~/components/ui/button";
+import { useT } from "~/i18n/client";
 import type { AmountScope } from "~/lib/privacy";
 import { api } from "~/trpc/react";
 
@@ -168,13 +169,22 @@ export function AmountsToggle({
   global?: boolean;
   className?: string;
 }) {
+  const t = useT();
   const { prefs, unsaved, setHidden, setCard } = usePrefs();
   const card = useContext(CardContext);
   const own = global ? null : card;
   const hidden = own
     ? (prefs.scopes[keyOf(own)] ?? prefs.hidden)
     : prefs.hidden;
-  const label = `${hidden ? "Show" : "Hide"} ${own ? "amounts in this card" : "all amounts"}${unsaved ? " (couldn't save; applies until you reload)" : ""}`;
+  const { amounts } = t.common;
+  const action = own
+    ? hidden
+      ? amounts.showCard
+      : amounts.hideCard
+    : hidden
+      ? amounts.showAll
+      : amounts.hideAll;
+  const label = unsaved ? `${action} ${amounts.unsaved}` : action;
   const Icon = hidden ? EyeOff : Eye;
   return (
     <Button

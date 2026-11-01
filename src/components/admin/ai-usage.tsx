@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+import { intlLocale } from "~/i18n/config";
+
 import Decimal from "decimal.js";
 import { useMemo, useState } from "react";
 
@@ -27,6 +30,8 @@ function cost(price: Price | undefined, input: number, output: number) {
 }
 
 function DailyChart({ usage }: { usage: Usage }) {
+  const t = useT();
+  const locale = useLocale();
   const [hover, setHover] = useState<number | null>(null);
   const days = useMemo(() => {
     const totals = new Map<string, { tokens: number; jobs: number }>();
@@ -55,28 +60,30 @@ function DailyChart({ usage }: { usage: Usage }) {
           {shown ? (
             <>
               <span className="text-ink font-semibold">
-                {formatDate(shown.day)}
+                {formatDate(shown.day, locale)}
               </span>{" "}
-              · {integer.format(shown.tokens)} tokens · {shown.jobs} job
-              {shown.jobs === 1 ? "" : "s"}
+              {t.admin.usage.dayDetail(
+                integer.format(shown.tokens),
+                shown.jobs,
+              )}
             </>
           ) : (
             <>
               <span className="text-ink font-semibold">
-                {compact.format(total)} tokens
+                {t.admin.usage.tokenCount(compact.format(total))}
               </span>{" "}
-              over {usage.days} days. Hover a day for detail.
+              {t.admin.usage.overDays(usage.days)}
             </>
           )}
         </p>
         <p className="text-ink-3 text-[12px]">
-          Peak {compact.format(peak === 1 ? 0 : peak)}
+          {t.admin.usage.peak(compact.format(peak === 1 ? 0 : peak))}
         </p>
       </div>
       <div
         className="border-line flex h-40 items-end gap-[2px] border-b"
         role="img"
-        aria-label={`Tokens used per day over the last ${usage.days} days, ${integer.format(total)} in total. The table below has the figures.`}
+        aria-label={t.admin.usage.chartLabel(usage.days, integer.format(total))}
         onMouseLeave={() => setHover(null)}
       >
         {days.map((d, i) => (
@@ -101,14 +108,16 @@ function DailyChart({ usage }: { usage: Usage }) {
         ))}
       </div>
       <div className="text-ink-3 mt-1 flex justify-between text-[12px]">
-        <span>{formatDate(days[0]!.day)}</span>
-        <span>{formatDate(days.at(-1)!.day)}</span>
+        <span>{formatDate(days[0]!.day, locale)}</span>
+        <span>{formatDate(days.at(-1)!.day, locale)}</span>
       </div>
     </div>
   );
 }
 
 export function AiUsage() {
+  const t = useT();
+  const locale = useLocale();
   const [usage] = api.admin.ai.usage.useSuspenseQuery({ days: 30 });
   const prices = useMemo(
     () => new Map(usage.providers.map((p) => [p.id, p])),
@@ -131,8 +140,8 @@ export function AiUsage() {
       const entry = map.get(key) ?? {
         id: row.providerId,
         name: row.providerId
-          ? (prices.get(row.providerId)?.name ?? "Deleted provider")
-          : "Not recorded",
+          ? (prices.get(row.providerId)?.name ?? t.admin.usage.deletedProvider)
+          : t.admin.usage.notRecorded,
         jobs: 0,
         input: 0,
         output: 0,
@@ -145,20 +154,20 @@ export function AiUsage() {
     return [...map.values()].sort(
       (a, b) => b.input + b.output - (a.input + a.output),
     );
-  }, [month, prices]);
+  }, [month, prices, t]);
   const monthCost = byProvider.reduce<Decimal | null>((acc, p) => {
     const c = p.id ? cost(prices.get(p.id), p.input, p.output) : null;
     return c ? (acc ?? new Decimal(0)).plus(c) : acc;
   }, null);
-  const monthName = new Intl.DateTimeFormat("en-SG", {
+  const monthName = new Intl.DateTimeFormat(intlLocale[locale], {
     month: "long",
     timeZone: "UTC",
   }).format(new Date());
 
   if (usage.daily.length === 0 && month.length === 0) {
     return (
-      <EmptyState title="No usage yet">
-        Token counts appear here once statements have been read.
+      <EmptyState title={t.admin.usage.noUsageYet}>
+        {t.admin.usage.tokenCountsAppearHereOnceStatementsHaveBeenRead}
       </EmptyState>
     );
   }
@@ -166,22 +175,25 @@ export function AiUsage() {
   return (
     <div className="space-y-6">
       <Section
-        title={`${monthName} so far`}
+        title={t.admin.usage.monthSoFar(monthName)}
         description={
           monthCost
-            ? `Estimated cost ${formatMoney(monthCost.toFixed(2), "USD")} from the list prices you entered. Your provider's bill is the source of truth.`
-            : "Add list prices to a provider (Edit → Cost & limits) to see estimated cost."
+            ? t.admin.usage.estimatedCost(
+                formatMoney(monthCost.toFixed(2), "USD"),
+              )
+            : t.admin.usage
+                .addListPricesToAProviderEditCostLimitsToSeeEstimatedCost
         }
       >
         <Table>
           <thead>
             <tr>
-              <Th>Provider</Th>
-              <Th className="text-right">Jobs</Th>
-              <Th className="text-right">Input tokens</Th>
-              <Th className="text-right">Output tokens</Th>
-              <Th className="text-right">Est. cost</Th>
-              <Th>Monthly limit</Th>
+              <Th>{t.admin.usage.provider}</Th>
+              <Th className="text-right">{t.admin.usage.jobs}</Th>
+              <Th className="text-right">{t.admin.usage.inputTokens}</Th>
+              <Th className="text-right">{t.admin.usage.outputTokens}</Th>
+              <Th className="text-right">{t.admin.usage.estCost}</Th>
+              <Th>{t.admin.usage.monthlyLimit}</Th>
             </tr>
           </thead>
           <tbody>
@@ -209,7 +221,7 @@ export function AiUsage() {
                   </Td>
                   <Td>
                     {share === null ? (
-                      <span className="text-ink-3">None</span>
+                      <span className="text-ink-3">{t.common.status.none}</span>
                     ) : (
                       <Tag
                         tone={
@@ -220,8 +232,10 @@ export function AiUsage() {
                               : "neutral"
                         }
                       >
-                        {Math.round(share * 100)}% of{" "}
-                        {compact.format(price!.monthlyTokenLimit!)}
+                        {t.admin.usage.limitShare(
+                          Math.round(share * 100),
+                          compact.format(price!.monthlyTokenLimit!),
+                        )}
                       </Tag>
                     )}
                   </Td>
@@ -233,21 +247,21 @@ export function AiUsage() {
       </Section>
 
       <Section
-        title="Tokens per day"
-        description="Input and output tokens together, last 30 days (UTC)."
+        title={t.admin.usage.tokensPerDay}
+        description={t.admin.usage.inputAndOutputTokensTogetherLast30DaysUtc}
       >
         <DailyChart usage={usage} />
       </Section>
 
-      <Section title="By model, last 30 days">
+      <Section title={t.admin.usage.byModelLast30Days}>
         <Table>
           <thead>
             <tr>
-              <Th>Model</Th>
-              <Th>Provider</Th>
-              <Th className="text-right">Jobs</Th>
-              <Th className="text-right">Avg tokens per job</Th>
-              <Th className="text-right">Total tokens</Th>
+              <Th>{t.admin.usage.model}</Th>
+              <Th>{t.admin.usage.provider}</Th>
+              <Th className="text-right">{t.admin.usage.jobs}</Th>
+              <Th className="text-right">{t.admin.usage.avgTokensPerJob}</Th>
+              <Th className="text-right">{t.admin.usage.totalTokens}</Th>
             </tr>
           </thead>
           <tbody>
@@ -265,10 +279,11 @@ export function AiUsage() {
               >((acc, row) => {
                 const key = `${row.providerId ?? "none"}|${row.model ?? "?"}`;
                 const entry = (acc[key] ??= {
-                  model: row.model ?? "Unknown",
+                  model: row.model ?? t.common.status.unknown,
                   provider: row.providerId
-                    ? (prices.get(row.providerId)?.name ?? "Deleted provider")
-                    : "Not recorded",
+                    ? (prices.get(row.providerId)?.name ??
+                      t.admin.usage.deletedProvider)
+                    : t.admin.usage.notRecorded,
                   jobs: 0,
                   tokens: 0,
                 });

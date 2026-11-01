@@ -1,5 +1,8 @@
 "use client";
 
+import { useT } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import { Plus, RotateCcw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -25,32 +28,32 @@ type Institution = RouterOutputs["admin"]["institutions"]["list"][number];
 type Kind = Institution["kind"];
 type Method = Institution["ingestMethods"][number];
 
-const kindLabels: Record<Kind, string> = {
-  broker: "Broker",
-  bank: "Bank",
-  card_issuer: "Card issuer",
-  crypto_exchange: "Crypto exchange",
-  depository: "Depository",
-  other: "Other",
-};
+const getKindLabels = (t: Messages) => ({
+  broker: t.adminManage.institutions.broker,
+  bank: t.adminManage.institutions.bank,
+  card_issuer: t.adminManage.institutions.cardIssuer,
+  crypto_exchange: t.adminManage.institutions.cryptoExchange,
+  depository: t.adminManage.institutions.depository,
+  other: t.adminManage.institutions.other,
+});
 
-const kindPlurals: Record<Kind, string> = {
-  broker: "Brokers",
-  bank: "Banks",
-  card_issuer: "Card issuers",
-  crypto_exchange: "Crypto exchanges",
-  depository: "Depositories",
-  other: "Other",
-};
+const getKindPlurals = (t: Messages) => ({
+  broker: t.adminManage.institutions.brokers,
+  bank: t.adminManage.institutions.banks,
+  card_issuer: t.adminManage.institutions.cardIssuers,
+  crypto_exchange: t.adminManage.institutions.cryptoExchanges,
+  depository: t.adminManage.institutions.depositories,
+  other: t.adminManage.institutions.other,
+});
 
-const methodLabels: Record<Method, string> = {
-  api: "API sync",
-  csv: "CSV",
-  statement_ocr: "Statement reading",
-};
+const getMethodLabels = (t: Messages) => ({
+  api: t.adminManage.institutions.apiSync,
+  csv: t.adminManage.institutions.csv,
+  statement_ocr: t.adminManage.institutions.statementReading,
+});
 
-const apiAdapters = [
-  { value: "", label: "None" },
+const getApiAdapters = (t: Messages) => [
+  { value: "", label: t.adminManage.institutions.none },
   { value: "ibkr_flex", label: "IBKR Flex Web Service" },
   { value: "longbridge", label: "Longbridge OpenAPI" },
   { value: "moomoo_opend", label: "moomoo OpenD" },
@@ -75,6 +78,10 @@ function removalOutcome(i: Institution) {
 }
 
 export function InstitutionsAdmin() {
+  const t = useT();
+  const kindLabels = getKindLabels(t);
+  const kindPlurals = getKindPlurals(t);
+  const methodLabels = getMethodLabels(t);
   const utils = api.useUtils();
   const [rows] = api.admin.institutions.list.useSuspenseQuery();
   const [filter, setFilter] = useState<Filter>("all");
@@ -96,8 +103,10 @@ export function InstitutionsAdmin() {
     onSuccess: async (r) => {
       success(
         r.inserted + r.unarchived === 0
-          ? "All defaults are already present."
-          : `Restored ${r.inserted + r.unarchived} default institution${r.inserted + r.unarchived === 1 ? "" : "s"}.`,
+          ? t.adminManage.institutions.allDefaultsAreAlreadyPresent
+          : t.adminManage.institutions.defaultsRestored(
+              r.inserted + r.unarchived,
+            ),
       );
       await invalidate();
     },
@@ -106,7 +115,7 @@ export function InstitutionsAdmin() {
   const restore = api.admin.institutions.restore.useMutation({
     onMutate: clear,
     onSuccess: async () => {
-      success("Restored. People can pick it again when adding an account.");
+      success(t.adminManage.institutions.institutionRestored);
       await invalidate();
     },
     onError: error,
@@ -132,7 +141,11 @@ export function InstitutionsAdmin() {
   });
 
   const tabs: { value: Filter; label: string; count?: number }[] = [
-    { value: "all", label: "Active", count: counts.all },
+    {
+      value: "all",
+      label: t.adminManage.institutions.active,
+      count: counts.all,
+    },
     ...(
       [
         "broker",
@@ -145,7 +158,11 @@ export function InstitutionsAdmin() {
     )
       .filter((k) => counts[k])
       .map((k) => ({ value: k, label: kindPlurals[k], count: counts[k] })),
-    { value: "archived", label: "Archived", count: counts.archived },
+    {
+      value: "archived",
+      label: t.adminManage.institutions.archived,
+      count: counts.archived,
+    },
   ];
 
   return (
@@ -154,8 +171,8 @@ export function InstitutionsAdmin() {
         <div className="relative w-full max-w-xs">
           <Search className="text-ink-3 pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
-            aria-label="Search institutions"
-            placeholder="Search by name"
+            aria-label={t.adminManage.institutions.searchInstitutions}
+            placeholder={t.adminManage.institutions.searchByName}
             className="pl-9"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -167,26 +184,28 @@ export function InstitutionsAdmin() {
             disabled={missingDefaults === 0}
             title={
               missingDefaults === 0
-                ? "Every default institution is present"
+                ? t.adminManage.institutions.defaultsAlreadyPresentLabel
                 : [
-                    ...(defaults.data?.missing ?? []).map((n) => `Add ${n}`),
-                    ...(defaults.data?.archived ?? []).map(
-                      (n) => `Restore ${n}`,
+                    ...(defaults.data?.missing ?? []).map((n) =>
+                      t.adminManage.institutions.add(n),
+                    ),
+                    ...(defaults.data?.archived ?? []).map((n) =>
+                      t.adminManage.institutions.restoreNamed(n),
                     ),
                   ].join("\n")
             }
-            confirmLabel={`Bring back ${missingDefaults}?`}
+            confirmLabel={t.adminManage.institutions.bringBack(missingDefaults)}
             onConfirm={() => restoreDefaults.mutate()}
             loading={restoreDefaults.isPending}
           >
             <RotateCcw className="size-4" />
             {missingDefaults
-              ? `Restore ${missingDefaults} default${missingDefaults === 1 ? "" : "s"}`
-              : "Defaults present"}
+              ? t.adminManage.institutions.restoreDefault(missingDefaults)
+              : t.adminManage.institutions.defaultsPresent}
           </ConfirmButton>
           <Button onClick={() => setEditing("new")}>
             <Plus className="size-4" />
-            Add institution
+            {t.adminManage.institutions.addInstitution}
           </Button>
         </div>
       </div>
@@ -194,7 +213,7 @@ export function InstitutionsAdmin() {
       <FlashNotice flash={flash} className="mb-6" />
 
       <FilterTabs
-        label="Filter institutions"
+        label={t.adminManage.institutions.filterInstitutions}
         value={filter}
         onChange={setFilter}
         options={tabs}
@@ -203,24 +222,32 @@ export function InstitutionsAdmin() {
       {visible.length === 0 ? (
         <div className="mt-6">
           <EmptyState
-            title={filter === "archived" ? "Nothing archived" : "No matches"}
+            title={
+              filter === "archived"
+                ? t.adminManage.institutions.nothingArchived
+                : t.adminManage.institutions.noMatches
+            }
           >
             {filter === "archived"
-              ? "Defaults you remove, and institutions still used by accounts, end up here."
-              : "Try a different search, or add the institution yourself."}
+              ? t.adminManage.institutions.archivedInstitutionsHelp
+              : t.adminManage.institutions.noMatchesHelp}
           </EmptyState>
         </div>
       ) : (
         <Table className="mt-6">
           <thead>
             <tr>
-              <Th>Name</Th>
-              <Th>Type</Th>
-              <Th>Country</Th>
-              <Th>How data comes in</Th>
-              <Th className="text-right">Accounts</Th>
+              <Th>{t.adminManage.institutions.name}</Th>
+              <Th>{t.common.fields.type}</Th>
+              <Th>{t.adminManage.institutions.country}</Th>
+              <Th>{t.adminManage.institutions.howDataComesIn}</Th>
               <Th className="text-right">
-                <span className="sr-only">Actions</span>
+                {t.adminManage.institutions.accounts}
+              </Th>
+              <Th className="text-right">
+                <span className="sr-only">
+                  {t.adminManage.institutions.actions}
+                </span>
               </Th>
             </tr>
           </thead>
@@ -237,7 +264,7 @@ export function InstitutionsAdmin() {
                   </button>
                   {!r.isSystem ? (
                     <Tag tone="outline" className="ml-2">
-                      Custom
+                      {t.adminManage.institutions.custom}
                     </Tag>
                   ) : null}
                 </Td>
@@ -272,7 +299,7 @@ export function InstitutionsAdmin() {
                       }
                       onClick={() => restore.mutate({ id: r.id })}
                     >
-                      Restore
+                      {t.adminManage.institutions.restore}
                     </Button>
                   ) : (
                     <Button
@@ -280,7 +307,7 @@ export function InstitutionsAdmin() {
                       size="sm"
                       onClick={() => setEditing(r)}
                     >
-                      Edit
+                      {t.common.actions.edit}
                     </Button>
                   )}
                 </Td>
@@ -292,7 +319,7 @@ export function InstitutionsAdmin() {
 
       <InstitutionDrawer
         key={editing === "new" ? "new" : (editing?.id ?? "closed")}
-        institution={editing}
+        institutionCount={editing}
         mergeTargets={rows.filter(
           (r) => !r.archivedAt && (editing === "new" || r.id !== editing?.id),
         )}
@@ -308,17 +335,22 @@ export function InstitutionsAdmin() {
 }
 
 function InstitutionDrawer({
-  institution,
+  institutionCount,
   mergeTargets,
   onClose,
   onSaved,
 }: {
-  institution: Institution | "new" | null;
+  institutionCount: Institution | "new" | null;
   mergeTargets: Institution[];
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
-  const existing = institution && institution !== "new" ? institution : null;
+  const t = useT();
+  const kindLabels = getKindLabels(t);
+  const methodLabels = getMethodLabels(t);
+  const apiAdapters = getApiAdapters(t);
+  const existing =
+    institutionCount && institutionCount !== "new" ? institutionCount : null;
   const [methods, setMethods] = useState<Method[]>(
     existing?.ingestMethods ?? ["statement_ocr"],
   );
@@ -348,10 +380,10 @@ function InstitutionDrawer({
     };
     if (existing) {
       await update.mutateAsync({ id: existing.id, ...values });
-      await onSaved(`Saved ${values.name}.`);
+      await onSaved(t.adminManage.institutions.saved(values.name));
     } else {
       await create.mutateAsync(values);
-      await onSaved(`Added ${values.name}.`);
+      await onSaved(t.adminManage.institutions.added(values.name));
     }
   }
 
@@ -360,22 +392,24 @@ function InstitutionDrawer({
     const result = await remove.mutateAsync({ id: existing.id });
     await onSaved(
       result.outcome === "deleted"
-        ? `Removed ${existing.name}.`
+        ? t.adminManage.institutions.removed(existing.name)
         : result.reason === "default"
-          ? `${existing.name} is a default, so it was archived. Restore it from the archived list.`
-          : `${existing.name} is used by existing accounts, so it was archived instead of deleted.`,
+          ? t.adminManage.institutions.defaultArchived(existing.name)
+          : t.adminManage.institutions.inUseArchived(existing.name),
     );
   }
 
   return (
     <Drawer
-      open={institution !== null}
+      open={institutionCount !== null}
       onClose={onClose}
-      title={existing ? existing.name : "Add institution"}
+      title={
+        existing ? existing.name : t.adminManage.institutions.addInstitution
+      }
       description={
         existing
-          ? `Key: ${existing.key}`
-          : "Brokers, banks and card issuers your users can pick when adding accounts."
+          ? t.adminManage.institutions.key(existing.key)
+          : t.adminManage.institutions.institutionHelp
       }
       footer={
         <>
@@ -383,22 +417,28 @@ function InstitutionDrawer({
             <ConfirmButton
               variant="danger"
               className="mr-auto"
-              confirmLabel={outcome === "delete" ? "Delete it?" : "Archive it?"}
+              confirmLabel={
+                outcome === "delete"
+                  ? t.adminManage.institutions.deleteIt
+                  : t.adminManage.institutions.archiveIt
+              }
               onConfirm={() => void onRemove().catch(() => undefined)}
               loading={remove.isPending}
             >
-              {outcome === "delete" ? "Delete" : "Archive"}
+              {outcome === "delete"
+                ? t.common.actions.delete
+                : t.common.actions.archive}
             </ConfirmButton>
           ) : null}
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             type="submit"
             form="institution-form"
             loading={create.isPending || update.isPending}
           >
-            {existing ? "Save" : "Add"}
+            {existing ? t.common.actions.save : t.common.actions.add}
           </Button>
         </>
       }
@@ -412,13 +452,20 @@ function InstitutionDrawer({
         {existing && !existing.archivedAt ? (
           <p className="text-ink-3 text-[13px]">
             {outcome === "delete"
-              ? "Not used by any account or upload, so removing it deletes it."
+              ? t.adminManage.institutions.deleteHelp
               : outcome === "archive-default"
-                ? "A default from the preset pack: removing it archives it, so the next start-up does not add it back."
-                : `Used by ${existing.accountCount} account${existing.accountCount === 1 ? "" : "s"}${existing.documentCount ? ` and ${existing.documentCount} upload${existing.documentCount === 1 ? "" : "s"}` : ""}: removing it archives it and keeps their history.`}
+                ? t.adminManage.institutions.archiveDefaultHelp
+                : t.adminManage.institutions.archiveUsageHelp(
+                    existing.accountCount,
+                    existing.documentCount
+                      ? t.adminManage.institutions.uploadUsage(
+                          existing.documentCount,
+                        )
+                      : "",
+                  )}
           </p>
         ) : null}
-        <Field label="Name" htmlFor="inst-name">
+        <Field label={t.adminManage.institutions.name} htmlFor="inst-name">
           <Input
             id="inst-name"
             name="name"
@@ -427,7 +474,7 @@ function InstitutionDrawer({
           />
         </Field>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Type" htmlFor="inst-kind">
+          <Field label={t.common.fields.type} htmlFor="inst-kind">
             <Select
               id="inst-kind"
               name="kind"
@@ -441,15 +488,17 @@ function InstitutionDrawer({
             </Select>
           </Field>
           <Field
-            label="Country"
+            label={t.adminManage.institutions.country}
             htmlFor="inst-country"
             hint={
               country
-                ? (countryLabel ?? "Not a country code")
-                : "Two-letter code, e.g. SG"
+                ? (countryLabel ?? t.adminManage.institutions.notACountryCode)
+                : t.adminManage.institutions.countryCodeHelp
             }
             error={
-              country && !countryLabel ? "Use a two-letter country code" : null
+              country && !countryLabel
+                ? t.adminManage.institutions.useATwoletterCountryCode
+                : null
             }
           >
             <Input
@@ -459,12 +508,15 @@ function InstitutionDrawer({
               value={country}
               onChange={(e) => setCountry(e.target.value.toUpperCase())}
               aria-invalid={!!country && !countryLabel}
-              placeholder="SG"
+              placeholder={t.adminManage.institutions.countryCodeExample}
               className="uppercase"
             />
           </Field>
         </div>
-        <Field label="Website" htmlFor="inst-website">
+        <Field
+          label={t.adminManage.institutions.website}
+          htmlFor="inst-website"
+        >
           <Input
             id="inst-website"
             name="website"
@@ -475,7 +527,7 @@ function InstitutionDrawer({
         </Field>
         <fieldset className="space-y-2.5">
           <legend className="mb-2 text-[13px] font-semibold">
-            How data comes in
+            {t.adminManage.institutions.howDataComesIn}
           </legend>
           {(Object.keys(methodLabels) as Method[]).map((m) => (
             <Checkbox
@@ -492,16 +544,18 @@ function InstitutionDrawer({
             />
           ))}
           {methods.length === 0 ? (
-            <p className="text-loss text-[13px]">Pick at least one.</p>
+            <p className="text-loss text-[13px]">
+              {t.adminManage.institutions.pickAtLeastOne}
+            </p>
           ) : null}
         </fieldset>
         <Field
-          label="API adapter"
+          label={t.adminManage.institutions.apiAdapter}
           htmlFor="inst-adapter"
           hint={
             apiOn
-              ? "Which sync integration to use."
-              : "Choosing an adapter turns on API sync."
+              ? t.adminManage.institutions.adapterHelp
+              : t.adminManage.institutions.enableSyncHelp
           }
         >
           <Select
@@ -520,9 +574,9 @@ function InstitutionDrawer({
           </Select>
         </Field>
         <Field
-          label="Notes for the AI"
+          label={t.adminManage.institutions.notesForTheAI}
           htmlFor="inst-hints"
-          hint="Added to the extraction prompt for this institution's statements, e.g. which section holds positions."
+          hint={t.adminManage.institutions.extractionNotesHelp}
         >
           <Textarea
             id="inst-hints"
@@ -534,21 +588,23 @@ function InstitutionDrawer({
         {existing && !existing.archivedAt && mergeTargets.length ? (
           <fieldset className="border-line space-y-3 border-t pt-5">
             <legend className="text-[13px] font-semibold">
-              Merge a duplicate
+              {t.adminManage.institutions.mergeADuplicate}
             </legend>
             <p className="text-ink-3 -mt-1 text-[13px]">
-              Moves this institution&apos;s {existing.accountCount} account
-              {existing.accountCount === 1 ? "" : "s"} and uploads into another,
-              then removes this one.
+              {t.adminManage.institutions.mergeDescription(
+                existing.accountCount,
+              )}
             </p>
             <div className="flex flex-wrap gap-2">
               <Select
-                aria-label="Merge into"
+                aria-label={t.adminManage.institutions.mergeInto}
                 className="max-w-xs flex-1"
                 value={mergeInto}
                 onChange={(e) => setMergeInto(e.target.value)}
               >
-                <option value="">Merge into…</option>
+                <option value="">
+                  {t.adminManage.institutions.mergeIntoPlaceholder}
+                </option>
                 {mergeTargets.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
@@ -559,19 +615,23 @@ function InstitutionDrawer({
                 variant="secondary"
                 disabled={!mergeInto}
                 loading={merge.isPending}
-                confirmLabel="Merge now?"
+                confirmLabel={t.adminManage.institutions.mergeNow}
                 onConfirm={() =>
                   void merge
                     .mutateAsync({ sourceId: existing.id, targetId: mergeInto })
                     .then((r) =>
                       onSaved(
-                        `Merged ${existing.name} into ${mergeTargets.find((t) => t.id === mergeInto)?.name}; ${r.accountsMoved} account${r.accountsMoved === 1 ? "" : "s"} moved.`,
+                        t.adminManage.institutions.accountsMerged(
+                          existing.name,
+                          mergeTargets.find((t) => t.id === mergeInto)?.name,
+                          r.accountsMoved,
+                        ),
                       ),
                     )
                     .catch(() => undefined)
                 }
               >
-                Merge
+                {t.adminManage.institutions.merge}
               </ConfirmButton>
             </div>
           </fieldset>

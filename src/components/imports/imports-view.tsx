@@ -1,5 +1,6 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
 import { FileImage, FileText, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,7 +14,6 @@ import {
   type AccountGroup,
   accountGroupOf,
   accountGroups,
-  accountTypeLabels,
 } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { formatDate, formatDateTime } from "~/lib/format";
@@ -22,20 +22,14 @@ import { api } from "~/trpc/react";
 const ACCEPT = "application/pdf,image/png,image/jpeg,image/webp";
 const MAX_BYTES = 20 * 1024 * 1024;
 
-const WHAT_IT_READS: Record<AccountGroup, string> = {
-  investments:
-    "Holdings, cash and trades from a brokerage statement or app screenshot.",
-  banking:
-    "Every transaction and the closing balance from a bank or card statement.",
-  cpf_srs:
-    "SRS holdings, cash and top-ups, or your CPF balance. Split CPF into its accounts by hand afterwards.",
-};
-
 export function ImportsView({
   initialAccountId,
 }: {
   initialAccountId: string | null;
 }) {
+  const t = useT();
+  const locale = useLocale();
+  const WHAT_IT_READS = t.imports.importsView.reads;
   const router = useRouter();
   const [accounts] = api.accounts.list.useSuspenseQuery();
   const open = accounts.filter((a) => !a.archivedAt);
@@ -63,11 +57,11 @@ export function ImportsView({
     if (!account) return;
     setError(null);
     if (file.size > MAX_BYTES) {
-      setError({ message: "That file is larger than 20 MB." });
+      setError({ message: t.imports.importsView.thatFileIsLargerThan });
       return;
     }
     if (!ACCEPT.split(",").includes(file.type)) {
-      setError({ message: "Use a PDF, PNG, JPEG or WebP file." });
+      setError({ message: t.imports.importsView.useAPdfPngJpeg });
       return;
     }
     setUploading(true);
@@ -85,11 +79,11 @@ export function ImportsView({
         return;
       }
       setError({
-        message: json.error ?? "The upload failed. Try again.",
+        message: json.error ?? t.imports.importsView.theUploadFailedTryAgain,
         jobId: json.jobId,
       });
     } catch {
-      setError({ message: "The upload failed. Check your connection." });
+      setError({ message: t.imports.importsView.theUploadFailedCheckYour });
     } finally {
       setUploading(false);
     }
@@ -102,15 +96,15 @@ export function ImportsView({
         <div className="grid gap-8 p-5 sm:p-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           {/* 1. Which account */}
           <div>
-            <p className="eyebrow">1 · Which account is it for?</p>
+            <p className="eyebrow">{t.imports.importsView.whichAccountIsIt}</p>
             {open.length === 0 ? (
               <p className="text-ink-2 mt-4 text-sm">
-                Add an account first, so the statement has somewhere to go.{" "}
+                {t.imports.importsView.addAnAccountFirstSo}{" "}
                 <Link
                   href="/accounts"
                   className="font-semibold underline underline-offset-4"
                 >
-                  Add one
+                  {t.imports.importsView.addOne}
                 </Link>
                 .
               </p>
@@ -124,7 +118,7 @@ export function ImportsView({
                   return (
                     <div key={g}>
                       <p className="text-ink-3 mb-2 text-[12px] font-semibold">
-                        {accountGroups[g].label}
+                        {t.common.accountGroups[g]}
                       </p>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {items.map((a) => (
@@ -157,7 +151,7 @@ export function ImportsView({
                                     : "text-ink-3",
                                 )}
                               >
-                                {accountTypeLabels[a.type]}
+                                {t.common.accountTypes[a.type]}
                                 {a.last4 ? ` ··${a.last4}` : ""}
                               </span>
                             </span>
@@ -173,7 +167,7 @@ export function ImportsView({
 
           {/* 2. The file */}
           <div>
-            <p className="eyebrow">2 · Drop the statement</p>
+            <p className="eyebrow">{t.imports.importsView.dropTheStatement}</p>
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -207,15 +201,15 @@ export function ImportsView({
               </span>
               <p className="font-poster mt-4 text-[22px] font-bold">
                 {uploading
-                  ? "Uploading…"
+                  ? t.imports.importsView.uploading
                   : account
-                    ? `Statement for ${account.name}`
-                    : "Pick an account first"}
+                    ? t.imports.importsView.statementFor(account.name)
+                    : t.imports.importsView.pickAnAccountFirst}
               </p>
               <p className="text-ink-2 mt-1 max-w-sm text-[13px]">
                 {group
                   ? WHAT_IT_READS[group]
-                  : "Then drop a PDF or screenshot here."}
+                  : t.imports.importsView.thenDropAPdfOr}
               </p>
               <input
                 ref={input}
@@ -234,16 +228,14 @@ export function ImportsView({
                 loading={uploading}
                 onClick={() => input.current?.click()}
               >
-                Choose file
+                {t.imports.importsView.chooseFile}
               </Button>
               <p className="text-ink-3 mt-3 font-mono text-[11px] tracking-wide">
-                PDF · PNG · JPEG · WEBP — UP TO 20 MB
+                {t.imports.importsView.pdfPngJpegWebpUp}
               </p>
             </div>
             <p className="text-ink-3 mt-3 text-[12px]">
-              Uploading sends statement text or images to this instance&apos;s
-              configured AI provider, including its fallback if needed. Only
-              upload documents you agree to share with those providers.
+              {t.imports.importsView.uploadingSendsStatementTextOr}
             </p>
             {error ? (
               <Notice tone="error" className="mt-3">
@@ -253,7 +245,7 @@ export function ImportsView({
                     href={`/imports/${error.jobId}`}
                     className="font-semibold underline underline-offset-4"
                   >
-                    Open it
+                    {t.imports.importsView.openIt}
                   </Link>
                 ) : null}
               </Notice>
@@ -263,11 +255,13 @@ export function ImportsView({
       </section>
 
       <Section
-        title="Recent imports"
-        description="Open one to check what was read before it's saved."
+        title={t.imports.importsView.recentImports}
+        description={t.imports.importsView.openOneToCheckWhat}
       >
         {(jobs.data ?? []).length === 0 ? (
-          <p className="text-ink-2 text-sm">Nothing uploaded yet.</p>
+          <p className="text-ink-2 text-sm">
+            {t.imports.importsView.nothingUploadedYet}
+          </p>
         ) : (
           <ul className="-mx-2">
             {jobs.data!.map((j) => (
@@ -289,11 +283,11 @@ export function ImportsView({
                     </span>
                     <span className="text-ink-3 block truncate text-[12px]">
                       {[
-                        j.accountName ?? "Removed account",
+                        j.accountName ?? t.imports.importsView.removedAccount,
                         j.periodStart && j.periodEnd
-                          ? `${formatDate(j.periodStart)} – ${formatDate(j.periodEnd)}`
+                          ? `${formatDate(j.periodStart, locale)} – ${formatDate(j.periodEnd, locale)}`
                           : null,
-                        formatDateTime(j.createdAt),
+                        formatDateTime(j.createdAt, locale),
                       ]
                         .filter(Boolean)
                         .join(" · ")}
@@ -303,7 +297,7 @@ export function ImportsView({
                     <ImportStatus status={j.status} stale={j.stale} />
                     {j.status === "needs_review" ? (
                       <span className="text-ink-3 text-[11px]">
-                        {j.accepted} of {j.rows} selected
+                        {t.imports.importsView.selected(j.accepted, j.rows)}
                       </span>
                     ) : null}
                   </span>

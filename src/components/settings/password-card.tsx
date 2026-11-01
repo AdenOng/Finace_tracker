@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -13,6 +14,7 @@ import { authClient } from "~/server/auth/client";
 const MIN_LENGTH = 10;
 
 export function PasswordCard() {
+  const t = useT();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -28,13 +30,11 @@ export function PasswordCard() {
     setError(null);
     setSaved(false);
     if (newPassword.length < MIN_LENGTH)
-      return setError(
-        `Use at least ${MIN_LENGTH} characters for the new password.`,
-      );
+      return setError(t.settings.passwordCard.minPassword(MIN_LENGTH));
     if (newPassword !== formText(data, "confirm"))
-      return setError("The new passwords don't match.");
+      return setError(t.settings.passwordCard.theNewPasswordsDontMatch);
     if (newPassword === currentPassword)
-      return setError("Choose a password you aren't already using.");
+      return setError(t.settings.passwordCard.chooseAPasswordYouArent);
     setPending(true);
     const { error } = await authClient.changePassword({
       currentPassword,
@@ -45,8 +45,9 @@ export function PasswordCard() {
     if (error)
       return setError(
         error.code === "INVALID_PASSWORD"
-          ? "Your current password is not right."
-          : (error.message ?? "Your password was not changed."),
+          ? t.settings.passwordCard.yourCurrentPasswordIsNot
+          : (error.message ??
+              t.settings.passwordCard.yourPasswordWasNotChanged),
       );
     form.reset();
     setSaved(true);
@@ -57,9 +58,14 @@ export function PasswordCard() {
     <form onSubmit={change} className="max-w-md space-y-4">
       {error ? <Notice tone="error">{error}</Notice> : null}
       {saved ? (
-        <Notice tone="success">Your password was changed.</Notice>
+        <Notice tone="success">
+          {t.settings.passwordCard.yourPasswordWasChanged}
+        </Notice>
       ) : null}
-      <Field label="Current password" htmlFor="password-current">
+      <Field
+        label={t.settings.passwordCard.currentPassword}
+        htmlFor="password-current"
+      >
         <Input
           id="password-current"
           name="current"
@@ -69,9 +75,9 @@ export function PasswordCard() {
         />
       </Field>
       <Field
-        label="New password"
+        label={t.settings.passwordCard.newPassword}
         htmlFor="password-new"
-        hint={`At least ${MIN_LENGTH} characters.`}
+        hint={t.settings.passwordCard.minHint(MIN_LENGTH)}
       >
         <Input
           id="password-new"
@@ -83,7 +89,10 @@ export function PasswordCard() {
           required
         />
       </Field>
-      <Field label="Repeat new password" htmlFor="password-confirm">
+      <Field
+        label={t.settings.passwordCard.repeatNewPassword}
+        htmlFor="password-confirm"
+      >
         <Input
           id="password-confirm"
           name="confirm"
@@ -95,11 +104,11 @@ export function PasswordCard() {
       <Checkbox
         name="signOutOthers"
         defaultChecked
-        label="Sign out of other devices"
-        description="Recommended if you think someone else knows your password."
+        label={t.settings.passwordCard.signOutOfOtherDevices}
+        description={t.settings.passwordCard.recommendedIfYouThinkSomeone}
       />
       <Button type="submit" variant="secondary" loading={pending}>
-        Change password
+        {t.settings.passwordCard.changePassword}
       </Button>
     </form>
   );

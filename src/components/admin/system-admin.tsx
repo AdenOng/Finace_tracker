@@ -1,5 +1,7 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+
 import { CircleAlert, CircleCheck } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
@@ -11,8 +13,6 @@ import { formatBytes, formatDateTime, formatRelative } from "~/lib/format";
 import { api } from "~/trpc/react";
 
 const integer = new Intl.NumberFormat("en-SG");
-const plural = (n: number, word: string) =>
-  `${integer.format(n)} ${word}${n === 1 ? "" : "s"}`;
 
 function Rows({ rows }: { rows: [string, React.ReactNode][] }) {
   return (
@@ -38,12 +38,13 @@ function Check({ ok, children }: { ok: boolean; children: React.ReactNode }) {
 }
 
 export function SystemAdmin() {
+  const locale = useLocale();
+  const t = useT();
   const [info] = api.admin.system.info.useSuspenseQuery();
   const { flash, success, error, clear } = useFlash(10_000);
   const testEmail = api.admin.system.testEmail.useMutation({
     onMutate: clear,
-    onSuccess: (r) =>
-      success(`Test email sent to ${r.to}. Check the inbox (and spam).`),
+    onSuccess: (r) => success(t.adminManage.system.testEmailSent(r.to)),
     onError: error,
   });
   const { migrations } = info.database;
@@ -52,95 +53,120 @@ export function SystemAdmin() {
 
   return (
     <div className="space-y-6">
-      <Section title="App">
+      <Section title={t.adminManage.system.app}>
         <Rows
           rows={[
-            ["Version", info.app.version],
+            [t.adminManage.system.version, info.app.version],
             [
-              "Running since",
-              `${formatRelative(info.app.startedAt)} (${formatDateTime(info.app.startedAt)})`,
+              t.adminManage.system.runningSince,
+              `${formatRelative(info.app.startedAt, undefined, locale)} (${formatDateTime(info.app.startedAt, locale)})`,
             ],
-            ["Node", `${info.app.node} · ${info.app.platform}`],
-            ["Mode", info.app.environment],
-            ["Public URL", info.config.baseUrl],
+            [
+              t.adminManage.system.node,
+              `${info.app.node} · ${info.app.platform}`,
+            ],
+            [t.adminManage.system.mode, info.app.environment],
+            [t.adminManage.system.publicUrl, info.config.baseUrl],
           ]}
         />
       </Section>
 
-      <Section title="Database">
+      <Section title={t.adminManage.system.database}>
         <Rows
           rows={[
-            ["PostgreSQL", info.database.version],
-            ["Size", formatBytes(info.database.sizeBytes)],
+            [t.adminManage.system.postgresql, info.database.version],
+            [t.adminManage.system.size, formatBytes(info.database.sizeBytes)],
             [
-              "Migrations",
+              t.adminManage.system.migrations,
               <Check key="m" ok={migrationsOk}>
                 {migrations.applied === null
-                  ? "Could not read the migrations table"
-                  : `${migrations.applied} of ${migrations.expected} applied`}
+                  ? t.adminManage.system.migrationsUnavailable
+                  : t.adminManage.system.migrationsApplied(
+                      migrations.applied,
+                      migrations.expected,
+                    )}
                 {migrations.latestTag ? (
                   <span className="text-ink-3 font-normal">
                     {" "}
-                    · latest {migrations.latestTag}
+                    {t.adminManage.system.latestMigration(migrations.latestTag)}
                   </span>
                 ) : null}
               </Check>,
             ],
             [
-              "Rows",
+              t.adminManage.system.rows,
               [
-                plural(info.database.counts.users, "user"),
-                plural(info.database.counts.accounts, "account"),
-                plural(info.database.counts.transactions, "transaction"),
-                plural(info.database.counts.documents, "upload"),
+                t.adminManage.system.userCount(
+                  integer.format(info.database.counts.users),
+                ),
+                t.adminManage.system.accountCount(
+                  integer.format(info.database.counts.accounts),
+                ),
+                t.adminManage.system.transactionCount(
+                  integer.format(info.database.counts.transactions),
+                ),
+                t.adminManage.system.uploadCount(
+                  integer.format(info.database.counts.documents),
+                ),
               ].join(" · "),
             ],
           ]}
         />
       </Section>
 
-      <Section title="Storage">
+      <Section title={t.adminManage.system.storage}>
         <Rows
           rows={[
             [
-              "Uploaded statements",
-              `${formatBytes(info.storage.uploads.bytes)} in ${integer.format(info.storage.uploads.files)} files${info.storage.uploads.truncated ? "+" : ""} · ${info.storage.uploads.directory}`,
+              t.adminManage.system.uploadedStatements,
+              t.adminManage.system.storageSummary(
+                formatBytes(info.storage.uploads.bytes),
+                `${integer.format(info.storage.uploads.files)}${info.storage.uploads.truncated ? "+" : ""}`,
+                info.storage.uploads.directory,
+              ),
             ],
             [
-              "Backups",
-              `${formatBytes(info.storage.backups.bytes)} in ${integer.format(info.storage.backups.files)} files · ${info.storage.backups.directory}`,
+              t.adminManage.system.backups,
+              t.adminManage.system.storageSummary(
+                formatBytes(info.storage.backups.bytes),
+                integer.format(info.storage.backups.files),
+                info.storage.backups.directory,
+              ),
             ],
           ]}
         />
       </Section>
 
       <Section
-        title="Configuration"
-        description="Secrets are never shown, only whether they are set."
+        title={t.adminManage.system.configuration}
+        description={t.adminManage.system.configurationPrivacyHelp}
       >
         <Rows
           rows={[
-            ["Data pack", info.config.preset],
+            [t.adminManage.system.dataPack, info.config.preset],
             [
-              "Two-step required by .env",
+              t.adminManage.system.environmentTwoStep,
               info.config.requireTwoFactor
-                ? "Yes (REQUIRE_TWO_FACTOR=true)"
-                : "No — set on Admin → Security",
+                ? t.adminManage.system.environmentTwoStepEnabled
+                : t.adminManage.system.environmentTwoStepDisabled,
             ],
             [
-              "Encryption key",
+              t.adminManage.system.encryptionKey,
               <Check key="k" ok={info.config.encryptionKeySet}>
-                {info.config.encryptionKeySet ? "Set" : "Missing"}
+                {info.config.encryptionKeySet
+                  ? t.adminManage.system.set
+                  : t.adminManage.system.missing}
               </Check>,
             ],
             [
-              "opencode server",
+              t.adminManage.system.opencodeServer,
               <span key="o">
                 {info.config.opencodeUrl}
                 <span className="text-ink-3 font-normal">
                   {" "}
-                  · password{" "}
-                  {info.config.opencodePasswordSet ? "set" : "not set"}
+                  {t.adminManage.system.passwordStatus(
+                    info.config.opencodePasswordSet,
+                  )}
                 </span>
               </span>,
             ],
@@ -149,8 +175,8 @@ export function SystemAdmin() {
       </Section>
 
       <Section
-        title="Email"
-        description="Used for invite and reset links, review reminders and new-device alerts. Set SMTP_URL and SMTP_FROM in .env, then restart."
+        title={t.common.fields.email}
+        description={t.adminManage.system.emailHelp}
         actions={
           info.config.email.configured ? (
             <Button
@@ -159,7 +185,7 @@ export function SystemAdmin() {
               loading={testEmail.isPending}
               onClick={() => testEmail.mutate()}
             >
-              Send me a test email
+              {t.adminManage.system.sendMeATestEmail}
             </Button>
           ) : null
         }
@@ -168,8 +194,8 @@ export function SystemAdmin() {
         <Check ok={info.config.email.configured}>
           <span className="text-sm">
             {info.config.email.configured
-              ? `Sending through ${info.config.email.host}`
-              : "Not set up — links are shown to you to hand over"}
+              ? t.adminManage.system.sendingThrough(info.config.email.host)
+              : t.adminManage.system.emailNotConfigured}
           </span>
         </Check>
       </Section>

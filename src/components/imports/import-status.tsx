@@ -1,16 +1,20 @@
+"use client";
+
+import type { Messages } from "~/i18n/messages";
+import { useT } from "~/i18n/client";
 import { cn } from "~/lib/cn";
 
 type Status =
   "queued" | "running" | "needs_review" | "completed" | "failed" | "cancelled";
 
-const LABELS: Record<Status, string> = {
-  queued: "Waiting",
-  running: "Reading",
-  needs_review: "Ready to review",
-  completed: "Imported",
-  failed: "Couldn't read",
-  cancelled: "Cancelled",
-};
+const labels = (t: Messages): Record<Status, string> => ({
+  queued: t.imports.importStatus.waiting,
+  running: t.imports.importStatus.reading,
+  needs_review: t.imports.importStatus.readyToReview,
+  completed: t.imports.importStatus.imported,
+  failed: t.imports.importStatus.couldntRead,
+  cancelled: t.imports.importStatus.cancelled,
+});
 
 /** A job's state as a small ink stamp; the reading states pulse. */
 export function ImportStatus({
@@ -20,6 +24,7 @@ export function ImportStatus({
   status: Status;
   stale?: boolean;
 }) {
+  const t = useT();
   const shown = stale ? "failed" : status;
   return (
     <span
@@ -35,7 +40,7 @@ export function ImportStatus({
       {shown === "queued" || shown === "running" ? (
         <span className="bg-art-cobalt size-1.5 animate-pulse rounded-full" />
       ) : null}
-      {stale ? "Interrupted" : LABELS[shown]}
+      {stale ? t.imports.importStatus.interrupted : labels(t)[shown]}
     </span>
   );
 }

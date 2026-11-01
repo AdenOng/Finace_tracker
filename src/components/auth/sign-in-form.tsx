@@ -6,6 +6,7 @@ import { KeyRound } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { Field, Input } from "~/components/ui/field";
 import { Notice } from "~/components/ui/panel";
@@ -24,34 +25,28 @@ function ForgotPassword({
   onBack: () => void;
 }) {
   const request = api.passwordReset.request.useMutation();
+  const t = useT();
   const back = (
     <button
       type="button"
       onClick={onBack}
       className="text-[13px] font-semibold underline underline-offset-4"
     >
-      Back to sign in
+      {t.auth.signIn.back}
     </button>
   );
 
   if (!emailResets)
     return (
       <div className="space-y-4">
-        <Notice>
-          Ask whoever runs this Finfolio for a password reset link. It works
-          once and signs you out everywhere else.
-        </Notice>
+        <Notice>{t.auth.signIn.askOperator}</Notice>
         {back}
       </div>
     );
   if (request.isSuccess)
     return (
       <div className="space-y-4">
-        <Notice tone="success">
-          If an account uses that address, a reset link is on its way. It works
-          once within the hour. Check your spam folder if it doesn&apos;t
-          arrive.
-        </Notice>
+        <Notice tone="success">{t.auth.signIn.sent}</Notice>
         {back}
       </div>
     );
@@ -65,14 +60,11 @@ function ForgotPassword({
         });
       }}
     >
-      <p className="text-ink-2 text-sm">
-        Enter the email you sign in with and we&apos;ll send you a link to
-        choose a new password.
-      </p>
+      <p className="text-ink-2 text-sm">{t.auth.signIn.resetIntro}</p>
       {request.error ? (
         <Notice tone="error">{errorMessage(request.error)}</Notice>
       ) : null}
-      <Field label="Email" htmlFor="reset-email">
+      <Field label={t.common.fields.email} htmlFor="reset-email">
         <Input
           id="reset-email"
           name="email"
@@ -88,7 +80,7 @@ function ForgotPassword({
         className="w-full"
         loading={request.isPending}
       >
-        Email me a reset link
+        {t.auth.signIn.sendReset}
       </Button>
       {back}
     </form>
@@ -96,6 +88,7 @@ function ForgotPassword({
 }
 
 export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
+  const t = useT();
   const router = useRouter();
   const queryClient = useQueryClient();
   const next = safeNextPath(useSearchParams().get("next"));
@@ -113,7 +106,7 @@ export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
       password: formText(form, "password"),
     });
     setPending(null);
-    if (error) return setError(error.message ?? "Sign-in failed");
+    if (error) return setError(error.message ?? t.auth.signIn.failed);
     // With 2FA enabled the client plugin redirects to /two-factor itself.
     if (data && !("twoFactorRedirect" in data && data.twoFactorRedirect)) {
       queryClient.clear();
@@ -128,7 +121,7 @@ export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
     const result = await authClient.signIn.passkey();
     setPending(null);
     if (result?.error)
-      return setError(result.error.message ?? "Passkey sign-in failed");
+      return setError(result.error.message ?? t.auth.signIn.passkeyFailed);
     queryClient.clear();
     router.replace(next);
     router.refresh();
@@ -146,7 +139,7 @@ export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
     <div className="space-y-6">
       {error ? <Notice tone="error">{error}</Notice> : null}
       <form onSubmit={onSubmit} className="space-y-5">
-        <Field label="Email" htmlFor="email">
+        <Field label={t.common.fields.email} htmlFor="email">
           <Input
             id="email"
             name="email"
@@ -157,7 +150,7 @@ export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
           />
         </Field>
         <Field
-          label="Password"
+          label={t.auth.signIn.password}
           htmlFor="password"
           hint={
             <button
@@ -165,7 +158,7 @@ export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
               onClick={() => setForgot(true)}
               className="underline underline-offset-4"
             >
-              Forgot password?
+              {t.auth.signIn.forgot}
             </button>
           }
         >
@@ -183,12 +176,12 @@ export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
           className="w-full"
           loading={pending === "password"}
         >
-          Sign in
+          {t.auth.signIn.submit}
         </Button>
       </form>
       <div className="text-ink-3 flex items-center gap-3 text-[13px]">
         <span className="bg-line h-px flex-1" />
-        or
+        {t.auth.signIn.or}
         <span className="bg-line h-px flex-1" />
       </div>
       <Button
@@ -200,7 +193,7 @@ export function SignInForm({ emailResets = false }: { emailResets?: boolean }) {
         loading={pending === "passkey"}
       >
         <KeyRound className="size-4" />
-        Use a passkey
+        {t.auth.signIn.passkey}
       </Button>
     </div>
   );

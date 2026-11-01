@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, categoryLabel } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import {
   Download,
   GripVertical,
@@ -27,32 +30,34 @@ type Kind = Category["kind"];
 type ImportRow =
   RouterInputs["admin"]["categories"]["importJson"]["rows"][number];
 
-const swatches: { hex: string; name: string }[] = [
-  { hex: "#D9622B", name: "Orange" },
-  { hex: "#5E8C31", name: "Green" },
-  { hex: "#2F6FB0", name: "Blue" },
-  { hex: "#B03A7A", name: "Magenta" },
-  { hex: "#6B5BB5", name: "Indigo" },
-  { hex: "#8A4FD8", name: "Violet" },
-  { hex: "#7A5230", name: "Brown" },
-  { hex: "#1F9C8A", name: "Teal" },
-  { hex: "#C9406A", name: "Rose" },
-  { hex: "#2591B8", name: "Sky" },
-  { hex: "#D4A017", name: "Mustard" },
-  { hex: "#7E7E7E", name: "Grey" },
+const getSwatches = (t: Messages) => [
+  { hex: "#D9622B", name: t.adminManage.categories.orange },
+  { hex: "#5E8C31", name: t.adminManage.categories.green },
+  { hex: "#2F6FB0", name: t.adminManage.categories.blue },
+  { hex: "#B03A7A", name: t.adminManage.categories.magenta },
+  { hex: "#6B5BB5", name: t.adminManage.categories.indigo },
+  { hex: "#8A4FD8", name: t.adminManage.categories.violet },
+  { hex: "#7A5230", name: t.adminManage.categories.brown },
+  { hex: "#1F9C8A", name: t.adminManage.categories.teal },
+  { hex: "#C9406A", name: t.adminManage.categories.rose },
+  { hex: "#2591B8", name: t.adminManage.categories.sky },
+  { hex: "#D4A017", name: t.adminManage.categories.mustard },
+  { hex: "#7E7E7E", name: t.adminManage.categories.grey },
 ];
 
-const kindLabels: Record<Kind, string> = {
-  expense: "Spending",
-  income: "Income",
-  transfer: "Transfer",
-};
+const getKindLabels = (t: Messages) => ({
+  expense: t.adminManage.categories.spending,
+  income: t.adminManage.categories.income,
+  transfer: t.adminManage.categories.transfer,
+});
 
 function swallow(fn: () => Promise<unknown>) {
   return () => void fn().catch(() => undefined);
 }
 
 export function CategoriesAdmin() {
+  const t = useT();
+  const kindLabels = getKindLabels(t);
   const utils = api.useUtils();
   const [rows] = api.admin.categories.list.useSuspenseQuery();
   const defaults = api.admin.categories.defaultsPreview.useQuery();
@@ -75,8 +80,8 @@ export function CategoriesAdmin() {
     onSuccess: async (r) => {
       success(
         r.restored > 1
-          ? "Restored, along with its parent category."
-          : "Category restored.",
+          ? t.adminManage.categories.restoredWithParent
+          : t.adminManage.categories.categoryRestored,
       );
       await invalidate();
     },
@@ -88,8 +93,8 @@ export function CategoriesAdmin() {
       const n = r.inserted + r.unarchived;
       success(
         n === 0
-          ? "All default categories are already present."
-          : `Restored ${n} default categor${n === 1 ? "y" : "ies"}.`,
+          ? t.adminManage.categories.defaultsAlreadyPresent
+          : t.adminManage.categories.defaultsRestored(n),
       );
       await invalidate();
     },
@@ -120,6 +125,7 @@ export function CategoriesAdmin() {
   const matches = (c: Category) =>
     !q ||
     c.name.toLowerCase().includes(q) ||
+    categoryLabel(t, c.name).toLowerCase().includes(q) ||
     (c.aiHint?.toLowerCase().includes(q) ?? false);
 
   const missingDefaults =
@@ -171,35 +177,32 @@ export function CategoriesAdmin() {
   const groups: { kind: Kind; title: string; description: string }[] = [
     {
       kind: "expense",
-      title: "Spending",
-      description: "Where money goes. Counted in spending reports.",
+      title: t.adminManage.categories.spending,
+      description: t.adminManage.categories.spendingHelp,
     },
     {
       kind: "income",
-      title: "Income",
-      description: "Money arriving that is not a transfer.",
+      title: t.adminManage.categories.income,
+      description: t.adminManage.categories.incomeHelp,
     },
     {
       kind: "transfer",
-      title: "Transfers",
-      description:
-        "Moves between your own accounts. Excluded from spending so nothing is double-counted.",
+      title: t.adminManage.categories.transfers,
+      description: t.adminManage.categories.transferHelp,
     },
   ];
 
   return (
     <>
       <p className="text-ink-2 mb-5 max-w-2xl text-sm">
-        The AI may only answer with one of these categories, and reads each
-        description to decide. People can re-categorise any transaction
-        afterwards. Drag the handle to reorder.
+        {t.adminManage.categories.taxonomyHelp}
       </p>
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="relative w-full max-w-xs">
           <Search className="text-ink-3 pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
-            aria-label="Search categories"
-            placeholder="Search name or description"
+            aria-label={t.adminManage.categories.searchCategories}
+            placeholder={t.adminManage.categories.searchNameOrDescription}
             className="pl-9"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -208,37 +211,39 @@ export function CategoriesAdmin() {
         <div className="ml-auto flex flex-wrap gap-2">
           <Button variant="ghost" onClick={exportJson}>
             <Download className="size-4" />
-            Export
+            {t.common.actions.export}
           </Button>
           <Button variant="ghost" onClick={() => setImporting(true)}>
             <Upload className="size-4" />
-            Import
+            {t.adminManage.categories.import}
           </Button>
           <ConfirmButton
             variant="secondary"
             disabled={missingDefaults === 0}
             title={
               missingDefaults === 0
-                ? "Every default category is present"
+                ? t.adminManage.categories.everyDefaultCategoryIsPresent
                 : [
-                    ...(defaults.data?.missing ?? []).map((n) => `Add ${n}`),
-                    ...(defaults.data?.archived ?? []).map(
-                      (n) => `Restore ${n}`,
+                    ...(defaults.data?.missing ?? []).map((n) =>
+                      t.adminManage.categories.add(n),
+                    ),
+                    ...(defaults.data?.archived ?? []).map((n) =>
+                      t.adminManage.categories.restoreNamed(n),
                     ),
                   ].join("\n")
             }
-            confirmLabel={`Bring back ${missingDefaults}?`}
+            confirmLabel={t.adminManage.categories.bringBack(missingDefaults)}
             loading={restoreDefaults.isPending}
             onConfirm={() => restoreDefaults.mutate()}
           >
             <RotateCcw className="size-4" />
             {missingDefaults
-              ? `Restore ${missingDefaults} default${missingDefaults === 1 ? "" : "s"}`
-              : "Defaults present"}
+              ? t.adminManage.categories.restoreDefault(missingDefaults)
+              : t.adminManage.categories.defaultsPresent}
           </ConfirmButton>
           <Button onClick={() => setEditing("new")}>
             <Plus className="size-4" />
-            Add category
+            {t.adminManage.categories.addCategory}
           </Button>
         </div>
       </div>
@@ -302,13 +307,15 @@ export function CategoriesAdmin() {
           );
         })}
         {q && !active.some(matches) ? (
-          <EmptyState title="No matches">Try another word.</EmptyState>
+          <EmptyState title={t.adminManage.categories.noMatches}>
+            {t.adminManage.categories.tryAnotherWord}
+          </EmptyState>
         ) : null}
 
         {archived.length ? (
           <Section
-            title="Archived"
-            description="Hidden from people and the AI. Restore to bring one back."
+            title={t.adminManage.categories.archived}
+            description={t.adminManage.categories.archivedHelp}
           >
             <ul className="flex flex-wrap gap-2">
               {archived.map((c) => {
@@ -320,9 +327,11 @@ export function CategoriesAdmin() {
                   >
                     <span>
                       {parent ? (
-                        <span className="text-ink-3">{parent.name} › </span>
+                        <span className="text-ink-3">
+                          {categoryLabel(t, parent.name)} ›{" "}
+                        </span>
                       ) : null}
-                      {c.name}
+                      {categoryLabel(t, c.name)}
                       <span className="text-ink-3 ml-1.5 text-[12px]">
                         {kindLabels[c.kind]}
                       </span>
@@ -335,7 +344,7 @@ export function CategoriesAdmin() {
                       }
                       onClick={() => restore.mutate({ id: c.id })}
                     >
-                      Restore
+                      {t.adminManage.categories.restore}
                     </Button>
                   </li>
                 );
@@ -402,6 +411,7 @@ function SortableList<T extends { id: string; name: string }>({
   onMove: (from: number, to: number) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   return (
@@ -435,8 +445,8 @@ function SortableList<T extends { id: string; name: string }>({
             <button
               type="button"
               draggable
-              aria-label={`Move ${item.name}. Use the up and down arrow keys.`}
-              title="Drag to reorder"
+              aria-label={t.adminManage.categories.reorderLabel(item.name)}
+              title={t.adminManage.categories.dragToReorder}
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = "move";
                 setDragIndex(index);
@@ -476,7 +486,10 @@ function CategoryRow({
   onEdit: (c: Category) => void;
   onArchive: (c: Category, mode: "archive" | "merge") => void;
 }) {
-  const count = `${category.transactionCount} txn${category.transactionCount === 1 ? "" : "s"}`;
+  const t = useT();
+  const count = t.adminManage.categories.transactionCount(
+    category.transactionCount,
+  );
   return (
     <div className={cn("flex items-center gap-3 py-2.5", child ? "pl-2" : "")}>
       <span
@@ -491,10 +504,10 @@ function CategoryRow({
       />
       <div className="min-w-0 flex-1">
         <p className={cn("text-sm", child ? "font-medium" : "font-bold")}>
-          {category.name}
+          {categoryLabel(t, category.name)}
           {!category.isSystem ? (
             <Tag tone="outline" className="ml-2">
-              Custom
+              {t.adminManage.categories.custom}
             </Tag>
           ) : null}
           <span className="figures text-ink-3 ml-2 text-[12px] font-normal sm:hidden">
@@ -510,7 +523,7 @@ function CategoryRow({
       </span>
       <div className="flex shrink-0 gap-0.5">
         <Button variant="ghost" size="sm" onClick={() => onEdit(category)}>
-          Edit
+          {t.common.actions.edit}
         </Button>
         <Button
           variant="ghost"
@@ -518,7 +531,7 @@ function CategoryRow({
           className="text-ink-2"
           onClick={() => onArchive(category, "merge")}
         >
-          Merge
+          {t.adminManage.categories.merge}
         </Button>
         <Button
           variant="ghost"
@@ -526,7 +539,7 @@ function CategoryRow({
           className="text-loss"
           onClick={() => onArchive(category, "archive")}
         >
-          Archive
+          {t.common.actions.archive}
         </Button>
       </div>
     </div>
@@ -546,6 +559,8 @@ function CategoryDrawer({
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
+  const t = useT();
+  const swatches = getSwatches(t);
   const existing = category && category !== "new" ? category : null;
   const [color, setColor] = useState(existing?.color ?? swatches[0]!.hex);
   const [parentId, setParentId] = useState(existing?.parentId ?? "");
@@ -565,10 +580,10 @@ function CategoryDrawer({
     };
     if (existing) {
       await update.mutateAsync({ id: existing.id, ...values });
-      await onSaved(`Saved ${values.name}.`);
+      await onSaved(t.adminManage.categories.saved(values.name));
     } else {
       await create.mutateAsync(values);
-      await onSaved(`Added ${values.name}.`);
+      await onSaved(t.adminManage.categories.added(values.name));
     }
   }
 
@@ -576,23 +591,25 @@ function CategoryDrawer({
     <Drawer
       open={category !== null}
       onClose={onClose}
-      title={existing ? existing.name : "Add category"}
-      description={
+      title={
         existing
-          ? `Key: ${existing.key} — stays the same if you rename it.`
-          : undefined
+          ? categoryLabel(t, existing.name)
+          : t.adminManage.categories.addCategory
+      }
+      description={
+        existing ? t.adminManage.categories.keyHelp(existing.key) : undefined
       }
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             type="submit"
             form="category-form"
             loading={create.isPending || update.isPending}
           >
-            {existing ? "Save" : "Add"}
+            {existing ? t.common.actions.save : t.common.actions.add}
           </Button>
         </>
       }
@@ -606,7 +623,7 @@ function CategoryDrawer({
         }}
       >
         {error ? <Notice tone="error">{error.message}</Notice> : null}
-        <Field label="Name" htmlFor="cat-name">
+        <Field label={t.adminManage.categories.name} htmlFor="cat-name">
           <Input
             id="cat-name"
             name="name"
@@ -616,13 +633,9 @@ function CategoryDrawer({
         </Field>
         <div className="grid grid-cols-2 gap-4">
           <Field
-            label="Parent"
+            label={t.adminManage.categories.parent}
             htmlFor="cat-parent"
-            hint={
-              hasChildren
-                ? "Has subcategories, so it stays top-level."
-                : undefined
-            }
+            hint={hasChildren ? t.adminManage.categories.parentHelp : undefined}
           >
             <Select
               id="cat-parent"
@@ -630,22 +643,22 @@ function CategoryDrawer({
               onChange={(e) => setParentId(e.target.value)}
               disabled={hasChildren}
             >
-              <option value="">None (top level)</option>
+              <option value="">{t.adminManage.categories.noneTopLevel}</option>
               {parents
                 .filter((p) => p.id !== existing?.id)
                 .map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name}
+                    {categoryLabel(t, p.name)}
                   </option>
                 ))}
             </Select>
           </Field>
           <Field
-            label="Type"
+            label={t.common.fields.type}
             htmlFor="cat-kind"
             hint={
               parent
-                ? `Set by ${parent.name}: subcategories share their parent's type.`
+                ? t.adminManage.categories.inheritedTypeHelp(parent.name)
                 : undefined
             }
           >
@@ -655,14 +668,20 @@ function CategoryDrawer({
               disabled={!!parent}
               onChange={(e) => setKind(e.target.value as Kind)}
             >
-              <option value="expense">Spending</option>
-              <option value="income">Income</option>
-              <option value="transfer">Transfer</option>
+              <option value="expense">
+                {t.adminManage.categories.spending}
+              </option>
+              <option value="income">{t.adminManage.categories.income}</option>
+              <option value="transfer">
+                {t.adminManage.categories.transfer}
+              </option>
             </Select>
           </Field>
         </div>
         <fieldset>
-          <legend className="mb-2 text-[13px] font-semibold">Colour</legend>
+          <legend className="mb-2 text-[13px] font-semibold">
+            {t.adminManage.categories.colour}
+          </legend>
           <div className="flex flex-wrap gap-2">
             {swatches.map((s) => (
               <button
@@ -686,9 +705,9 @@ function CategoryDrawer({
           </div>
         </fieldset>
         <Field
-          label="Description for the AI"
+          label={t.adminManage.categories.descriptionForTheAI}
           htmlFor="cat-hint"
-          hint="Concrete examples work best, e.g. merchant names that belong here."
+          hint={t.adminManage.categories.descriptionHelp}
         >
           <Textarea
             id="cat-hint"
@@ -715,6 +734,7 @@ function ArchiveDrawer({
   onClose: () => void;
   onDone: (message: string) => Promise<void>;
 }) {
+  const t = useT();
   const archive = api.admin.categories.archive.useMutation();
   const children = category
     ? options.filter((o) => o.parentId === category.id)
@@ -737,18 +757,18 @@ function ArchiveDrawer({
       onClose={onClose}
       title={
         merge
-          ? `Merge ${category?.name ?? ""}`
-          : `Archive ${category?.name ?? ""}`
+          ? t.adminManage.categories.mergeNamed(category?.name ?? "")
+          : t.adminManage.categories.archive(category?.name ?? "")
       }
       description={
         merge
-          ? "Moves its transactions and merchant rules into another category, then archives it. Use it to fold duplicates together."
-          : "Archived categories disappear for people and the AI. You can restore them later."
+          ? t.adminManage.categories.mergeHelp
+          : t.adminManage.categories.archiveHelp
       }
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             variant={merge ? "primary" : "danger"}
@@ -756,7 +776,7 @@ function ArchiveDrawer({
             form="archive-form"
             loading={archive.isPending}
           >
-            {merge ? "Merge" : "Archive"}
+            {merge ? t.adminManage.categories.merge : t.common.actions.archive}
           </Button>
         </>
       }
@@ -777,8 +797,15 @@ function ArchiveDrawer({
             const target = targets.find((t) => t.id === reassignToId);
             await onDone(
               merge && target
-                ? `Merged ${category.name} into ${target.name}; ${r.transactionsMoved} transaction${r.transactionsMoved === 1 ? "" : "s"} moved.`
-                : `Archived ${r.archived} categor${r.archived === 1 ? "y" : "ies"}; ${r.transactionsMoved} transaction${r.transactionsMoved === 1 ? "" : "s"} moved.`,
+                ? t.adminManage.categories.mergeResult(
+                    category.name,
+                    target.name,
+                    r.transactionsMoved,
+                  )
+                : t.adminManage.categories.archiveResult(
+                    r.archived,
+                    r.transactionsMoved,
+                  ),
             );
           })();
         }}
@@ -788,22 +815,20 @@ function ArchiveDrawer({
         ) : null}
         {children.length ? (
           <Notice tone="warn">
-            Its {children.length} subcategor
-            {children.length === 1 ? "y is" : "ies are"} archived too, and their
-            transactions move with it.
+            {t.adminManage.categories.childrenArchived(children.length)}
           </Notice>
         ) : null}
         {affected > 0 ? (
           <Notice tone="warn">
-            This recategorises {affected} transaction
-            {affected === 1 ? "" : "s"} across all users. Merchant rules move
-            with them
-            {merge ? "" : ", or are deleted if you leave them uncategorised"}.
-            The change is recorded in the activity log.
+            {t.adminManage.categories.recategorises(affected, merge)}
           </Notice>
         ) : null}
         <Field
-          label={merge ? "Merge into" : "Move existing transactions to"}
+          label={
+            merge
+              ? t.adminManage.categories.mergeInto
+              : t.adminManage.categories.moveExistingTransactionsTo
+          }
           htmlFor="reassign"
         >
           <Select
@@ -813,12 +838,14 @@ function ArchiveDrawer({
             required={merge}
           >
             <option value="" disabled={merge}>
-              {merge ? "Choose a category" : "Leave uncategorised"}
+              {merge
+                ? t.adminManage.categories.chooseACategory
+                : t.adminManage.categories.leaveUncategorised}
             </option>
-            {targets.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.parentId ? "— " : ""}
-                {t.name}
+            {targets.map((target) => (
+              <option key={target.id} value={target.id}>
+                {target.parentId ? "— " : ""}
+                {categoryLabel(t, target.name)}
               </option>
             ))}
           </Select>
@@ -837,6 +864,7 @@ function ImportDrawer({
   onClose: () => void;
   onDone: (message: string) => Promise<void>;
 }) {
+  const t = useT();
   const fileInput = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ImportRow[] | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -853,17 +881,17 @@ function ImportDrawer({
         ? raw
         : (raw as { categories?: unknown }).categories;
       if (!Array.isArray(list) || list.length === 0)
-        throw new Error("No categories found in that file.");
+        throw new Error(t.adminManage.categories.noCategoriesFoundInThatFile);
       const parsed = list as ImportRow[];
       setRows(parsed);
       preview.mutate({ rows: parsed, dryRun: true });
     } catch (e) {
       setParseError(
         e instanceof SyntaxError
-          ? "That file is not valid JSON."
+          ? t.adminManage.categories.thatFileIsNotValidJSON
           : e instanceof Error
             ? e.message
-            : "Could not read that file.",
+            : t.adminManage.categories.couldNotReadThatFile,
       );
     }
   }
@@ -872,12 +900,12 @@ function ImportDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      title="Import categories"
-      description="Use a file from Export. Categories are matched by key: new keys are added, existing ones updated. Nothing is deleted."
+      title={t.adminManage.categories.importCategories}
+      description={t.adminManage.categories.importHelp}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             disabled={!rows || !preview.data}
@@ -888,13 +916,17 @@ function ImportDrawer({
                 .mutateAsync({ rows, dryRun: false })
                 .then((r) =>
                   onDone(
-                    `Imported: ${r.created} added, ${r.updated} updated, ${r.unchanged} unchanged.`,
+                    t.adminManage.categories.importResult(
+                      r.created,
+                      r.updated,
+                      r.unchanged,
+                    ),
                   ),
                 )
                 .catch(() => undefined)
             }
           >
-            Apply import
+            {t.adminManage.categories.applyImport}
           </Button>
         </>
       }
@@ -902,7 +934,7 @@ function ImportDrawer({
       <div className="space-y-5">
         <Button variant="secondary" onClick={() => fileInput.current?.click()}>
           <Upload className="size-4" />
-          Choose a JSON file
+          {t.adminManage.categories.chooseAJSONFile}
         </Button>
         <input
           ref={fileInput}
@@ -922,17 +954,24 @@ function ImportDrawer({
           <Notice tone="error">{apply.error.message}</Notice>
         ) : null}
         {preview.isPending ? (
-          <p className="text-ink-3 text-sm">Checking the file…</p>
+          <p className="text-ink-3 text-sm">
+            {t.adminManage.categories.checkingTheFile}
+          </p>
         ) : null}
         {preview.data ? (
           <Notice tone="info">
-            <strong>{rows?.length} categories in the file.</strong> Applying
-            adds {preview.data.created}, updates {preview.data.updated} and
-            leaves {preview.data.unchanged} as they are.
+            <strong>{t.adminManage.categories.fileCount(rows?.length)}</strong>
+            {t.adminManage.categories.previewChanges(
+              preview.data.created,
+              preview.data.updated,
+              preview.data.unchanged,
+            )}
             {preview.data.archivedWithParent
-              ? ` ${preview.data.archivedWithParent} subcategor${preview.data.archivedWithParent === 1 ? "y is" : "ies are"} archived along with an archived parent.`
+              ? t.adminManage.categories.importArchivedChildren(
+                  preview.data.archivedWithParent,
+                )
               : ""}{" "}
-            Archiving through an import never moves transactions.
+            {t.adminManage.categories.importArchiveHelp}
           </Notice>
         ) : null}
       </div>

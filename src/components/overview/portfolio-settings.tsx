@@ -1,4 +1,5 @@
 "use client";
+import { useT } from "~/i18n/client";
 
 import { Settings } from "lucide-react";
 import { Suspense, useState } from "react";
@@ -17,6 +18,8 @@ export function PortfolioSettings({
   id: string;
   iconOnly?: boolean;
 }) {
+  const t = useT();
+
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -27,8 +30,8 @@ export function PortfolioSettings({
         className={iconOnly ? "min-h-11 min-w-9 px-2.5" : "min-h-11 px-2.5"}
         aria-label={
           iconOnly
-            ? "Investment display settings"
-            : "Net worth display settings"
+            ? t.overview.portfolioSettings.investmentDisplaySettings
+            : t.overview.portfolioSettings.netWorthDisplaySettings
         }
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
@@ -38,30 +41,45 @@ export function PortfolioSettings({
       </Button>
       <Drawer
         open={open}
+        confirmDiscard={false}
         onClose={() => setOpen(false)}
-        title="Portfolio display"
-        description="Choose one currency for your net worth, investments and account totals."
-        footer={<Button onClick={() => setOpen(false)}>Done</Button>}
+        title={t.overview.portfolioSettings.portfolioDisplay}
+        description={
+          t.overview.portfolioSettings
+            .chooseOneCurrencyForYourNetWorthInvestments
+        }
+        footer={
+          <Button onClick={() => setOpen(false)}>
+            {t.common.actions.done}
+          </Button>
+        }
       >
         <label
           htmlFor={id}
           className="text-ink-2 mb-2 block text-sm font-medium"
         >
-          Display currency
+          {t.overview.portfolioSettings.displayCurrency}
         </label>
         <Suspense
-          fallback={<p className="text-ink-3 text-sm">Loading currencies…</p>}
+          fallback={
+            <p className="text-ink-3 text-sm">
+              {t.overview.portfolioSettings.loadingCurrencies}
+            </p>
+          }
         >
           <CurrencySelect id={id} />
         </Suspense>
         <p className="text-ink-3 mt-4 text-sm">
-          Each account total includes its investments and cash, converted using
-          the latest available daily exchange rates. Changing currency updates
-          every total together.
+          {
+            t.overview.portfolioSettings
+              .eachAccountTotalIncludesItsInvestmentsAndCash
+          }
         </p>
         <p className="text-ink-3 mt-3 text-sm">
-          Exchange rates refresh automatically. If a rate is unavailable, the
-          total is marked as partial until conversion is available.
+          {
+            t.overview.portfolioSettings
+              .exchangeRatesRefreshAutomaticallyIfARateIs
+          }
         </p>
         <Suspense fallback={null}>
           <CountCpfSrs />

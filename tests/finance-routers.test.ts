@@ -18,6 +18,7 @@ import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { api, TRPCReactProvider } from "../src/trpc/react";
 
 import { todayIso } from "../src/lib/dates";
+import { addDays } from "../src/lib/cash-flow";
 import type { Database } from "../src/server/db";
 import * as schema from "../src/server/db/schema";
 import { exchangeRates } from "../src/server/modules/portfolio/exchange-rates";
@@ -38,6 +39,7 @@ await mock.module("~/server/auth/config", () => ({
   auth: { api: { getSession: async () => null } },
 }));
 const { accountsRouter } = await import("../src/server/api/routers/accounts");
+const { planningRouter } = await import("../src/server/api/routers/planning");
 const { portfolioRouter } = await import("../src/server/api/routers/portfolio");
 const { transfersRouter } = await import("../src/server/api/routers/transfers");
 const { spendingRouter } = await import("../src/server/api/routers/spending");
@@ -98,6 +100,7 @@ function contextFor(id: string) {
 }
 
 const callers = (id: string) => ({
+  planning: planningRouter.createCaller(contextFor(id)),
   workspaces: workspacesRouter.createCaller(contextFor(id)),
   accounts: accountsRouter.createCaller(contextFor(id)),
   portfolio: portfolioRouter.createCaller(contextFor(id)),
@@ -4379,5 +4382,404 @@ describe("transfer review", () => {
     await expect(
       alice.transfers.link({ ...rows, fee: { amount: "-1", currency: "SGD" } }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("recurring cash flow and card bills", () => {
+  const today = todayIso();
+  const scheduleValues = (accountId: string) => ({
+    accountId,
+    name: "Rent",
+    amount: "-100",
+    frequency: "monthly" as const,
+    startDate: today,
+    endDate: null,
+  });
+  async function cardFixture() {
+    const source = await alice.accounts.create(bank);
+    const card = await alice.accounts.create({
+      ...bank,
+      name: "Card",
+      type: "credit_card",
+    });
+    await alice.planning.setPaymentBank({
+      cardAccountId: card.id,
+      bankAccountId: source.id,
+    });
+    return { source, card };
+  }
+  async function payment(
+    source: string,
+    card: string,
+    amount: string,
+    date = today,
+  ) {
+    const outgoing = await spendingEntry(source, {
+      isTransfer: true,
+      amount: `-${amount}`,
+      postedDate: date,
+    });
+    const incoming = await spendingEntry(card, {
+      isTransfer: true,
+      amount,
+      postedDate: date,
+    });
+    const link = await alice.transfers.link({
+      outgoing: { kind: "transaction", id: outgoing.id },
+      incoming: { kind: "transaction", id: incoming.id },
+      manual: true,
+    });
+    return { outgoing, incoming, link };
+  }
+  test("keeps plans private, never writes transactions, and rejects foreign/invalid accounts", async () => {
+    const source = await alice.accounts.create(bank);
+    const created = await alice.planning.createSchedule(
+      scheduleValues(source.id),
+    );
+    const view = await alice.planning.overview();
+    expect(view.schedules.map((s) => s.id)).toEqual([created.id]);
+    expect(view.forecasts[0]?.balance).toBeNull();
+    expect(await db.$count(schema.transaction)).toBe(0);
+    expect(await bob.planning.overview()).toMatchObject({
+      accounts: [],
+      schedules: [],
+      occurrences: [],
+      profiles: [],
+      bills: [],
+      forecasts: [],
+    });
+    await expect(
+      bob.planning.createSchedule(scheduleValues(source.id)),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      bob.planning.setActive({ id: created.id, active: false }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(bob.planning.removeSchedule(created)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      bob.planning.decideOccurrence({
+        scheduleId: created.id,
+        dueDate: today,
+        action: "skip",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const card = await alice.accounts.create({ ...bank, type: "credit_card" });
+    await expect(
+      alice.planning.createSchedule(scheduleValues(card.id)),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.planning.createSchedule({
+        ...scheduleValues(source.id),
+        amount: "0",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.planning.overview({ days: 365 as 30 }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+  test("matching removes a planned amount exactly once, and edits/deletions restore it", async () => {
+    const source = await alice.accounts.create(bank);
+    await alice.portfolio.recordSnapshot({
+      accountId: source.id,
+      asOf: addDays(today, -1),
+      positions: [],
+      cash: [{ currency: "SGD", amount: "1000" }],
+    });
+    const schedule = await alice.planning.createSchedule({
+      ...scheduleValues(source.id),
+      endDate: today,
+    });
+    const row = await spendingEntry(source.id, {
+      amount: "-100",
+      postedDate: today,
+      description: "Rent paid",
+      currency: "SGD",
+    });
+    await spendingEntry(source.id, {
+      amount: "-900",
+      postedDate: today,
+      currency: "USD",
+    });
+    let view = await alice.planning.overview();
+    expect(view.forecasts[0]).toMatchObject({
+      balance: "900",
+      projected: "800",
+    });
+    expect(view.occurrences[0]?.suggestions.map((t) => t.id)).toEqual([row.id]);
+    const match = {
+      scheduleId: schedule.id,
+      dueDate: today,
+      action: "match" as const,
+      transactionId: row.id,
+    };
+    await alice.planning.decideOccurrence(match);
+    view = await alice.planning.overview();
+    expect(view.forecasts[0]).toMatchObject({
+      balance: "900",
+      projected: "900",
+      events: [],
+    });
+    const other = await alice.planning.createSchedule({
+      ...scheduleValues(source.id),
+      endDate: today,
+    });
+    await expect(
+      alice.planning.decideOccurrence({ ...match, scheduleId: other.id }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await alice.planning.setActive({ id: other.id, active: false });
+    await alice.spending.update({
+      id: row.id,
+      accountId: source.id,
+      postedDate: today,
+      amount: "-110",
+      description: "Rent paid",
+      merchant: null,
+      currency: "SGD",
+      categoryId: null,
+      isTransfer: false,
+      cleared: false,
+      notes: null,
+    });
+    view = await alice.planning.overview();
+    expect(view.occurrences[0]).toMatchObject({
+      matched: null,
+      staleMatch: true,
+    });
+    expect(view.forecasts[0]?.projected).toBe("790");
+    await alice.spending.remove(row);
+    view = await alice.planning.overview();
+    expect(view.occurrences[0]).toMatchObject({
+      matched: null,
+      skipped: false,
+      staleMatch: false,
+    });
+    expect(view.forecasts[0]?.projected).toBe("900");
+  });
+  test("skips can be cleared and plans paused without modifying recorded spending", async () => {
+    const source = await alice.accounts.create(bank);
+    const schedule = await alice.planning.createSchedule({
+      ...scheduleValues(source.id),
+      endDate: today,
+    });
+    const decision = { scheduleId: schedule.id, dueDate: today };
+    await alice.planning.decideOccurrence({ ...decision, action: "skip" });
+    expect((await alice.planning.overview()).forecasts[0]?.events).toEqual([]);
+    await alice.planning.decideOccurrence({ ...decision, action: "reset" });
+    expect((await alice.planning.overview()).forecasts[0]?.events).toHaveLength(
+      1,
+    );
+    await alice.planning.setActive({ id: schedule.id, active: false });
+    expect((await alice.planning.overview()).occurrences).toEqual([]);
+    await alice.planning.setActive({ id: schedule.id, active: true });
+    await expect(
+      alice.planning.decideOccurrence({
+        ...decision,
+        dueDate: addDays(today, 1),
+        action: "skip",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await alice.planning.removeSchedule(schedule);
+    expect(await db.$count(schema.recurringOccurrence)).toBe(0);
+    expect(await db.$count(schema.transaction)).toBe(0);
+  });
+  test("links only owned same-currency bank/card accounts and requires explicit statement details", async () => {
+    const { source, card } = await cardFixture();
+    const bill = {
+      cardAccountId: card.id,
+      statementDate: addDays(today, -10),
+      dueDate: addDays(today, 10),
+      amountDue: "100",
+    };
+    await expect(
+      bob.planning.setPaymentBank({
+        cardAccountId: card.id,
+        bankAccountId: source.id,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(bob.planning.createStatement(bill)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    const foreign = await bob.accounts.create(bank);
+    await expect(
+      alice.planning.setPaymentBank({
+        cardAccountId: card.id,
+        bankAccountId: foreign.id,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const usd = await alice.accounts.create({ ...bank, currency: "USD" });
+    await expect(
+      alice.planning.setPaymentBank({
+        cardAccountId: card.id,
+        bankAccountId: usd.id,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.planning.setPaymentBank({
+        cardAccountId: source.id,
+        bankAccountId: card.id,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.planning.createStatement({ ...bill, dueDate: bill.statementDate }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      alice.planning.createStatement({
+        ...bill,
+        statementDate: addDays(today, 1),
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const created = await alice.planning.createStatement(bill);
+    await expect(alice.planning.createStatement(bill)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await expect(bob.planning.removeStatement(created)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await alice.planning.setPaymentBank({
+      cardAccountId: card.id,
+      bankAccountId: null,
+    });
+    const view = await alice.planning.overview();
+    expect(view.profiles).toEqual([]);
+    expect(view.bills[0]).toMatchObject({
+      bankAccountId: source.id,
+      status: "unpaid",
+      remaining: "100",
+    });
+    await expect(
+      alice.planning.createStatement({
+        ...bill,
+        statementDate: addDays(today, -9),
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+  test("only confirmed bank/card pairs settle bills; partial payments reduce both cash and future reservations", async () => {
+    const { source, card } = await cardFixture();
+    await alice.portfolio.recordSnapshot({
+      accountId: source.id,
+      asOf: addDays(today, -15),
+      positions: [],
+      cash: [{ currency: "SGD", amount: "1000" }],
+    });
+    const bill = await alice.planning.createStatement({
+      cardAccountId: card.id,
+      statementDate: addDays(today, -10),
+      dueDate: addDays(today, 10),
+      amountDue: "300",
+    });
+    await spendingEntry(card.id, {
+      amount: "300",
+      postedDate: today,
+      description: "Refund",
+      isTransfer: false,
+    });
+    const out = await spendingEntry(source.id, {
+      amount: "-100",
+      postedDate: today,
+      isTransfer: true,
+    });
+    const credit = await spendingEntry(card.id, {
+      amount: "100",
+      postedDate: today,
+      isTransfer: true,
+    });
+    expect((await alice.planning.overview()).bills[0]).toMatchObject({
+      status: "unpaid",
+      paid: "0",
+    });
+    const link = await alice.transfers.link({
+      outgoing: { kind: "transaction", id: out.id },
+      incoming: { kind: "transaction", id: credit.id },
+      manual: true,
+    });
+    let view = await alice.planning.overview();
+    expect(view.bills[0]).toMatchObject({
+      status: "partial",
+      paid: "100",
+      remaining: "200",
+    });
+    expect(view.forecasts[0]).toMatchObject({
+      balance: "900",
+      projected: "700",
+    });
+    await payment(source.id, card.id, "200");
+    view = await alice.planning.overview();
+    expect(view.bills[0]).toMatchObject({
+      status: "paid",
+      remaining: "0",
+      paidOn: today,
+    });
+    expect(view.forecasts[0]).toMatchObject({
+      balance: "700",
+      projected: "700",
+      events: [],
+    });
+    await alice.transfers.unlink(link);
+    view = await alice.planning.overview();
+    expect(view.bills[0]).toMatchObject({
+      status: "partial",
+      remaining: "100",
+    });
+    expect(view.forecasts[0]?.projected).toBe("600");
+    await alice.planning.removeStatement(bill);
+    expect(await db.$count(schema.transaction)).toBe(5);
+    expect(await db.$count(schema.transferLink)).toBe(1);
+  });
+  test("latest statements replace older carryover reservations, while payment history remains truthful", async () => {
+    const { source, card } = await cardFixture();
+    await alice.portfolio.recordSnapshot({
+      accountId: source.id,
+      asOf: addDays(today, -30),
+      positions: [],
+      cash: [{ currency: "SGD", amount: "1000" }],
+    });
+    await alice.planning.createStatement({
+      cardAccountId: card.id,
+      statementDate: addDays(today, -20),
+      dueDate: addDays(today, -5),
+      amountDue: "100",
+    });
+    await alice.planning.createStatement({
+      cardAccountId: card.id,
+      statementDate: addDays(today, -2),
+      dueDate: addDays(today, 20),
+      amountDue: "150",
+    });
+    let view = await alice.planning.overview({ days: 30 });
+    expect(view.bills[0]?.status).toBe("overdue");
+    expect(view.forecasts[0]).toMatchObject({ projected: "850" });
+    expect(view.forecasts[0]?.events).toHaveLength(1);
+    await payment(source.id, card.id, "100");
+    view = await alice.planning.overview();
+    expect(view.bills[0]).toMatchObject({ status: "paid", paidLate: true });
+    expect(view.bills[1]).toMatchObject({ status: "partial", remaining: "50" });
+    expect(view.forecasts[0]).toMatchObject({
+      balance: "900",
+      projected: "850",
+    });
+  });
+  test("planning history archives accounts, prevents type/currency changes, and excludes archived plans from forecasts", async () => {
+    const source = await alice.accounts.create(bank);
+    await alice.planning.createSchedule(scheduleValues(source.id));
+    await expect(
+      alice.accounts.update({ ...bank, id: source.id, type: "credit_card" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      alice.accounts.update({ ...bank, id: source.id, currency: "USD" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await alice.accounts.remove(source)).toEqual({
+      outcome: "archived",
+    });
+    expect((await alice.planning.overview()).forecasts).toEqual([]);
+    expect((await alice.planning.overview()).occurrences).toEqual([]);
+    const { source: paymentBank, card } = await cardFixture();
+    expect(await alice.accounts.remove(card)).toEqual({ outcome: "archived" });
+    await expect(
+      alice.planning.setPaymentBank({
+        cardAccountId: card.id,
+        bankAccountId: paymentBank.id,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

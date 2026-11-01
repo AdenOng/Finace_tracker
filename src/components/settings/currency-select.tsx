@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import { useRouter } from "next/navigation";
 
 import { Select } from "~/components/ui/field";
@@ -16,6 +17,7 @@ export function CurrencySelect({
   /** Codes only, sized to sit beside a label. */
   compact?: boolean;
 }) {
+  const t = useT();
   const router = useRouter();
   const utils = api.useUtils();
   const [currencies] = api.catalog.currencies.useSuspenseQuery();
@@ -34,7 +36,7 @@ export function CurrencySelect({
     <div>
       <Select
         id={id}
-        aria-label="Display currency"
+        aria-label={t.settings.currencySelect.displayCurrency}
         className={cn(
           compact ? "h-8 w-auto pr-8 font-mono text-[12px]" : "w-auto min-w-44",
           className,

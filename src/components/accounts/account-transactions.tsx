@@ -1,5 +1,7 @@
 "use client";
 
+import { useT, useLocale, categoryLabel } from "~/i18n/client";
+
 import Decimal from "decimal.js";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
@@ -25,6 +27,8 @@ export function AccountTransactions({
   readOnly: boolean;
   allHref: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const utils = api.useUtils();
   // The month comes from the browser's clock, so it is set after hydration.
   const [month, setMonth] = useState<string | null>(null);
@@ -49,13 +53,15 @@ export function AccountTransactions({
     <Section
       amounts="account-transactions"
       amountsFor={accountId}
-      title="Transactions"
-      description="What came in and went out. Transfers between your own accounts are shown but not counted."
+      title={t.accounts.transactions.transactions}
+      description={
+        t.accounts.transactions.whatCameInAndWentOutTransfersBetweenYourOwn
+      }
       actions={
         readOnly ? undefined : (
           <Button size="sm" onClick={() => setAdding(true)}>
             <Plus className="size-4" />
-            Add transaction
+            {t.accounts.transactions.addTransaction}
           </Button>
         )
       }
@@ -65,19 +71,19 @@ export function AccountTransactions({
           <Button
             variant="ghost"
             size="sm"
-            aria-label="Previous month"
+            aria-label={t.accounts.transactions.previousMonth}
             disabled={!month}
             onClick={() => setMonth((m) => (m ? shiftMonth(m, -1) : m))}
           >
             <ChevronLeft className="size-4" />
           </Button>
           <p className="min-w-32 text-center text-[15px] font-semibold">
-            {month ? formatMonth(month) : " "}
+            {month ? formatMonth(month, locale) : " "}
           </p>
           <Button
             variant="ghost"
             size="sm"
-            aria-label="Next month"
+            aria-label={t.accounts.transactions.nextMonth}
             disabled={!month}
             onClick={() => setMonth((m) => (m ? shiftMonth(m, 1) : m))}
           >
@@ -87,14 +93,14 @@ export function AccountTransactions({
         {currency ? (
           <p className="figures font-mono text-[13px]">
             <span className="text-gain">
-              In{" "}
+              {t.accounts.transactions.in}{" "}
               <span className="sensitive">
                 {formatMoney(total(1).toFixed(2), currency)}
               </span>
             </span>
             <span className="text-ink-3 mx-2">·</span>
             <span className="text-loss">
-              Out{" "}
+              {t.accounts.transactions.out}{" "}
               <span className="sensitive">
                 {formatMoney(total(-1).toFixed(2), currency)}
               </span>
@@ -104,10 +110,10 @@ export function AccountTransactions({
       </div>
 
       {list.isLoading || !month ? (
-        <p className="text-ink-3 text-sm">Loading…</p>
+        <p className="text-ink-3 text-sm">{t.common.status.loading}</p>
       ) : rows.length === 0 ? (
         <p className="text-ink-2 border-line-2 rounded-ctl border border-dashed px-5 py-6 text-sm">
-          Nothing recorded for {formatMonth(month)}.
+          {t.accounts.transactions.empty(formatMonth(month, locale))}
         </p>
       ) : (
         <ul>
@@ -119,7 +125,7 @@ export function AccountTransactions({
                 className="border-line grid grid-cols-[4.5rem_1fr_auto] items-center gap-4 border-b py-2.5 text-[13px] last:border-b-0"
               >
                 <span className="figures text-ink-3 font-mono text-[12px]">
-                  {formatDate(r.postedDate).replace(/ \d{4}$/, "")}
+                  {formatDate(r.postedDate, locale).replace(/ \d{4}$/, "")}
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate font-medium">
@@ -127,8 +133,10 @@ export function AccountTransactions({
                   </span>
                   <span className="text-ink-3 block truncate text-[12px]">
                     {r.isTransfer
-                      ? "Transfer"
-                      : (r.categoryName ?? "Not categorised")}
+                      ? t.accounts.transactions.transfer
+                      : r.categoryName
+                        ? categoryLabel(t, r.categoryName)
+                        : t.accounts.transactions.notCategorised}
                   </span>
                 </span>
                 <span
@@ -155,8 +163,8 @@ export function AccountTransactions({
         className="mt-4 inline-block text-[13px] font-semibold underline decoration-current/30 underline-offset-4 hover:decoration-current"
       >
         {rows.length > SHOWN
-          ? `See all ${rows.length} in Spending`
-          : "Open in Spending"}
+          ? t.accounts.transactions.seeAll(rows.length)
+          : t.accounts.transactions.openInSpending}
       </Link>
 
       {adding ? (

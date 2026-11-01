@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -23,6 +24,7 @@ function secretFromUri(uri: string) {
 }
 
 export function TwoFactorCard({ enabled }: { enabled: boolean }) {
+  const t = useT();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>({ name: "idle" });
@@ -45,7 +47,9 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
     await run(async () => {
       const { data, error } = await authClient.twoFactor.enable({ password });
       if (error || data?.method !== "totp") {
-        return setError(error?.message ?? "Could not start enrolment");
+        return setError(
+          error?.message ?? t.settings.twoFactorCard.couldNotStartEnrolment,
+        );
       }
       setStep({
         name: "scan",
@@ -64,7 +68,10 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
     );
     await run(async () => {
       const { error } = await authClient.twoFactor.verifyTotp({ code });
-      if (error) return setError(error.message ?? "That code did not match");
+      if (error)
+        return setError(
+          error.message ?? t.settings.twoFactorCard.thatCodeDidNotMatch,
+        );
       queryClient.clear();
       setStep({ name: "codes", backupCodes: step.backupCodes });
     });
@@ -76,7 +83,9 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
     await run(async () => {
       const { error } = await authClient.twoFactor.disable({ password });
       if (error)
-        return setError(error.message ?? "Could not turn off two-step sign-in");
+        return setError(
+          error.message ?? t.settings.twoFactorCard.couldNotTurnOffTwostep,
+        );
       setStep({ name: "idle" });
       router.refresh();
     });
@@ -86,8 +95,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
     return (
       <div className="space-y-4">
         <Notice tone="success">
-          Two-step sign-in is on. Save these backup codes somewhere safe — each
-          works once if you lose your phone.
+          {t.settings.twoFactorCard.twostepSigninIsOnSave}
         </Notice>
         <ol className="figures border-line grid grid-cols-2 gap-x-6 gap-y-1 border p-4 text-[15px] sm:grid-cols-3">
           {step.backupCodes.map((code) => (
@@ -101,7 +109,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
               void navigator.clipboard.writeText(step.backupCodes.join("\n"))
             }
           >
-            Copy codes
+            {t.settings.twoFactorCard.copyCodes}
           </Button>
           <Button
             onClick={() => {
@@ -109,7 +117,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
               window.location.assign("/settings");
             }}
           >
-            I&apos;ve saved them
+            {t.settings.twoFactorCard.iveSavedThem}
           </Button>
         </div>
       </div>
@@ -124,14 +132,16 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
         </div>
         <form onSubmit={confirm} className="space-y-4">
           <p className="text-ink-2 text-sm">
-            Scan with Google Authenticator, 1Password, Authy or similar.
-            Can&apos;t scan? Enter this key:
+            {t.settings.twoFactorCard.scanWithGoogleAuthenticator1password}
           </p>
           <p className="figures bg-wash px-3 py-2 text-[13px] font-semibold break-all">
             {secretFromUri(step.totpURI)}
           </p>
           {error ? <Notice tone="error">{error}</Notice> : null}
-          <Field label="6-digit code" htmlFor="totp-code">
+          <Field
+            label={t.settings.twoFactorCard.sixDigitCode}
+            htmlFor="totp-code"
+          >
             <Input
               id="totp-code"
               name="code"
@@ -143,14 +153,14 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
           </Field>
           <div className="flex gap-2">
             <Button type="submit" loading={pending}>
-              Confirm
+              {t.settings.twoFactorCard.confirm}
             </Button>
             <Button
               type="button"
               variant="ghost"
               onClick={() => setStep({ name: "idle" })}
             >
-              Cancel
+              {t.settings.twoFactorCard.cancel}
             </Button>
           </div>
         </form>
@@ -163,7 +173,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
       <form onSubmit={disable} className="max-w-sm space-y-4">
         {error ? <Notice tone="error">{error}</Notice> : null}
         <Field
-          label="Confirm your password to turn it off"
+          label={t.settings.twoFactorCard.confirmYourPasswordToTurn}
           htmlFor="tf-disable-password"
         >
           <Input
@@ -176,14 +186,14 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
         </Field>
         <div className="flex gap-2">
           <Button type="submit" variant="danger" loading={pending}>
-            Turn off
+            {t.settings.twoFactorCard.turnOff}
           </Button>
           <Button
             type="button"
             variant="ghost"
             onClick={() => setStep({ name: "idle" })}
           >
-            Cancel
+            {t.settings.twoFactorCard.cancel}
           </Button>
         </div>
       </form>
@@ -191,14 +201,14 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <p className="text-gain flex items-center gap-2 text-sm font-semibold">
           <ShieldCheck className="size-5" />
-          On — an authenticator code is required after your password.
+          {t.settings.twoFactorCard.onAnAuthenticatorCodeIs}
         </p>
         <Button
           variant="secondary"
           size="sm"
           onClick={() => setStep({ name: "disable" })}
         >
-          Turn off
+          {t.settings.twoFactorCard.turnOff}
         </Button>
       </div>
     );
@@ -207,7 +217,10 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
   return (
     <form onSubmit={start} className="max-w-sm space-y-4">
       {error ? <Notice tone="error">{error}</Notice> : null}
-      <Field label="Confirm your password to begin" htmlFor="tf-password">
+      <Field
+        label={t.settings.twoFactorCard.confirmYourPasswordToBegin}
+        htmlFor="tf-password"
+      >
         <Input
           id="tf-password"
           name="password"
@@ -217,7 +230,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
         />
       </Field>
       <Button type="submit" loading={pending}>
-        Set up authenticator app
+        {t.settings.twoFactorCard.setUpAuthenticatorApp}
       </Button>
     </form>
   );

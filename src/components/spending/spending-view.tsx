@@ -17,6 +17,8 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { categoryLabel, useT, useLocale } from "~/i18n/client";
+import { intlLocale } from "~/i18n/config";
 import {
   BulkEditDrawer,
   type BulkAction,
@@ -45,6 +47,8 @@ export function SpendingView({
   initialAccountId: string | null;
   initialMonth: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const utils = api.useUtils();
   const [month, setMonth] = useState(initialMonth);
   useEffect(() => {
@@ -97,13 +101,13 @@ export function SpendingView({
   const totals = useMemo(() => {
     const byCurrency = new Map<string, { spent: Decimal; received: Decimal }>();
     for (const row of summary.data ?? []) {
-      const t = byCurrency.get(row.currency) ?? {
+      const previous = byCurrency.get(row.currency) ?? {
         spent: new Decimal(0),
         received: new Decimal(0),
       };
       byCurrency.set(row.currency, {
-        spent: t.spent.plus(row.spent),
-        received: t.received.plus(row.received),
+        spent: previous.spent.plus(row.spent),
+        received: previous.received.plus(row.received),
       });
     }
     return [...byCurrency];
@@ -135,32 +139,36 @@ export function SpendingView({
       `finfolio-transactions-${query ? "search" : month}.csv`,
       toCsv([
         [
-          "Date",
-          "Description",
-          "Merchant",
-          "Account",
-          "Category",
-          "Amount",
-          "Currency",
-          "Transfer",
-          "Status",
-          "Notes",
+          t.common.fields.date,
+          t.spending.spendingView.description,
+          t.spending.spendingView.merchant,
+          t.spending.spendingView.account,
+          t.spending.spendingView.category,
+          t.common.fields.amount,
+          t.common.fields.currency,
+          t.spending.spendingView.transfer,
+          t.common.fields.status,
+          t.common.fields.notes,
         ],
-        ...rows.map((t) => [
-          t.postedDate,
-          t.description,
-          t.merchant,
-          t.accountName,
-          t.categoryName,
-          t.amount,
-          t.currency,
-          t.isTransfer ? "Yes" : "No",
-          t.reconciliationId
-            ? "Reconciled"
-            : t.cleared
-              ? "Cleared"
-              : "Uncleared",
-          t.notes,
+        ...rows.map((row) => [
+          row.postedDate,
+          row.description,
+          row.merchant,
+          row.accountName,
+          row.categoryName
+            ? categoryLabel(t, row.categoryName)
+            : row.categoryName,
+          row.amount,
+          row.currency,
+          row.isTransfer
+            ? t.spending.spendingView.yes
+            : t.spending.spendingView.no,
+          row.reconciliationId
+            ? t.spending.spendingView.reconciled
+            : row.cleared
+              ? t.spending.spendingView.cleared
+              : t.spending.spendingView.uncleared,
+          row.notes,
         ]),
       ]),
       "text/csv;charset=utf-8",
@@ -170,7 +178,7 @@ export function SpendingView({
     selectable.length > 0 && selectable.every((r) => selected.has(r.id));
   const toggleAll = (checked: boolean) =>
     setSelected(checked ? new Set(selectable.map((r) => r.id)) : new Set());
-  const shortMonth = new Intl.DateTimeFormat("en-SG", {
+  const shortMonth = new Intl.DateTimeFormat(intlLocale[locale], {
     month: "short",
     year: "numeric",
     timeZone: "UTC",
@@ -181,28 +189,30 @@ export function SpendingView({
       <header className="mb-5 flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="font-display text-[30px] leading-tight font-semibold sm:text-4xl">
-            Spending
+            {t.spending.spendingView.spending}
           </h1>
           <p className="text-ink-3 mt-1 text-[13px] sm:text-sm">
-            Your money, month by month.
+            {t.spending.spendingView.yourMoneyMonthByMonth}
           </p>
         </div>
         <Button
           onClick={() => setEditing("new")}
           disabled={openAccounts.length === 0}
-          aria-label="Add transaction"
+          aria-label={t.spending.spendingView.addTransaction}
           className="h-11 rounded-full px-4"
         >
           <Plus className="size-4" aria-hidden="true" />
-          <span className="sm:hidden">Add</span>
-          <span className="hidden sm:inline">Add transaction</span>
+          <span className="sm:hidden">{t.common.actions.add}</span>
+          <span className="hidden sm:inline">
+            {t.spending.spendingView.addTransaction}
+          </span>
         </Button>
       </header>
       <Link
         href="/spending/transfers"
         className="mb-4 inline-block text-sm font-semibold underline underline-offset-4"
       >
-        Review transfers
+        {t.spending.spendingView.reviewTransfers}
       </Link>
       <div className="border-line mb-5 flex items-center justify-between gap-2 border-b pb-4">
         <div className="card flex min-w-0 items-center rounded-full p-0.5 shadow-none">
@@ -210,7 +220,7 @@ export function SpendingView({
             variant="ghost"
             size="sm"
             className="size-10 rounded-full px-0"
-            aria-label="Previous month"
+            aria-label={t.spending.spendingView.previousMonth}
             onClick={() => {
               setSelected(new Set());
               setMonth((m) => shiftMonth(m, -1));
@@ -220,16 +230,18 @@ export function SpendingView({
           </Button>
           <p
             className="figures min-w-24 px-1 text-center text-[13px] font-semibold"
-            aria-label={formatMonth(month)}
+            aria-label={formatMonth(month, locale)}
           >
             <span className="sm:hidden">{shortMonth}</span>
-            <span className="hidden sm:inline">{formatMonth(month)}</span>
+            <span className="hidden sm:inline">
+              {formatMonth(month, locale)}
+            </span>
           </p>
           <Button
             variant="ghost"
             size="sm"
             className="size-10 rounded-full px-0"
-            aria-label="Next month"
+            aria-label={t.spending.spendingView.nextMonth}
             onClick={() => {
               setSelected(new Set());
               setMonth((m) => shiftMonth(m, 1));
@@ -242,28 +254,30 @@ export function SpendingView({
           variant="ghost"
           size="sm"
           className="h-10 rounded-full px-2 sm:px-3"
-          aria-label="Merchant rules"
+          aria-label={t.spending.spendingView.merchantRules}
           onClick={() => setShowRules(true)}
         >
           <Sparkles className="size-4" aria-hidden="true" />
-          <span className="sm:hidden">Rules</span>
-          <span className="hidden sm:inline">Merchant rules</span>
+          <span className="sm:hidden">{t.spending.spendingView.rules}</span>
+          <span className="hidden sm:inline">
+            {t.spending.spendingView.merchantRules}
+          </span>
         </Button>
       </div>
 
       {openAccounts.length === 0 ? (
         <EmptyState
-          title="Add an account first"
+          title={t.spending.spendingView.addAnAccountFirst}
           action={
             <Link
               href="/accounts"
               className="font-semibold underline underline-offset-4"
             >
-              Go to accounts
+              {t.spending.spendingView.goToAccounts}
             </Link>
           }
         >
-          Transactions belong to a bank, card or cash account.
+          {t.spending.spendingView.transactionsBelongToABankCardOr}
         </EmptyState>
       ) : null}
 
@@ -277,12 +291,14 @@ export function SpendingView({
         <AmountsScope
           scope="spending-summary"
           className="card min-w-0 overflow-hidden"
-          aria-label="Monthly summary"
+          aria-label={t.spending.spendingView.monthlySummary}
         >
           <div className="flex items-center justify-between gap-2 px-4 pt-2 sm:px-6 sm:pt-3">
-            <h2 className="text-sm font-semibold">Monthly overview</h2>
+            <h2 className="text-sm font-semibold">
+              {t.spending.spendingView.monthlyOverview}
+            </h2>
             <span className="text-ink-3 flex items-center gap-1 text-[11px]">
-              Excludes transfers
+              {t.spending.spendingView.excludesTransfers}
               <AmountsToggle />
             </span>
           </div>
@@ -298,36 +314,36 @@ export function SpendingView({
           ) : totals.length === 0 ? (
             <div className="px-4 py-6 sm:px-6">
               <p className="text-ink-2 text-sm">
-                A fresh start for {shortMonth}.
+                {t.spending.spendingView.freshStart(shortMonth)}
               </p>
               <p className="text-ink-3 mt-1 text-[13px]">
-                Your income and spending will appear here.
+                {t.spending.spendingView.yourIncomeAndSpendingWillAppearHere}
               </p>
             </div>
           ) : (
             <>
               <dl className="divide-line divide-y px-4 sm:px-6">
-                {totals.map(([currency, t]) => (
+                {totals.map(([currency, row]) => (
                   <div key={currency} className="grid grid-cols-2 gap-4 py-5">
                     <div className="min-w-0">
                       <dt className="text-ink-3 flex items-center gap-1.5 text-[12px]">
                         <ArrowUpRight className="size-3.5" />
-                        Money out
+                        {t.spending.spendingView.moneyOut}
                       </dt>
                       <dd className="font-poster figures mt-2 text-[clamp(20px,5.5vw,32px)] leading-none font-bold break-words">
                         <span className="sensitive">
-                          {formatMoney(t.spent.toFixed(), currency)}
+                          {formatMoney(row.spent.toFixed(), currency)}
                         </span>
                       </dd>
                     </div>
                     <div className="border-line min-w-0 border-l pl-4">
                       <dt className="text-ink-3 flex items-center gap-1.5 text-[12px]">
                         <ArrowDownLeft className="size-3.5" />
-                        Money in
+                        {t.spending.spendingView.moneyIn}
                       </dt>
                       <dd className="font-poster figures text-gain mt-2 text-[clamp(20px,5.5vw,32px)] leading-none font-bold break-words">
                         <span className="sensitive">
-                          {formatMoney(t.received.toFixed(), currency)}
+                          {formatMoney(row.received.toFixed(), currency)}
                         </span>
                       </dd>
                     </div>
@@ -337,7 +353,7 @@ export function SpendingView({
               {spending.length > 0 ? (
                 <div className="border-line border-t px-4 py-4 sm:px-6">
                   <p className="text-ink-3 mb-2 text-[11px] font-medium tracking-wide uppercase">
-                    Where it went
+                    {t.spending.spendingView.whereItWent}
                   </p>
                   <ul className="space-y-3">
                     {spending.map((r) => (
@@ -366,12 +382,14 @@ export function SpendingView({
         <AmountsScope
           scope="spending-transactions"
           className="card min-w-0 overflow-hidden"
-          aria-label="Transactions"
+          aria-label={t.spending.spendingView.transactions}
         >
           <div className="border-line border-b px-4 py-3 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <h2 className="text-[15px] font-semibold">Transactions</h2>
+                <h2 className="text-[15px] font-semibold">
+                  {t.spending.spendingView.transactions}
+                </h2>
                 {list.data ? (
                   <span className="bg-wash text-ink-3 figures rounded-full px-2 py-0.5 text-[11px]">
                     {list.data.length}
@@ -382,12 +400,16 @@ export function SpendingView({
                     variant="ghost"
                     size="sm"
                     className="h-10 rounded-full px-2 sm:px-3"
-                    aria-label="Export these transactions as CSV"
+                    aria-label={
+                      t.spending.spendingView.exportTheseTransactionsAsCSV
+                    }
                     disabled={list.isPlaceholderData}
                     onClick={exportCsv}
                   >
                     <Download className="size-3.5" aria-hidden="true" />
-                    <span className="hidden sm:inline">Export CSV</span>
+                    <span className="hidden sm:inline">
+                      {t.spending.spendingView.exportCSV}
+                    </span>
                   </Button>
                 ) : null}
                 <AmountsToggle className="h-10 rounded-full px-2" />
@@ -401,7 +423,7 @@ export function SpendingView({
                 aria-controls="spending-filters"
               >
                 <SlidersHorizontal className="size-3.5" aria-hidden="true" />
-                Filters{activeFilters ? ` · ${activeFilters}` : ""}
+                {t.spending.spendingView.filters(activeFilters)}
               </Button>
               {activeFilters ? (
                 <button
@@ -409,7 +431,7 @@ export function SpendingView({
                   className="text-ink-3 hidden text-xs underline underline-offset-4 sm:block"
                   onClick={clearFilters}
                 >
-                  Clear filters
+                  {t.spending.spendingView.clearFilters}
                 </button>
               ) : null}
             </div>
@@ -422,7 +444,7 @@ export function SpendingView({
             >
               <label className="col-span-2 min-w-0 sm:col-span-1">
                 <span className="text-ink-3 mb-1 block text-[11px]">
-                  Search every month
+                  {t.spending.spendingView.searchEveryMonth}
                 </span>
                 <span className="relative block">
                   <Search
@@ -431,8 +453,10 @@ export function SpendingView({
                   />
                   <Input
                     type="search"
-                    aria-label="Search transactions"
-                    placeholder="Description, merchant or note"
+                    aria-label={t.spending.spendingView.searchTransactions}
+                    placeholder={
+                      t.spending.spendingView.descriptionMerchantOrNote
+                    }
                     className="h-10 rounded-lg pl-8 text-[12px]"
                     maxLength={100}
                     value={search}
@@ -442,10 +466,10 @@ export function SpendingView({
               </label>
               <label className="min-w-0">
                 <span className="text-ink-3 mb-1 block text-[11px]">
-                  Account
+                  {t.spending.spendingView.account}
                 </span>
                 <Select
-                  aria-label="Filter by account"
+                  aria-label={t.spending.spendingView.filterByAccount}
                   className="h-10 min-w-0 rounded-lg text-[12px]"
                   value={accountId ?? ""}
                   onChange={(e) => {
@@ -453,7 +477,9 @@ export function SpendingView({
                     setAccountId(e.target.value || null);
                   }}
                 >
-                  <option value="">All accounts</option>
+                  <option value="">
+                    {t.spending.spendingView.allAccounts}
+                  </option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
@@ -463,10 +489,10 @@ export function SpendingView({
               </label>
               <label className="min-w-0">
                 <span className="text-ink-3 mb-1 block text-[11px]">
-                  Category
+                  {t.spending.spendingView.category}
                 </span>
                 <Select
-                  aria-label="Filter by category"
+                  aria-label={t.spending.spendingView.filterByCategory}
                   className="h-10 min-w-0 rounded-lg text-[12px]"
                   value={categoryId ?? ""}
                   onChange={(e) => {
@@ -474,10 +500,14 @@ export function SpendingView({
                     setCategoryId(e.target.value || null);
                   }}
                 >
-                  <option value="">All categories</option>
+                  <option value="">
+                    {t.spending.spendingView.allCategories}
+                  </option>
                   {orderCategories(categories).map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.parentId ? `— ${c.name}` : c.name}
+                      {c.parentId
+                        ? `— ${categoryLabel(t, c.name)}`
+                        : categoryLabel(t, c.name)}
                     </option>
                   ))}
                 </Select>
@@ -489,14 +519,17 @@ export function SpendingView({
                   {[
                     query && `“${query}”`,
                     accounts.find((a) => a.id === accountId)?.name,
-                    categories.find((c) => c.id === categoryId)?.name,
+                    categoryLabel(
+                      t,
+                      categories.find((c) => c.id === categoryId)?.name ?? "",
+                    ),
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
                 <button
                   type="button"
-                  aria-label="Clear filters"
+                  aria-label={t.spending.spendingView.clearFilters}
                   onClick={clearFilters}
                   className="text-ink-3 hover:bg-wash grid size-8 shrink-0 place-items-center rounded-full"
                 >
@@ -510,10 +543,10 @@ export function SpendingView({
               <div
                 className="bg-wash mb-4 flex flex-wrap items-center gap-2 p-3"
                 role="region"
-                aria-label="Selected transaction actions"
+                aria-label={t.spending.spendingView.selectedTransactionActions}
               >
                 <span className="mr-auto text-sm font-semibold">
-                  {selectedRows.length} selected
+                  {t.spending.spendingView.selected(selectedRows.length)}
                 </span>
                 <Button
                   size="sm"
@@ -521,7 +554,7 @@ export function SpendingView({
                   disabled={selectionBusy}
                   onClick={() => setBulkAction("edit")}
                 >
-                  Bulk edit
+                  {t.spending.spendingView.bulkEdit}
                 </Button>
                 <Button
                   size="sm"
@@ -529,7 +562,7 @@ export function SpendingView({
                   disabled={selectionBusy}
                   onClick={() => setBulkAction("rules")}
                 >
-                  Apply rules
+                  {t.spending.spendingView.applyRules}
                 </Button>
                 <Button
                   size="sm"
@@ -537,28 +570,27 @@ export function SpendingView({
                   disabled={selectionBusy}
                   onClick={() => setBulkAction("delete")}
                 >
-                  Delete selected
+                  {t.spending.spendingView.deleteSelected}
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => setSelected(new Set())}
                 >
-                  Clear selection
+                  {t.spending.spendingView.clearSelection}
                 </Button>
               </div>
             ) : null}
             {query && list.data?.length ? (
               <p className="text-ink-3 mb-3 text-[13px]">
                 {list.data.length >= 500
-                  ? `The 500 newest matches for “${query}” from every month. Add a filter to narrow it down.`
-                  : `Matches for “${query}” from every month, newest first.`}
+                  ? t.spending.spendingView.limitedMatches(query)
+                  : t.spending.spendingView.matches(query)}
               </p>
             ) : null}
             {(list.data?.length ?? 0) > 500 ? (
               <p className="text-ink-2 mb-3 text-sm">
-                Select up to 500 entries at a time. Select all chooses the first
-                500 visible entries.
+                {t.spending.spendingView.selectUpTo500EntriesAtA}
               </p>
             ) : null}
             {list.error ? (
@@ -572,17 +604,18 @@ export function SpendingView({
                 </span>
                 <p className="text-sm font-semibold">
                   {query
-                    ? `Nothing matches “${query}”`
+                    ? t.spending.spendingView.nothingMatches(query)
                     : activeFilters
-                      ? "No matching transactions"
-                      : "Nothing here yet"}
+                      ? t.spending.spendingView.noMatchingTransactions
+                      : t.spending.spendingView.nothingHereYet}
                 </p>
                 <p className="text-ink-3 mt-1 max-w-64 text-[13px]">
                   {query
-                    ? "The search covers every month. Try a shorter word."
+                    ? t.spending.spendingView.theSearchCoversEveryMonthTryA
                     : activeFilters
-                      ? "Try another account or category."
-                      : "Add a transaction to start your monthly record."}
+                      ? t.spending.spendingView.tryAnotherAccountOrCategory
+                      : t.spending.spendingView
+                          .addATransactionToStartYourMonthly}
                 </p>
                 {activeFilters ? (
                   <button
@@ -590,7 +623,7 @@ export function SpendingView({
                     className="mt-3 text-[13px] font-semibold underline underline-offset-4"
                     onClick={clearFilters}
                   >
-                    Clear filters
+                    {t.spending.spendingView.clearFilters}
                   </button>
                 ) : null}
               </div>
@@ -606,25 +639,27 @@ export function SpendingView({
                     <input
                       type="checkbox"
                       className="accent-brand size-4"
-                      aria-label="Select all visible transactions"
+                      aria-label={
+                        t.spending.spendingView.selectAllVisibleTransactions
+                      }
                       disabled={selectionBusy}
                       checked={allSelected}
                       onChange={(e) => toggleAll(e.target.checked)}
                     />
-                    Select all
+                    {t.spending.spendingView.selectAll}
                   </label>
                   <ul className="divide-line divide-y">
-                    {list.data.map((t) => (
+                    {list.data.map((row) => (
                       <MobileTransactionRow
-                        key={t.id}
-                        transaction={t}
-                        selected={selected.has(t.id)}
+                        key={row.id}
+                        transaction={row}
+                        selected={selected.has(row.id)}
                         disabled={
                           selectionBusy ||
-                          (!selected.has(t.id) && selected.size >= 500)
+                          (!selected.has(row.id) && selected.size >= 500)
                         }
-                        onSelect={() => toggleSelection(t.id)}
-                        onEdit={() => setEditing(t)}
+                        onSelect={() => toggleSelection(row.id)}
+                        onEdit={() => setEditing(row)}
                       />
                     ))}
                   </ul>
@@ -641,7 +676,9 @@ export function SpendingView({
                         <input
                           type="checkbox"
                           className="accent-brand size-4"
-                          aria-label="Select all visible transactions"
+                          aria-label={
+                            t.spending.spendingView.selectAllVisibleTransactions
+                          }
                           disabled={selectionBusy}
                           checked={
                             selectable.length > 0 &&
@@ -656,76 +693,83 @@ export function SpendingView({
                           }
                         />
                       </Th>
-                      <Th>Date</Th>
-                      <Th>Description</Th>
-                      <Th>Account</Th>
-                      <Th>Category</Th>
-                      <Th>Status</Th>
-                      <Th className="text-right">Amount</Th>
+                      <Th>{t.common.fields.date}</Th>
+                      <Th>{t.spending.spendingView.description}</Th>
+                      <Th>{t.spending.spendingView.account}</Th>
+                      <Th>{t.spending.spendingView.category}</Th>
+                      <Th>{t.common.fields.status}</Th>
+                      <Th className="text-right">{t.common.fields.amount}</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {list.data.map((t) => {
-                      const incoming = new Decimal(t.amount).isPositive();
+                    {list.data.map((row) => {
+                      const incoming = new Decimal(row.amount).isPositive();
                       return (
                         <Tr
-                          key={t.id}
+                          key={row.id}
                           className={
-                            selected.has(t.id) ? "bg-brand-soft" : undefined
+                            selected.has(row.id) ? "bg-brand-soft" : undefined
                           }
                         >
                           <Td>
                             <input
                               type="checkbox"
                               className="accent-brand size-4"
-                              aria-label={`Select ${t.description} on ${t.postedDate}`}
+                              aria-label={t.spending.spendingView.selectTransaction(
+                                row.description,
+                                row.postedDate,
+                              )}
                               disabled={
                                 selectionBusy ||
-                                (!selected.has(t.id) && selected.size >= 500)
+                                (!selected.has(row.id) && selected.size >= 500)
                               }
-                              checked={selected.has(t.id)}
-                              onChange={() => toggleSelection(t.id)}
+                              checked={selected.has(row.id)}
+                              onChange={() => toggleSelection(row.id)}
                             />
                           </Td>
                           <Td className="text-ink-2 whitespace-nowrap">
-                            {formatDate(t.postedDate)}
+                            {formatDate(row.postedDate, locale)}
                           </Td>
                           <Td>
                             <button
                               type="button"
-                              onClick={() => setEditing(t)}
+                              onClick={() => setEditing(row)}
                               className="text-left font-semibold hover:underline hover:underline-offset-4"
                             >
-                              {t.merchant ?? t.description}
+                              {row.merchant ?? row.description}
                             </button>
-                            {t.merchant ? (
+                            {row.merchant ? (
                               <span className="text-ink-3 block text-[13px]">
-                                {t.description}
+                                {row.description}
                               </span>
                             ) : null}
                           </Td>
-                          <Td className="text-ink-2">{t.accountName}</Td>
+                          <Td className="text-ink-2">{row.accountName}</Td>
                           <Td>
-                            {t.isTransfer ? (
+                            {row.isTransfer ? (
                               <Tag tone="outline">
-                                {t.transferLinkId
-                                  ? "Transfer · Linked"
-                                  : "Transfer"}
+                                {row.transferLinkId
+                                  ? t.spending.spendingView.transferLinked
+                                  : t.spending.spendingView.transfer}
                               </Tag>
                             ) : (
                               <CategoryLabel
-                                name={t.categoryName}
-                                color={t.categoryColor}
+                                name={row.categoryName}
+                                color={row.categoryColor}
                               />
                             )}
                           </Td>
                           <Td>
-                            {t.reconciliationId ? (
-                              <Tag>Reconciled</Tag>
-                            ) : t.cleared ? (
-                              <Tag tone="outline">Cleared</Tag>
+                            {row.reconciliationId ? (
+                              <Tag>{t.spending.spendingView.reconciled}</Tag>
+                            ) : row.cleared ? (
+                              <Tag tone="outline">
+                                {t.spending.spendingView.cleared}
+                              </Tag>
                             ) : (
-                              <span className="text-ink-3">Uncleared</span>
+                              <span className="text-ink-3">
+                                {t.spending.spendingView.uncleared}
+                              </span>
                             )}
                           </Td>
                           <Td
@@ -735,7 +779,7 @@ export function SpendingView({
                             )}
                           >
                             <span className="sensitive">
-                              {formatMoney(t.amount, t.currency, {
+                              {formatMoney(row.amount, row.currency, {
                                 signed: true,
                               })}
                             </span>
@@ -789,7 +833,13 @@ function CategoryLabel({
   name: string | null;
   color: string | null;
 }) {
-  if (!name) return <span className="text-ink-3">Uncategorised</span>;
+  const t = useT();
+  if (!name)
+    return (
+      <span className="text-ink-3">
+        {t.spending.spendingView.uncategorised}
+      </span>
+    );
   return (
     <span className="inline-flex items-center gap-2">
       <span
@@ -797,7 +847,7 @@ function CategoryLabel({
         className="size-2.5 shrink-0"
         style={{ backgroundColor: color ?? "var(--color-ink-3)" }}
       />
-      {name}
+      {categoryLabel(t, name)}
     </span>
   );
 }

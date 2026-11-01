@@ -1,5 +1,6 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
 import { KeyRound, Trash2 } from "lucide-react";
 import { useState } from "react";
 
@@ -9,6 +10,8 @@ import { formatDate } from "~/lib/format";
 import { authClient } from "~/server/auth/client";
 
 export function PasskeysCard() {
+  const t = useT();
+  const locale = useLocale();
   const { data: passkeys, isPending, refetch } = authClient.useListPasskeys();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -17,18 +20,23 @@ export function PasskeysCard() {
     setError(null);
     setBusy(true);
     const result = await authClient.passkey.addPasskey({
-      name: `${navigator.platform || "Device"} · ${new Date().toLocaleDateString()}`,
+      name: `${navigator.platform || t.settings.passkeysCard.device} · ${formatDate(new Date(), locale)}`,
     });
     setBusy(false);
     if (result?.error)
-      return setError(result.error.message ?? "Passkey was not added");
+      return setError(
+        result.error.message ?? t.settings.passkeysCard.passkeyWasNotAdded,
+      );
     void refetch();
   }
 
   async function remove(id: string) {
     setError(null);
     const { error } = await authClient.passkey.deletePasskey({ id });
-    if (error) return setError(error.message ?? "Could not remove passkey");
+    if (error)
+      return setError(
+        error.message ?? t.settings.passkeysCard.couldNotRemovePasskey,
+      );
     void refetch();
   }
 
@@ -47,19 +55,19 @@ export function PasskeysCard() {
               <KeyRound className="text-brand size-4" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">
-                  {pk.name ?? "Passkey"}
+                  {pk.name ?? t.settings.passkeysCard.passkey}
                 </p>
                 <p className="text-ink-3 text-[13px]">
-                  Added {pk.createdAt ? formatDate(pk.createdAt) : "—"} ·{" "}
-                  {pk.deviceType === "multiDevice"
-                    ? "Synced"
-                    : "This device only"}
+                  {t.settings.passkeysCard.added(
+                    pk.createdAt ? formatDate(pk.createdAt, locale) : "—",
+                    pk.deviceType === "multiDevice",
+                  )}
                 </p>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
-                aria-label="Remove passkey"
+                aria-label={t.settings.passkeysCard.removePasskey}
                 onClick={() => void remove(pk.id)}
               >
                 <Trash2 className="size-4" />
@@ -69,13 +77,12 @@ export function PasskeysCard() {
         </ul>
       ) : (
         <p className="text-ink-2 text-sm">
-          No passkeys yet. A passkey lets you sign in with Face ID, Touch ID or
-          Windows Hello instead of a password.
+          {t.settings.passkeysCard.noPasskeysYetAPasskey}
         </p>
       )}
       <Button variant="secondary" onClick={add} loading={busy}>
         <KeyRound className="size-4" />
-        Add a passkey
+        {t.settings.passkeysCard.addAPasskey}
       </Button>
     </div>
   );

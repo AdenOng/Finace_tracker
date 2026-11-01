@@ -1,3 +1,5 @@
+"use client";
+import { useT } from "~/i18n/client";
 import Decimal from "decimal.js";
 import { Lock } from "lucide-react";
 import Link from "next/link";
@@ -6,7 +8,7 @@ import { AmountsScope } from "~/components/finance/privacy";
 import { AccountRow } from "~/components/overview/account-row";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
 import { SheetHeader } from "~/components/overview/sheet-header";
-import { type CpfBucket, cpfBucketLabels } from "~/lib/accounts";
+import { type CpfBucket } from "~/lib/accounts";
 import { formatMoney } from "~/lib/format";
 import { cpfRates, srsCap, yearlyCpfInterest } from "~/lib/sg-retirement";
 import type { RouterOutputs } from "~/trpc/react";
@@ -43,6 +45,8 @@ function ColumnHeader({ label, value }: { label: string; value: string }) {
 
 /** CPF and SRS: money that counts toward the future but can't be spent today. */
 export function CpfSrsSheet({ worth }: { worth: Worth }) {
+  const t = useT();
+
   const currency = worth.currency;
   const cpfAccounts = worth.accounts.filter((a) => a.type === "cpf");
   const srsAccounts = worth.accounts.filter((a) => a.type === "srs");
@@ -86,10 +90,10 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
       className="card min-w-0 scroll-mt-6 p-5 sm:p-8"
     >
       <SheetHeader
-        eyebrow="CPF & SRS · for later"
+        eyebrow={t.overview.cpfSrsSheet.cPFSRSForLater}
         title={formatMoney(worth.cpfSrs.total ?? 0, currency)}
         href="/accounts"
-        linkLabel="Accounts"
+        linkLabel={t.overview.cpfSrsSheet.accounts}
         settings={
           <PortfolioSettings
             currency={currency}
@@ -100,7 +104,7 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
       />
       {incomplete ? (
         <p className="text-warn mt-4 text-sm">
-          Partial total. Some holdings are missing a price or exchange rate.
+          {t.overview.cpfSrsSheet.partialTotalSomeHoldingsAreMissingAPrice}
         </p>
       ) : null}
 
@@ -114,12 +118,14 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
             />
             {cpfAccounts.length === 0 ? (
               <p className="text-ink-2 mt-4 text-sm">
-                Copy your Ordinary, Special and MediSave balances from the CPF
-                app.{" "}
+                {
+                  t.overview.cpfSrsSheet
+                    .copyYourOrdinarySpecialAndMediSaveBalancesFrom
+                }{" "}
                 <Link href="/accounts?add=cpf_srs" className={link}>
-                  Add CPF
+                  {t.overview.cpfSrsSheet.addCPF}
                 </Link>
-                .
+                {t.overview.sentenceEnd}
               </p>
             ) : (
               <>
@@ -130,7 +136,7 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                       aria-label={buckets
                         .map(
                           (b) =>
-                            `${b.key === "unsplit" ? "Not split" : cpfBucketLabels[b.key]} ${b.total.div(bucketSum).times(100).toFixed(1)}%`,
+                            `${b.key === "unsplit" ? t.overview.cpfSrsSheet.notSplit : t.common.cpfBuckets[b.key]} ${b.total.div(bucketSum).times(100).toFixed(1)}%`,
                         )
                         .join(", ")}
                       className="flex h-4 gap-[2px]"
@@ -158,10 +164,10 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                           />
                           <span className="flex-1">
                             {b.key === "unsplit" ? (
-                              "Not split by account"
+                              t.overview.cpfSrsSheet.notSplitByAccount
                             ) : (
                               <>
-                                {cpfBucketLabels[b.key]}
+                                {t.common.cpfBuckets[b.key]}
                                 <span className="text-ink-3">
                                   {" "}
                                   · {cpfRates[b.key] * 100}%
@@ -180,12 +186,11 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                     </ul>
                     {interest ? (
                       <p className="text-ink-3 mt-2 text-[12px]">
-                        About{" "}
+                        {t.overview.cpfSrsSheet.interestBefore}{" "}
                         <span className="text-gain figures sensitive font-mono">
                           {sgd(interest)}
                         </span>{" "}
-                        a year in interest at today&apos;s rates, paid in
-                        January.
+                        {t.overview.cpfSrsSheet.interestAfter}
                       </p>
                     ) : null}
                   </div>
@@ -209,12 +214,11 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
             />
             {srsAccounts.length === 0 ? (
               <p className="text-ink-2 mt-4 text-sm">
-                What you put into SRS comes off your taxable income, up to{" "}
-                {sgd(srsCap)} a year.{" "}
+                {t.overview.cpfSrsSheet.srsRelief(sgd(srsCap))}{" "}
                 <Link href="/accounts?add=cpf_srs" className={link}>
-                  Add an SRS account
+                  {t.overview.cpfSrsSheet.addAnSRSAccount}
                 </Link>
-                .
+                {t.overview.sentenceEnd}
               </p>
             ) : (
               <ul className="mt-2">
@@ -226,7 +230,9 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
             {worth.srs && toppedUp && room ? (
               <div className="border-line-2 rounded-card mt-5 border border-dashed px-4 py-3.5">
                 <div className="flex items-baseline justify-between gap-3">
-                  <p className="eyebrow">Put in {worth.srs.year}</p>
+                  <p className="eyebrow">
+                    {t.overview.cpfSrsSheet.putIn(worth.srs.year)}
+                  </p>
                   <p className="figures font-mono text-[13px] font-semibold">
                     <span className="sensitive">{sgd(toppedUp)}</span>{" "}
                     <span className="text-ink-3 font-normal">
@@ -244,13 +250,17 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
                 </span>
                 <p className="text-ink-3 text-[12px]">
                   {room.isZero() ? (
-                    `You've reached the ${sgd(srsCap)} cap for ${worth.srs.year}.`
+                    t.overview.cpfSrsSheet.capReached(
+                      sgd(srsCap),
+                      worth.srs.year,
+                    )
                   ) : toppedUp.isZero() ? (
-                    `No top-ups recorded yet. Anything in by 31 Dec comes off next year's tax bill. Deposits show up here when you import an SRS statement.`
+                    t.overview.cpfSrsSheet.noTopupsRecordedYetAnythingInBy31
                   ) : (
                     <>
-                      <span className="sensitive">{sgd(room)}</span> more by 31
-                      Dec gets you the full tax relief.
+                      {t.overview.cpfSrsSheet.roomBefore}
+                      <span className="sensitive">{sgd(room)}</span>{" "}
+                      {t.overview.cpfSrsSheet.roomAfter}
                     </>
                   )}
                 </p>
@@ -264,11 +274,10 @@ export function CpfSrsSheet({ worth }: { worth: Worth }) {
         <Lock aria-hidden="true" className="mt-px size-3.5 shrink-0" />
         <span>
           {worth.countCpfSrs
-            ? "Counted in net worth."
-            : "Not counted in net worth."}{" "}
-          CPF opens up from 55; SRS can be withdrawn without penalty from your
-          statutory retirement age.
-          {enabled ? " Change this under the gear icon." : null}
+            ? t.overview.cpfSrsSheet.countedInNetWorth
+            : t.overview.cpfSrsSheet.notCountedInNetWorth}{" "}
+          {t.overview.cpfSrsSheet.cPFOpensUpFrom55SRSCanBe}
+          {enabled ? t.overview.cpfSrsSheet.changeThisUnderTheGearIcon : null}
         </span>
       </p>
     </AmountsScope>

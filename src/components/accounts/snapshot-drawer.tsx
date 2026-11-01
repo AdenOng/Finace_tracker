@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "~/i18n/client";
+
 import Decimal from "decimal.js";
 import { Plus, X } from "lucide-react";
 import { useState } from "react";
@@ -12,8 +14,6 @@ import {
   type AssetClass,
   type CpfBucket,
   assetClasses,
-  assetClassLabels,
-  cpfBucketLabels,
   cpfBuckets,
   holdsSecurities,
 } from "~/lib/accounts";
@@ -68,6 +68,9 @@ export function SnapshotDrawer({
   entry?: RouterOutputs["portfolio"]["snapshot"];
   createOnly?: boolean;
 }) {
+  const t = useT();
+
+  const [structureEdited, setStructureEdited] = useState(false);
   const investments = holdsSecurities(account.type);
   const cpf = account.type === "cpf";
   const latest = entry ?? account.holdings;
@@ -174,42 +177,43 @@ export function SnapshotDrawer({
         : await record.mutateAsync(input);
     await onSaved(
       entry
-        ? "Entry updated."
+        ? t.accounts.snapshot.entryUpdated
         : result.replaced
-          ? "Replaced the entry for that date."
+          ? t.accounts.snapshot.replacedTheEntryForThatDate
           : investments
-            ? "Holdings recorded."
-            : "Balance recorded.",
+            ? t.accounts.snapshot.holdingsRecorded
+            : t.accounts.snapshot.balanceRecorded,
     );
   }
 
   return (
     <Drawer
       open={open}
+      dirty={structureEdited}
       onClose={onClose}
       className={investments ? "max-w-2xl" : undefined}
       title={
         entry
-          ? "Edit entry"
+          ? t.accounts.snapshot.editEntry
           : createOnly
-            ? "Add entry"
+            ? t.accounts.snapshot.addEntry
             : investments
-              ? "Update holdings"
-              : "Update balance"
+              ? t.accounts.snapshot.updateHoldings
+              : t.accounts.snapshot.updateBalance
       }
       description={
         investments
-          ? "What the account held on a date. Prices are used until live quotes are available."
+          ? t.accounts.snapshot.whatTheAccountHeldOnADatePricesAreUsed
           : cpf
-            ? "Copy each balance from the CPF app or your latest statement. Leave out any you don't have."
+            ? t.accounts.snapshot.copyEachBalanceFromTheCPFAppOrYourLatest
             : account.type === "credit_card"
-              ? "Enter what you owe as a negative amount."
-              : "The balance shown by your bank on a date."
+              ? t.accounts.snapshot.enterWhatYouOweAsANegativeAmount
+              : t.accounts.snapshot.theBalanceShownByYourBankOnADate
       }
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             type="submit"
@@ -217,7 +221,7 @@ export function SnapshotDrawer({
             loading={mutation.isPending}
             disabled={!hasEntries || mutation.isPending}
           >
-            Save
+            {t.common.actions.save}
           </Button>
         </>
       }
@@ -232,23 +236,23 @@ export function SnapshotDrawer({
         ) : null}
         {entry?.documentId ? (
           <Notice>
-            Editing these holdings keeps the original statement image or file
-            and any imported trades. Changes apply to this saved entry.
+            {
+              t.accounts.snapshot
+                .editingTheseHoldingsKeepsTheOriginalStatementImageOrFile
+            }
           </Notice>
         ) : null}
         {!hasEntries ? (
-          <Notice>
-            Add a holding or cash balance before saving. To record an empty
-            account, enter 0 under {investments ? "Cash" : "Balance"}.
-          </Notice>
+          <Notice>{t.accounts.snapshot.emptyHint(investments)}</Notice>
         ) : null}
         <Field
-          label="As of"
+          label={t.accounts.snapshot.asOf}
           htmlFor="snapshot-date"
           hint={
             entry || createOnly
-              ? "The newest dated entry determines the account value. An existing entry will not be overwritten."
-              : "Saving the same date again replaces that entry."
+              ? t.accounts.snapshot
+                  .theNewestDatedEntryDeterminesTheAccountValueAnExisting
+              : t.accounts.snapshot.savingTheSameDateAgainReplacesThatEntry
           }
         >
           <Input
@@ -264,28 +268,34 @@ export function SnapshotDrawer({
 
         {investments ? (
           <fieldset className="space-y-4">
-            <legend className="mb-3 text-[15px] font-bold">Holdings</legend>
+            <legend className="mb-3 text-[15px] font-bold">
+              {t.accounts.snapshot.holdings}
+            </legend>
             {positions.map((p, i) => (
               <div key={p.key} className="border-line border p-4">
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-ink-2 text-[13px] font-semibold">
-                    Holding {i + 1}
+                    {t.accounts.snapshot.holdingNumber(i + 1)}
                   </p>
                   <button
                     type="button"
-                    aria-label={`Remove holding ${i + 1}`}
-                    onClick={() =>
+                    aria-label={t.accounts.snapshot.removeHolding(i + 1)}
+                    onClick={() => {
+                      setStructureEdited(true);
                       setPositions((rows) =>
                         rows.filter((r) => r.key !== p.key),
-                      )
-                    }
+                      );
+                    }}
                     className="rounded-ctl hover:bg-wash grid size-8 place-items-center"
                   >
                     <X className="size-4" />
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <Field label="Symbol" htmlFor={`p-symbol-${p.key}`}>
+                  <Field
+                    label={t.accounts.snapshot.symbol}
+                    htmlFor={`p-symbol-${p.key}`}
+                  >
                     <Input
                       id={`p-symbol-${p.key}`}
                       required
@@ -298,7 +308,10 @@ export function SnapshotDrawer({
                       placeholder="AAPL"
                     />
                   </Field>
-                  <Field label="Exchange" htmlFor={`p-exchange-${p.key}`}>
+                  <Field
+                    label={t.accounts.snapshot.exchange}
+                    htmlFor={`p-exchange-${p.key}`}
+                  >
                     <Input
                       id={`p-exchange-${p.key}`}
                       maxLength={16}
@@ -311,7 +324,7 @@ export function SnapshotDrawer({
                     />
                   </Field>
                   <Field
-                    label="Name"
+                    label={t.common.fields.name}
                     htmlFor={`p-name-${p.key}`}
                     className="col-span-2"
                   >
@@ -324,7 +337,10 @@ export function SnapshotDrawer({
                       }
                     />
                   </Field>
-                  <Field label="Type" htmlFor={`p-class-${p.key}`}>
+                  <Field
+                    label={t.common.fields.type}
+                    htmlFor={`p-class-${p.key}`}
+                  >
                     <Select
                       id={`p-class-${p.key}`}
                       value={p.assetClass}
@@ -336,12 +352,15 @@ export function SnapshotDrawer({
                     >
                       {assetClasses.map((c) => (
                         <option key={c} value={c}>
-                          {assetClassLabels[c]}
+                          {t.common.assetClasses[c]}
                         </option>
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Currency" htmlFor={`p-currency-${p.key}`}>
+                  <Field
+                    label={t.common.fields.currency}
+                    htmlFor={`p-currency-${p.key}`}
+                  >
                     <Input
                       id={`p-currency-${p.key}`}
                       required
@@ -354,7 +373,10 @@ export function SnapshotDrawer({
                       className="uppercase"
                     />
                   </Field>
-                  <Field label="Quantity" htmlFor={`p-qty-${p.key}`}>
+                  <Field
+                    label={t.accounts.snapshot.quantity}
+                    htmlFor={`p-qty-${p.key}`}
+                  >
                     <Input
                       id={`p-qty-${p.key}`}
                       required
@@ -366,7 +388,10 @@ export function SnapshotDrawer({
                       className="figures"
                     />
                   </Field>
-                  <Field label="Price" htmlFor={`p-price-${p.key}`}>
+                  <Field
+                    label={t.accounts.snapshot.price}
+                    htmlFor={`p-price-${p.key}`}
+                  >
                     <Input
                       id={`p-price-${p.key}`}
                       inputMode="decimal"
@@ -378,9 +403,9 @@ export function SnapshotDrawer({
                     />
                   </Field>
                   <Field
-                    label="Average cost"
+                    label={t.accounts.snapshot.averageCost}
                     htmlFor={`p-cost-${p.key}`}
-                    hint="Optional, per unit"
+                    hint={t.accounts.snapshot.optionalPerUnit}
                     className="col-span-2"
                   >
                     <Input
@@ -394,9 +419,11 @@ export function SnapshotDrawer({
                     />
                   </Field>
                   <Field
-                    label="Market value"
+                    label={t.accounts.snapshot.marketValue}
                     htmlFor={`p-value-${p.key}`}
-                    hint="Optional total; otherwise quantity × price."
+                    hint={
+                      t.accounts.snapshot.optionalTotalOtherwiseQuantityPrice
+                    }
                     className="col-span-2"
                   >
                     <Input
@@ -416,7 +443,8 @@ export function SnapshotDrawer({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() =>
+              onClick={() => {
+                setStructureEdited(true);
                 setPositions((rows) => [
                   ...rows,
                   {
@@ -431,25 +459,29 @@ export function SnapshotDrawer({
                     averageCost: "",
                     value: "",
                   },
-                ])
-              }
+                ]);
+              }}
             >
               <Plus className="size-4" />
-              Add holding
+              {t.accounts.snapshot.addHolding}
             </Button>
           </fieldset>
         ) : null}
 
         {cpf ? (
           <fieldset className="space-y-3">
-            <legend className="mb-3 text-[15px] font-bold">Balances</legend>
+            <legend className="mb-3 text-[15px] font-bold">
+              {t.accounts.snapshot.balances}
+            </legend>
             <div className="grid grid-cols-2 gap-3">
               {cash
                 .filter((c) => c.bucket)
                 .map((c) => (
                   <Field
                     key={c.key}
-                    label={`${cpfBucketLabels[c.bucket!]} (SGD)`}
+                    label={t.accounts.snapshot.bucketCurrency(
+                      t.common.cpfBuckets[c.bucket!],
+                    )}
                     htmlFor={`c-bucket-${c.bucket}`}
                   >
                     <Input
@@ -465,16 +497,16 @@ export function SnapshotDrawer({
                 ))}
             </div>
             <p className="text-ink-3 text-[13px]">
-              Retirement opens at 55, when Special closes.
+              {t.accounts.snapshot.retirementOpensAt55WhenSpecialCloses}
             </p>
             {cash.some((c) => !c.bucket) ? (
               <Notice>
-                An earlier entry recorded{" "}
-                {cash
-                  .filter((c) => !c.bucket)
-                  .map((c) => `${c.currency} ${c.amount}`)
-                  .join(", ")}{" "}
-                without a split.{" "}
+                {t.accounts.snapshot.unsplit(
+                  cash
+                    .filter((c) => !c.bucket)
+                    .map((c) => `${c.currency} ${c.amount}`)
+                    .join(", "),
+                )}{" "}
                 <button
                   type="button"
                   className="font-semibold underline underline-offset-4"
@@ -482,9 +514,9 @@ export function SnapshotDrawer({
                     setCash((rows) => rows.filter((r) => r.bucket))
                   }
                 >
-                  Remove it
+                  {t.accounts.snapshot.removeIt}
                 </button>{" "}
-                once you&apos;ve entered the balances above.
+                {t.accounts.snapshot.unsplitAfter}
               </Notice>
             ) : null}
           </fieldset>
@@ -493,11 +525,16 @@ export function SnapshotDrawer({
         {cpf ? null : (
           <fieldset className="space-y-3">
             <legend className="mb-3 text-[15px] font-bold">
-              {investments ? "Cash" : "Balance"}
+              {investments
+                ? t.accounts.snapshot.cash
+                : t.accounts.snapshot.balance}
             </legend>
             {cash.map((c, i) => (
               <div key={c.key} className="flex items-end gap-3">
-                <Field label="Currency" htmlFor={`c-currency-${c.key}`}>
+                <Field
+                  label={t.common.fields.currency}
+                  htmlFor={`c-currency-${c.key}`}
+                >
                   <Input
                     id={`c-currency-${c.key}`}
                     required
@@ -511,7 +548,7 @@ export function SnapshotDrawer({
                   />
                 </Field>
                 <Field
-                  label="Amount"
+                  label={t.common.fields.amount}
                   htmlFor={`c-amount-${c.key}`}
                   className="flex-1"
                 >
@@ -529,10 +566,13 @@ export function SnapshotDrawer({
                 {cash.length > 1 ? (
                   <button
                     type="button"
-                    aria-label={`Remove ${c.currency || "cash"} balance`}
-                    onClick={() =>
-                      setCash((rows) => rows.filter((r) => r.key !== c.key))
-                    }
+                    aria-label={t.accounts.snapshot.removeBalance(
+                      c.currency || t.common.assetClasses.cash,
+                    )}
+                    onClick={() => {
+                      setStructureEdited(true);
+                      setCash((rows) => rows.filter((r) => r.key !== c.key));
+                    }}
                     className="rounded-ctl hover:bg-wash mb-1 grid size-8 place-items-center"
                   >
                     <X className="size-4" />
@@ -544,15 +584,16 @@ export function SnapshotDrawer({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() =>
+              onClick={() => {
+                setStructureEdited(true);
                 setCash((rows) => [
                   ...rows,
                   { key: key(), currency: "", amount: "" },
-                ])
-              }
+                ]);
+              }}
             >
               <Plus className="size-4" />
-              Add currency
+              {t.accounts.snapshot.addCurrency}
             </Button>
           </fieldset>
         )}

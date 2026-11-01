@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, categoryLabel } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import { FileText, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -44,11 +47,11 @@ function useElapsed(running: boolean) {
   return seconds;
 }
 
-function checkFile(file: File) {
+function checkFile(file: File, t: Messages) {
   if (!ACCEPTED.includes(file.type))
-    return "Use a PDF, PNG, JPEG or WebP file.";
+    return t.admin.playground.useAPdfPngJpegOrWebpFile;
   if (file.size > MAX_BYTES)
-    return `That file is ${formatBytes(file.size)}; the limit is 20 MB.`;
+    return t.admin.playground.fileTooLarge(formatBytes(file.size));
   return null;
 }
 
@@ -95,6 +98,7 @@ function reconciles(out: StatementExtraction) {
 }
 
 export function ExtractionPlayground() {
+  const t = useT();
   const [providers] = api.admin.ai.list.useSuspenseQuery();
   const institutions = api.catalog.institutions.useQuery();
   const categories = api.catalog.categories.useQuery();
@@ -115,7 +119,7 @@ export function ExtractionPlayground() {
 
   function pick(next: File | null | undefined) {
     if (!next) return;
-    const problem = checkFile(next);
+    const problem = checkFile(next, t);
     setFileError(problem);
     setFile(problem ? null : next);
   }
@@ -137,7 +141,10 @@ export function ExtractionPlayground() {
           !response.ok || "error" in data
             ? {
                 state: "error",
-                error: "error" in data ? data.error : "Extraction failed",
+                error:
+                  "error" in data
+                    ? data.error
+                    : t.admin.playground.extractionFailed,
               }
             : { state: "done", result: data },
       }));
@@ -146,7 +153,8 @@ export function ExtractionPlayground() {
         ...r,
         [providerId]: {
           state: "error",
-          error: e instanceof Error ? e.message : "Request failed",
+          error:
+            e instanceof Error ? e.message : t.admin.playground.requestFailed,
         },
       }));
     }
@@ -202,7 +210,7 @@ export function ExtractionPlayground() {
                   {file.name}
                 </span>
                 <span className="text-ink-3 text-[13px]">
-                  {formatBytes(file.size)} · click to change
+                  {t.admin.playground.changeFile(formatBytes(file.size))}
                 </span>
               </>
             ) : (
@@ -215,11 +223,11 @@ export function ExtractionPlayground() {
                 />
                 <span className="text-sm font-semibold">
                   {dragging
-                    ? "Drop to use this file"
-                    : "Drop a statement or screenshot"}
+                    ? t.admin.playground.dropToUseThisFile
+                    : t.admin.playground.dropAStatementOrScreenshot}
                 </span>
                 <span className="text-ink-3 text-[13px]">
-                  PDF, PNG, JPEG or WebP, up to 20 MB. Nothing is saved.
+                  {t.admin.playground.pdfPngJpegOrWebpUpTo20MbNothingIsSaved}
                 </span>
               </>
             )}
@@ -239,17 +247,20 @@ export function ExtractionPlayground() {
         <div className="space-y-4">
           <fieldset>
             <legend className="text-ink-2 mb-2 text-[13px] font-medium">
-              Providers
+              {t.admin.playground.providers}
             </legend>
             <div className="space-y-2">
               {providers.map((p) => (
                 <Checkbox
                   key={p.id}
-                  label={`${p.name}${p.isDefault ? " (default)" : ""}`}
+                  label={t.admin.playground.providerOption(p.name, p.isDefault)}
                   description={
                     p.isEnabled
-                      ? `${p.defaultModel}${p.supportsVision ? "" : " · text only"}`
-                      : "Disabled — enable it to try it here"
+                      ? t.admin.playground.providerModel(
+                          p.defaultModel,
+                          p.supportsVision,
+                        )
+                      : t.admin.playground.disabledEnableItToTryItHere
                   }
                   disabled={!p.isEnabled}
                   checked={selected.includes(p.id)}
@@ -266,24 +277,24 @@ export function ExtractionPlayground() {
           </fieldset>
           {selected.length <= 1 ? (
             <Field
-              label="Model override"
+              label={t.admin.playground.modelOverride}
               htmlFor="pg-model"
-              hint="Leave empty to use the provider's model."
+              hint={t.admin.playground.leaveEmptyToUseTheProviderSModel}
             >
               <Input
                 id="pg-model"
                 name="model"
-                placeholder="e.g. opencode-go/deepseek-flash-4.1"
+                placeholder={t.admin.playground.eGOpencodeGoDeepseekFlash41}
               />
             </Field>
           ) : null}
           <Field
-            label="Institution"
+            label={t.admin.playground.institution}
             htmlFor="pg-inst"
-            hint="Adds that institution's notes to the prompt."
+            hint={t.admin.playground.addsThatInstitutionSNotesToThePrompt}
           >
             <Select id="pg-inst" name="institutionId" defaultValue="">
-              <option value="">Not specified</option>
+              <option value="">{t.admin.playground.notSpecified}</option>
               {institutions.data?.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
@@ -298,22 +309,22 @@ export function ExtractionPlayground() {
             className="w-full"
           >
             {running
-              ? `Reading… ${elapsed}s`
+              ? t.admin.playground.readingElapsed(elapsed)
               : selected.length > 1
-                ? `Compare ${selected.length} providers`
-                : "Extract"}
+                ? t.admin.playground.compareProviders(selected.length)
+                : t.admin.playground.extract}
           </Button>
         </div>
       </form>
 
       {Object.keys(runs).length > 1 ? (
         <div className="animate-rise">
-          <h3 className="mb-2 font-bold">Comparison</h3>
+          <h3 className="mb-2 font-bold">{t.admin.playground.comparison}</h3>
           <Table>
             <thead>
               <tr>
                 <Th>
-                  <span className="sr-only">Measure</span>
+                  <span className="sr-only">{t.admin.playground.measure}</span>
                 </Th>
                 {Object.keys(runs).map((id) => (
                   <Th key={id}>{names.get(id)}</Th>
@@ -324,70 +335,90 @@ export function ExtractionPlayground() {
               {(
                 [
                   [
-                    "Result",
+                    t.admin.playground.result,
                     (run: Run) =>
                       run.state === "running" ? (
-                        <span className="text-ink-3">Reading…</span>
+                        <span className="text-ink-3">
+                          {t.admin.playground.reading}
+                        </span>
                       ) : run.state === "error" ? (
-                        <span className="text-loss">Failed</span>
+                        <span className="text-loss">
+                          {t.admin.playground.failed}
+                        </span>
                       ) : (
-                        <span className="text-gain">Done</span>
+                        <span className="text-gain">
+                          {t.common.actions.done}
+                        </span>
                       ),
                   ],
                   [
-                    "Took",
+                    t.admin.playground.took,
                     (run: Run) =>
                       run.state === "done"
-                        ? `${(run.result.durationMs / 1000).toFixed(1)}s`
+                        ? t.admin.playground.duration(
+                            (run.result.durationMs / 1000).toFixed(1),
+                          )
                         : "—",
                   ],
                   [
-                    "Tokens",
+                    t.admin.playground.tokens,
                     (run: Run) =>
                       run.state === "done"
-                        ? `${run.result.usage.inputTokens ?? "?"} in / ${run.result.usage.outputTokens ?? "?"} out`
+                        ? t.admin.playground.tokenUsage(
+                            run.result.usage.inputTokens ?? "?",
+                            run.result.usage.outputTokens ?? "?",
+                          )
                         : "—",
                   ],
                   [
-                    "Transactions",
+                    t.admin.playground.transactions,
                     (run: Run) =>
                       run.state === "done"
                         ? run.result.output.transactions.length
                         : "—",
                   ],
                   [
-                    "Holdings",
+                    t.admin.playground.holdings,
                     (run: Run) =>
                       run.state === "done"
                         ? run.result.output.positions.length
                         : "—",
                   ],
                   [
-                    "Balances reconcile",
+                    t.admin.playground.balancesReconcile,
                     (run: Run) => {
                       if (run.state !== "done") return "—";
                       const ok = reconciles(run.result.output);
                       return ok === null ? (
-                        <span className="text-ink-3">No balances</span>
+                        <span className="text-ink-3">
+                          {t.admin.playground.noBalances}
+                        </span>
                       ) : ok ? (
-                        <span className="text-gain">Yes</span>
+                        <span className="text-gain">
+                          {t.admin.playground.yes}
+                        </span>
                       ) : (
-                        <span className="text-warn">No</span>
+                        <span className="text-warn">
+                          {t.admin.playground.no}
+                        </span>
                       );
                     },
                   ],
                   [
-                    "Category agreement",
+                    t.admin.playground.categoryAgreement,
                     (run: Run, id: string) => {
                       const a = agreement?.get(id);
                       if (run.state !== "done" || !a) return "—";
                       return a.shared
-                        ? `${Math.round((a.agree / a.shared) * 100)}% of ${a.shared} shared lines`
-                        : "No shared lines";
+                        ? t.admin.playground.agreement(
+                            Math.round((a.agree / a.shared) * 100),
+                            a.shared,
+                          )
+                        : t.admin.playground.noSharedLines;
                     },
                   ],
                   [
-                    "Warnings",
+                    t.admin.playground.warnings,
                     (run: Run) =>
                       run.state === "done"
                         ? run.result.output.warnings.length
@@ -409,12 +440,14 @@ export function ExtractionPlayground() {
             </tbody>
           </Table>
           <p className="text-ink-3 mt-2 text-[13px]">
-            Category agreement compares lines found by more than one provider
-            (same date and amount) against the most common category for each.
+            {
+              t.admin.playground
+                .categoryAgreementComparesLinesFoundByMoreThanOneProviderSameDateAndAmountAgainstTheMostCommonCategoryForEach
+            }
           </p>
           <div className="mt-6 flex flex-wrap items-center gap-2">
             <span className="text-ink-2 text-[13px] font-semibold">
-              Details for
+              {t.admin.playground.detailsFor}
             </span>
             {Object.keys(runs).map((id) => (
               <Button
@@ -451,36 +484,48 @@ function ResultDetail({
   result: PreviewResult;
   categoryName: Map<string, string>;
 }) {
+  const messages = useT();
   const out = result.output;
   return (
     <div className="animate-rise space-y-8">
       <dl className="border-ink bg-line grid grid-cols-2 gap-px border-t-2 sm:grid-cols-4">
         {[
-          ["Document", out.documentType.replace(/_/g, " ")],
-          ["Institution", out.institutionName ?? "—"],
           [
-            "Period",
+            messages.admin.playground.document,
+            out.documentType.replace(/_/g, " "),
+          ],
+          [messages.admin.playground.institution, out.institutionName ?? "—"],
+          [
+            messages.admin.playground.period,
             out.periodStart || out.periodEnd
               ? `${out.periodStart ?? "?"} → ${out.periodEnd ?? "?"}`
               : "—",
           ],
           [
-            "Account",
+            messages.admin.playground.account,
             [out.accountName, out.accountLast4 && `••${out.accountLast4}`]
               .filter(Boolean)
               .join(" ") || "—",
           ],
-          ["Model", result.model],
-          ["Took", `${(result.durationMs / 1000).toFixed(1)}s`],
+          [messages.admin.playground.model, result.model],
           [
-            "Tokens",
-            `${result.usage.inputTokens ?? "?"} in / ${result.usage.outputTokens ?? "?"} out`,
+            messages.admin.playground.took,
+            messages.admin.playground.duration(
+              (result.durationMs / 1000).toFixed(1),
+            ),
           ],
           [
-            "Input",
+            messages.admin.playground.tokens,
+            messages.admin.playground.tokenUsage(
+              result.usage.inputTokens ?? "?",
+              result.usage.outputTokens ?? "?",
+            ),
+          ],
+          [
+            messages.admin.playground.input,
             result.usedTextLayer
-              ? `PDF text, ${result.pageCount} pages`
-              : "Image / scanned file",
+              ? messages.admin.playground.pdfText(result.pageCount)
+              : messages.admin.playground.imageScannedFile,
           ],
         ].map(([label, value]) => (
           <div key={label} className="bg-canvas px-4 py-3">
@@ -522,11 +567,11 @@ function ResultDetail({
           <Table>
             <thead>
               <tr>
-                <Th>Date</Th>
-                <Th>Description</Th>
-                <Th>Merchant</Th>
-                <Th>Category</Th>
-                <Th className="text-right">Amount</Th>
+                <Th>{messages.common.fields.date}</Th>
+                <Th>{messages.admin.playground.description}</Th>
+                <Th>{messages.admin.playground.merchant}</Th>
+                <Th>{messages.admin.playground.category}</Th>
+                <Th className="text-right">{messages.common.fields.amount}</Th>
               </tr>
             </thead>
             <tbody>
@@ -542,13 +587,18 @@ function ResultDetail({
                   <Td>
                     {t.isTransfer ? (
                       <Tag tone="outline" className="mr-1">
-                        Transfer
+                        {messages.admin.playground.transfer}
                       </Tag>
                     ) : null}
                     {t.categoryKey ? (
-                      (categoryName.get(t.categoryKey) ?? t.categoryKey)
+                      categoryLabel(
+                        messages,
+                        categoryName.get(t.categoryKey) ?? t.categoryKey,
+                      )
                     ) : (
-                      <span className="text-ink-3">Uncategorised</span>
+                      <span className="text-ink-3">
+                        {messages.admin.playground.uncategorised}
+                      </span>
                     )}
                   </Td>
                   <Td
@@ -574,12 +624,18 @@ function ResultDetail({
           <Table>
             <thead>
               <tr>
-                <Th>Symbol</Th>
-                <Th>Name</Th>
-                <Th>Exchange</Th>
-                <Th className="text-right">Quantity</Th>
-                <Th className="text-right">Avg cost</Th>
-                <Th className="text-right">Value</Th>
+                <Th>{messages.admin.playground.symbol}</Th>
+                <Th>{messages.common.fields.name}</Th>
+                <Th>{messages.admin.playground.exchange}</Th>
+                <Th className="text-right">
+                  {messages.admin.playground.quantity}
+                </Th>
+                <Th className="text-right">
+                  {messages.admin.playground.avgCost}
+                </Th>
+                <Th className="text-right">
+                  {messages.admin.playground.value}
+                </Th>
               </tr>
             </thead>
             <tbody>
@@ -608,7 +664,7 @@ function ResultDetail({
 
       <details className="border-line border">
         <summary className="hover:bg-wash cursor-pointer px-4 py-3 text-sm font-semibold">
-          Raw JSON
+          {messages.admin.playground.rawJson}
         </summary>
         <pre className="border-line bg-sunken text-ink-2 max-h-[32rem] overflow-auto border-t p-4 text-[12px] leading-relaxed">
           {JSON.stringify(out, null, 2)}
@@ -629,21 +685,25 @@ function BalanceCheck({
   sum: number;
   currency: string;
 }) {
+  const t = useT();
   const expected = opening + sum;
   const diff = Math.round((closing - expected) * 100) / 100;
   const ok = Math.abs(diff) < 0.01;
   return (
     <Notice tone={ok ? "success" : "warn"}>
       <strong>
-        {ok ? "Balances reconcile." : "Balances do not reconcile."}
+        {ok
+          ? t.admin.playground.balancesReconcile
+          : t.admin.playground.balancesDoNotReconcile}
       </strong>{" "}
-      Opening {formatMoney(opening, currency)} + transactions{" "}
-      {formatMoney(sum, currency, { signed: true })} ={" "}
-      {formatMoney(expected, currency)}; statement closing is{" "}
-      {formatMoney(closing, currency)}
-      {ok
-        ? "."
-        : ` (off by ${formatMoney(diff, currency, { signed: true })}). Some rows may be missing or misread.`}
+      {t.admin.playground.balanceEquation(
+        formatMoney(opening, currency),
+        formatMoney(sum, currency, { signed: true }),
+        formatMoney(expected, currency),
+        formatMoney(closing, currency),
+        ok,
+        formatMoney(diff, currency, { signed: true }),
+      )}
     </Notice>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+
 import {
   CircleAlert,
   CircleCheck,
@@ -49,6 +51,8 @@ function StatusLine({
 }
 
 export function BackupsAdmin() {
+  const locale = useLocale();
+  const t = useT();
   const utils = api.useUtils();
   const [data] = api.admin.data.backups.useSuspenseQuery(undefined, {
     // While a backup is requested or running, check back until it finishes.
@@ -63,8 +67,8 @@ export function BackupsAdmin() {
     onSuccess: async () => {
       success(
         data.service.running
-          ? "Backup requested. The backup service picks it up within a minute."
-          : "Backup requested, but the backup service is not running, so nothing will happen until it starts.",
+          ? t.adminManage.data.backupRequested
+          : t.adminManage.data.backupServiceUnavailable,
       );
       await utils.admin.data.backups.invalidate();
     },
@@ -76,8 +80,11 @@ export function BackupsAdmin() {
   return (
     <div className="space-y-6">
       <Section
-        title="Backup service"
-        description={`Nightly pg_dump into ${service.directory}, kept for ${service.retentionDays} days.`}
+        title={t.adminManage.data.backupService}
+        description={t.adminManage.data.backupSchedule(
+          service.directory,
+          service.retentionDays,
+        )}
         actions={
           <Button
             variant="secondary"
@@ -87,10 +94,10 @@ export function BackupsAdmin() {
             onClick={() => request.mutate()}
           >
             {service.inProgressSince
-              ? "Backing up…"
+              ? t.adminManage.data.backingUp
               : service.requestedAt
-                ? "Backup pending…"
-                : "Back up now"}
+                ? t.adminManage.data.backupPending
+                : t.adminManage.data.backUpNow}
           </Button>
         }
       >
@@ -98,24 +105,30 @@ export function BackupsAdmin() {
           <FlashNotice flash={flash} className="mb-3" />
           <StatusLine ok={service.running}>
             {service.running
-              ? `Running — last checked in ${formatRelative(service.heartbeat!)}.`
+              ? t.adminManage.data.serviceHeartbeat(
+                  formatRelative(service.heartbeat!, undefined, locale),
+                )
               : service.heartbeat
-                ? `Not running — last seen ${formatRelative(service.heartbeat)}.`
-                : "Not running. Start it with docker compose up -d backup."}
+                ? t.adminManage.data.serviceLastSeen(
+                    formatRelative(service.heartbeat, undefined, locale),
+                  )
+                : t.adminManage.data.startBackupServiceHelp}
           </StatusLine>
           {service.inProgressSince ? (
             <StatusLine ok={null}>
-              Backup in progress since {formatRelative(service.inProgressSince)}
-              .
+              {t.adminManage.data.backupInProgress(
+                formatRelative(service.inProgressSince, undefined, locale),
+              )}
             </StatusLine>
           ) : null}
           {service.lastRun ? (
             <StatusLine ok={service.lastRun.ok}>
-              Last backup {service.lastRun.ok ? "succeeded" : "failed"}
-              {service.lastRun.at
-                ? ` ${formatRelative(service.lastRun.at)} (${formatDateTime(service.lastRun.at)})`
-                : ""}
-              .
+              {t.adminManage.data.lastBackup(
+                service.lastRun.ok,
+                service.lastRun.at
+                  ? ` ${formatRelative(service.lastRun.at, undefined, locale)} (${formatDateTime(service.lastRun.at, locale)})`
+                  : "",
+              )}
             </StatusLine>
           ) : null}
           {service.lastRun?.error ? (
@@ -127,34 +140,35 @@ export function BackupsAdmin() {
             <StatusLine
               ok={Date.now() - latest.createdAt.getTime() < 2 * 86_400_000}
             >
-              Newest dump is from {formatRelative(latest.createdAt)}.
+              {t.adminManage.data.newestDump(
+                formatRelative(latest.createdAt, undefined, locale),
+              )}
             </StatusLine>
           ) : null}
         </div>
       </Section>
 
       <Section
-        title="Dumps"
-        description="Each file holds every user's data. Downloads are recorded in the activity log; keep copies somewhere safe and private."
+        title={t.adminManage.data.dumps}
+        description={t.adminManage.data.backupPrivacyHelp}
       >
         {!data.available ? (
-          <EmptyState title="Backup folder not found">
-            Nothing is mounted at {service.directory}. In Docker, the app needs
-            the ./backups folder mounted (see docker-compose.yml).
+          <EmptyState title={t.adminManage.data.backupFolderNotFound}>
+            {t.adminManage.data.missingMount(service.directory)}
           </EmptyState>
         ) : data.backups.length === 0 ? (
-          <EmptyState title="No backups yet">
-            The first one is made when the backup service starts.
+          <EmptyState title={t.adminManage.data.noBackupsYet}>
+            {t.adminManage.data.firstBackupHelp}
           </EmptyState>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Made</Th>
-                <Th>File</Th>
-                <Th className="text-right">Size</Th>
+                <Th>{t.adminManage.data.made}</Th>
+                <Th>{t.adminManage.data.file}</Th>
+                <Th className="text-right">{t.adminManage.data.size}</Th>
                 <Th className="text-right">
-                  <span className="sr-only">Download</span>
+                  <span className="sr-only">{t.common.actions.download}</span>
                 </Th>
               </tr>
             </thead>
@@ -163,9 +177,9 @@ export function BackupsAdmin() {
                 <Tr key={b.name}>
                   <Td
                     className="whitespace-nowrap"
-                    title={formatDateTime(b.createdAt)}
+                    title={formatDateTime(b.createdAt, locale)}
                   >
-                    {formatRelative(b.createdAt)}
+                    {formatRelative(b.createdAt, undefined, locale)}
                   </Td>
                   <Td className="text-ink-2 font-mono text-[12px]">{b.name}</Td>
                   <Td className="figures text-right">
@@ -177,7 +191,7 @@ export function BackupsAdmin() {
                       className="text-brand inline-flex items-center gap-1 text-[13px] font-semibold underline-offset-4 hover:underline"
                     >
                       <Download className="size-3.5" />
-                      Download
+                      {t.common.actions.download}
                     </a>
                   </Td>
                 </Tr>
@@ -187,20 +201,17 @@ export function BackupsAdmin() {
         )}
         <details className="mt-5 text-sm">
           <summary className="text-ink-2 cursor-pointer font-semibold">
-            How to restore
+            {t.adminManage.data.howToRestore}
           </summary>
           <div className="text-ink-2 mt-2 space-y-2">
-            <p>Stop the app, then restore into the database container:</p>
+            <p>{t.adminManage.data.restoreHelp}</p>
             <pre className="bg-sunken border-line rounded-ctl overflow-x-auto border p-3 text-[12px]">
               {`docker compose stop app
 docker compose exec -T db pg_restore --clean --if-exists \\
   -U finfolio -d finfolio < backups/finfolio-YYYYMMDD-HHMMSS.dump
 docker compose start app`}
             </pre>
-            <p>
-              The dump does not include APP_ENCRYPTION_KEY. Keep your .env with
-              it, or stored API keys cannot be read after a restore.
-            </p>
+            <p>{t.adminManage.data.encryptionKeyHelp}</p>
           </div>
         </details>
       </Section>
@@ -209,6 +220,8 @@ docker compose start app`}
 }
 
 export function MarketAdmin() {
+  const locale = useLocale();
+  const t = useT();
   const utils = api.useUtils();
   const [market] = api.admin.data.market.useSuspenseQuery();
   const { flash, success, error, clear } = useFlash(10_000);
@@ -216,14 +229,12 @@ export function MarketAdmin() {
     onMutate: clear,
     onSuccess: async (r) => {
       if (r.failed.length)
-        error(
-          `Could not fetch rates for ${r.failed.join(", ")}. The rate service may be down; the last stored rates are still used.`,
-        );
+        error(t.adminManage.data.ratesFetchFailed(r.failed.join(", ")));
       else
         success(
           r.stored
-            ? `Stored ${r.stored} new rate${r.stored === 1 ? "" : "s"} for ${r.currencies.join(", ")}.`
-            : `Rates for ${r.currencies.join(", ")} are already up to date.`,
+            ? t.adminManage.data.ratesStored(r.stored, r.currencies.join(", "))
+            : t.adminManage.data.ratesCurrent(r.currencies.join(", ")),
         );
       await Promise.all([
         utils.admin.data.market.invalidate(),
@@ -237,13 +248,14 @@ export function MarketAdmin() {
     onMutate: prices.clear,
     onSuccess: async (r) => {
       const problems = [
-        r.failed.length && `no price found for ${r.failed.join(", ")}`,
+        r.failed.length &&
+          t.adminManage.data.noPriceFoundFor(r.failed.join(", ")),
         r.mismatched.length &&
-          `${r.mismatched.join(", ")} quoted in a different currency than recorded`,
+          t.adminManage.data.quoteCurrencyMismatch(r.mismatched.join(", ")),
       ].filter(Boolean);
-      const updated = `Updated ${r.updated} of ${r.checked} price${r.checked === 1 ? "" : "s"}.`;
+      const updated = t.adminManage.data.pricesUpdated(r.updated, r.checked);
       if (problems.length)
-        prices.error(`${updated} Skipped: ${problems.join("; ")}.`);
+        prices.error(t.adminManage.data.skipped(updated, problems.join("; ")));
       else prices.success(updated);
       await utils.admin.data.market.invalidate();
     },
@@ -261,8 +273,8 @@ export function MarketAdmin() {
   return (
     <div className="space-y-6">
       <Section
-        title="Exchange rates"
-        description={`Daily reference rates${market.fxSource ? ` from ${market.fxSource}` : ""}, fetched for each currency people view totals in. Refreshed every 12 hours.`}
+        title={t.adminManage.data.exchangeRates}
+        description={t.adminManage.data.referenceRatesHelp(market.fxSource)}
         actions={
           <Button
             variant="secondary"
@@ -271,20 +283,22 @@ export function MarketAdmin() {
             onClick={() => refresh.mutate()}
           >
             <RefreshCw className="size-3.5" />
-            Refresh now
+            {t.adminManage.data.refreshNow}
           </Button>
         }
       >
         <FlashNotice flash={flash} className="mb-4" />
         {market.fx.length === 0 ? (
-          <p className="text-ink-3 text-sm">No display currencies yet.</p>
+          <p className="text-ink-3 text-sm">
+            {t.adminManage.data.noDisplayCurrenciesYet}
+          </p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Display currency</Th>
-                <Th>Latest rate</Th>
-                <Th className="text-right">Stored rates</Th>
+                <Th>{t.adminManage.data.displayCurrency}</Th>
+                <Th>{t.adminManage.data.latestRate}</Th>
+                <Th className="text-right">{t.adminManage.data.storedRates}</Th>
               </tr>
             </thead>
             <tbody>
@@ -298,10 +312,12 @@ export function MarketAdmin() {
                           f.latest < staleBefore && "text-warn font-semibold",
                         )}
                       >
-                        {f.latest === today ? "Today" : formatDate(f.latest)}
+                        {f.latest === today
+                          ? t.adminManage.data.today
+                          : formatDate(f.latest, locale)}
                       </span>
                     ) : (
-                      <Tag tone="warn">None stored</Tag>
+                      <Tag tone="warn">{t.adminManage.data.noneStored}</Tag>
                     )}
                   </Td>
                   <Td className="figures text-right">
@@ -313,14 +329,15 @@ export function MarketAdmin() {
           </Table>
         )}
         <p className="text-ink-3 mt-3 text-[13px]">
-          Account currencies in use:{" "}
-          {market.accountCurrencies.join(", ") || "none"}.
+          {t.adminManage.data.currenciesInUse(
+            market.accountCurrencies.join(", "),
+          )}
         </p>
       </Section>
 
       <Section
-        title="Security prices"
-        description="Stocks, ETFs and crypto are priced hourly from Yahoo Finance. Other holdings keep their statement price."
+        title={t.adminManage.data.securityPrices}
+        description={t.adminManage.data.marketPricesHelp}
         actions={
           <Button
             variant="secondary"
@@ -330,14 +347,14 @@ export function MarketAdmin() {
             onClick={() => refreshPrices.mutate()}
           >
             <RefreshCw className="size-3.5" />
-            Refresh now
+            {t.adminManage.data.refreshNow}
           </Button>
         }
       >
         <Checkbox
           className="mb-5"
-          label="Fetch market prices"
-          description="Only ticker symbols are sent to Yahoo, never quantities or account details."
+          label={t.adminManage.data.fetchMarketPrices}
+          description={t.adminManage.data.marketPrivacyHelp}
           checked={market.priceQuotes}
           disabled={setPriceQuotes.isPending}
           onChange={(e) => setPriceQuotes.mutate({ enabled: e.target.checked })}
@@ -345,16 +362,24 @@ export function MarketAdmin() {
         <FlashNotice flash={prices.flash} className="mb-4" />
         <dl className="mb-5 grid grid-cols-2 gap-6 sm:grid-cols-4">
           {[
-            ["Securities", integer.format(market.quotes.securities)],
-            ["With a quote", integer.format(market.quotes.quoted)],
             [
-              "Newest quote",
-              market.quotes.newest ? formatRelative(market.quotes.newest) : "—",
+              t.adminManage.data.securities,
+              integer.format(market.quotes.securities),
             ],
             [
-              "Daily closes up to",
+              t.adminManage.data.withAQuote,
+              integer.format(market.quotes.quoted),
+            ],
+            [
+              t.adminManage.data.newestQuote,
+              market.quotes.newest
+                ? formatRelative(market.quotes.newest, undefined, locale)
+                : "—",
+            ],
+            [
+              t.adminManage.data.dailyClosesUpTo,
               market.priceHistoryLatest
-                ? formatDate(market.priceHistoryLatest)
+                ? formatDate(market.priceHistoryLatest, locale)
                 : "—",
             ],
           ].map(([label, value]) => (
@@ -373,8 +398,7 @@ export function MarketAdmin() {
         {market.unquoted.length ? (
           <>
             <h3 className="mb-2 text-sm font-semibold">
-              Valued from statements ({market.unquoted.length}
-              {market.unquoted.length === 50 ? "+" : ""})
+              {t.adminManage.data.statementValuations(market.unquoted.length)}
             </h3>
             <ul className="flex flex-wrap gap-1.5">
               {market.unquoted.map((s) => (
@@ -396,6 +420,7 @@ export function MarketAdmin() {
 }
 
 export function StorageAdmin() {
+  const t = useT();
   const utils = api.useUtils();
   const [storage] = api.admin.data.storage.useSuspenseQuery();
   const [enabled, setEnabled] = useState(storage.retentionDays !== null);
@@ -411,8 +436,8 @@ export function StorageAdmin() {
     onSuccess: async (_, input) => {
       success(
         input.days
-          ? `Statement files are now deleted ${input.days} days after their import finishes. The daily clean-up runs automatically.`
-          : "Statement files are kept forever.",
+          ? t.adminManage.data.retentionSaved(input.days)
+          : t.adminManage.data.statementFilesAreKeptForever,
       );
       await invalidate();
     },
@@ -423,8 +448,8 @@ export function StorageAdmin() {
     onSuccess: async (r) => {
       success(
         r.files
-          ? `Deleted ${r.files} file${r.files === 1 ? "" : "s"}, freeing ${formatBytes(r.bytes)}.`
-          : "Nothing to clean up.",
+          ? t.adminManage.data.filesDeleted(r.files, formatBytes(r.bytes))
+          : t.adminManage.data.nothingToCleanUp,
       );
       await invalidate();
     },
@@ -436,12 +461,15 @@ export function StorageAdmin() {
 
   return (
     <div className="space-y-6">
-      <Section title="Stored statements">
+      <Section title={t.adminManage.data.storedStatements}>
         <dl className="grid grid-cols-3 gap-6">
           {[
-            ["Files kept", integer.format(storage.stats.files)],
-            ["Space used", formatBytes(storage.stats.bytes)],
-            ["Already cleaned up", integer.format(storage.stats.purged)],
+            [t.adminManage.data.filesKept, integer.format(storage.stats.files)],
+            [t.adminManage.data.spaceUsed, formatBytes(storage.stats.bytes)],
+            [
+              t.adminManage.data.alreadyCleanedUp,
+              integer.format(storage.stats.purged),
+            ],
           ].map(([label, value]) => (
             <div key={label}>
               <dt className="text-ink-2 text-[13px] font-semibold">{label}</dt>
@@ -454,35 +482,38 @@ export function StorageAdmin() {
       </Section>
 
       <Section
-        title="Retention"
-        description="Once a statement is imported, its transactions live in the database; the uploaded file is only needed to read it again. Failed and unreviewed imports always keep their file."
+        title={t.adminManage.data.retention}
+        description={t.adminManage.data.retentionHelp}
       >
         <div className="space-y-4">
           <FlashNotice flash={flash} />
           <Checkbox
-            label="Delete uploaded files after their import is finished"
-            description="The record of the upload stays, so the same file is still recognised as a duplicate."
+            label={t.adminManage.data.deleteCompletedFiles}
+            description={t.adminManage.data.duplicateDetectionHelp}
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
           {enabled ? (
             <div className="flex flex-wrap items-center gap-2 pl-6.5 text-sm">
-              Keep for
+              {t.adminManage.data.keepFor}
               <Input
                 type="number"
                 min={1}
                 max={3650}
                 value={days}
                 onChange={(e) => setDays(Number(e.target.value))}
-                aria-label="Days to keep files"
+                aria-label={t.adminManage.data.daysToKeepFiles}
                 className="h-9 w-24"
               />
-              days
+              {t.adminManage.data.days}
               {preview.data ? (
                 <span className="text-ink-3 ml-2">
                   {preview.data.files
-                    ? `${preview.data.files} file${preview.data.files === 1 ? "" : "s"} (${formatBytes(preview.data.bytes)}) would be deleted now`
-                    : "Nothing old enough to delete yet"}
+                    ? t.adminManage.data.cleanupPreview(
+                        preview.data.files,
+                        formatBytes(preview.data.bytes),
+                      )
+                    : t.adminManage.data.nothingOldEnoughToDeleteYet}
                 </span>
               ) : null}
             </div>
@@ -493,16 +524,18 @@ export function StorageAdmin() {
               loading={save.isPending}
               onClick={() => save.mutate({ days: enabled ? days : null })}
             >
-              Save
+              {t.common.actions.save}
             </Button>
             {storage.retentionDays && storage.eligible?.files ? (
               <ConfirmButton
                 variant="danger"
                 loading={purge.isPending}
-                confirmLabel={`Delete ${storage.eligible.files} files?`}
+                confirmLabel={t.adminManage.data.deleteFiles(
+                  storage.eligible.files,
+                )}
                 onConfirm={() => purge.mutate()}
               >
-                Clean up now
+                {t.adminManage.data.cleanUpNow}
               </ConfirmButton>
             ) : null}
           </div>
@@ -515,29 +548,29 @@ export function StorageAdmin() {
 type Diff = RouterOutputs["admin"]["data"]["presets"]["active"]["diff"];
 
 function DiffSummary({ diff }: { diff: Diff }) {
+  const t = useT();
   const parts = [
     diff.categories.missing.length &&
-      `${diff.categories.missing.length} categor${diff.categories.missing.length === 1 ? "y" : "ies"}`,
+      t.adminManage.data.categoryCount(diff.categories.missing.length),
     diff.institutions.missing.length &&
-      `${diff.institutions.missing.length} institution${diff.institutions.missing.length === 1 ? "" : "s"}`,
+      t.adminManage.data.institutionCount(diff.institutions.missing.length),
     diff.currencies.missing.length &&
-      `${diff.currencies.missing.length} currenc${diff.currencies.missing.length === 1 ? "y" : "ies"}`,
+      t.adminManage.data.currencyCount(diff.currencies.missing.length),
   ].filter(Boolean);
   const archived =
     diff.categories.archived.length + diff.institutions.archived.length;
   return (
     <p className="text-ink-2 text-sm">
       {parts.length
-        ? `Applying adds ${parts.join(", ")}.`
-        : "Everything in this pack is already here."}
-      {archived
-        ? ` ${archived} of its defaults are archived; restore those from Categories or Brokers & banks.`
-        : ""}
+        ? t.adminManage.data.applyingAdds(parts.join(", "))
+        : t.adminManage.data.packAlreadyPresent}
+      {archived ? t.adminManage.data.archivedDefaultsHelp(archived) : ""}
     </p>
   );
 }
 
 export function PresetsAdmin() {
+  const t = useT();
   const utils = api.useUtils();
   const [presets] = api.admin.data.presets.useSuspenseQuery();
   const { flash, success, error, clear } = useFlash(10_000);
@@ -557,7 +590,11 @@ export function PresetsAdmin() {
     onMutate: clear,
     onSuccess: async (r) => {
       success(
-        `Added ${r.categories} categories, ${r.institutions} institutions and ${r.currencies} currencies. Existing rows were left alone.`,
+        t.adminManage.data.packApplied(
+          r.categories,
+          r.institutions,
+          r.currencies,
+        ),
       );
       setCustom(null);
       preview.reset();
@@ -568,7 +605,7 @@ export function PresetsAdmin() {
   const setCpfSrs = api.admin.data.setCpfSrs.useMutation({
     onMutate: clear,
     onSuccess: async () => {
-      success("Saved. People see the change on their next page load.");
+      success(t.adminManage.data.packSettingsSaved);
       await utils.admin.data.presets.invalidate();
     },
     onError: error,
@@ -580,18 +617,18 @@ export function PresetsAdmin() {
     <div className="space-y-6">
       <FlashNotice flash={flash} />
       <Section
-        title={`Active pack: ${active.name}`}
+        title={t.adminManage.data.activePack(active.name)}
         description={
           active.source === "file"
-            ? `Loaded from PRESET_FILE (${active.file}). Seeded on every start-up; only missing rows are added.`
-            : `Built-in pack "${active.id}" (DATA_PRESET). Seeded on every start-up; only missing rows are added.`
+            ? t.adminManage.data.customPackHelp(active.file)
+            : t.adminManage.data.builtinPackHelp(active.id)
         }
       >
         <dl className="mb-4 grid grid-cols-3 gap-6">
           {[
-            ["Categories", active.counts.categories],
-            ["Institutions", active.counts.institutions],
-            ["Currencies", active.counts.currencies],
+            [t.adminManage.data.categories, active.counts.categories],
+            [t.adminManage.data.institutions, active.counts.institutions],
+            [t.adminManage.data.currencies, active.counts.currencies],
           ].map(([label, value]) => (
             <div key={label}>
               <dt className="text-ink-2 text-[13px] font-semibold">{label}</dt>
@@ -603,19 +640,17 @@ export function PresetsAdmin() {
         </dl>
         <DiffSummary diff={active.diff} />
         <p className="text-ink-3 mt-2 text-[13px]">
-          To switch the pack new installs start from, change DATA_PRESET or
-          PRESET_FILE in .env. Applying a pack below adds its defaults to this
-          instance now.
+          {t.adminManage.data.defaultPackHelp}
         </p>
       </Section>
 
       <Section
-        title="CPF & SRS accounts"
-        description="Singapore's retirement accounts: their own account types, the CPF buckets, and a toggle for counting them in net worth."
+        title={t.adminManage.data.cpfSrsAccounts}
+        description={t.adminManage.data.cpfSrsHelp}
       >
         <div className="flex flex-wrap items-end gap-3">
           <Field
-            label="Available to everyone"
+            label={t.adminManage.data.availableToEveryone}
             htmlFor="cpf-srs"
             className="w-64"
           >
@@ -636,25 +671,28 @@ export function PresetsAdmin() {
               }
             >
               <option value="pack">
-                Follow the pack ({active.features.cpfSrs ? "on" : "off"})
+                {t.adminManage.data.followPack(active.features.cpfSrs)}
               </option>
-              <option value="on">On</option>
-              <option value="off">Off</option>
+              <option value="on">{t.adminManage.data.on}</option>
+              <option value="off">{t.adminManage.data.off}</option>
             </Select>
           </Field>
           <p className="text-ink-3 pb-2 text-[13px]">
-            Currently {cpfSrs.effective ? "on" : "off"}. Turning it off hides
-            the account types; existing CPF and SRS accounts are kept.
+            {t.adminManage.data.cpfCurrent(cpfSrs.effective)}
           </p>
         </div>
       </Section>
 
       <Section
-        title="Apply a pack"
-        description="Adds another pack's categories, institutions and currencies. Insert-only: nothing you have edited is overwritten."
+        title={t.adminManage.data.applyAPack}
+        description={t.adminManage.data.applyPackHelp}
       >
         <div className="flex flex-wrap items-end gap-3">
-          <Field label="Built-in pack" htmlFor="pack-builtin" className="w-64">
+          <Field
+            label={t.adminManage.data.builtinPack}
+            htmlFor="pack-builtin"
+            className="w-64"
+          >
             <Select
               id="pack-builtin"
               value={custom ? "" : builtIn}
@@ -665,7 +703,9 @@ export function PresetsAdmin() {
               }}
             >
               {custom ? (
-                <option value="">Custom file: {custom.name}</option>
+                <option value="">
+                  {t.adminManage.data.customFile(custom.name)}
+                </option>
               ) : null}
               {presets.builtIn.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -676,7 +716,7 @@ export function PresetsAdmin() {
           </Field>
           <Button variant="ghost" onClick={() => fileInput.current?.click()}>
             <Upload className="size-4" />
-            Use a JSON pack
+            {t.adminManage.data.useAJSONPack}
           </Button>
           <input
             ref={fileInput}
@@ -697,7 +737,7 @@ export function PresetsAdmin() {
             loading={preview.isPending}
             onClick={() => preview.mutate(source)}
           >
-            Preview
+            {t.adminManage.data.preview}
           </Button>
         </div>
         {preview.data ? (
@@ -713,10 +753,10 @@ export function PresetsAdmin() {
                 !preview.data.diff.currencies.missing.length
               }
               loading={apply.isPending}
-              confirmLabel="Add these defaults?"
+              confirmLabel={t.adminManage.data.addTheseDefaults}
               onConfirm={() => apply.mutate(source)}
             >
-              Apply pack
+              {t.adminManage.data.applyPack}
             </ConfirmButton>
           </div>
         ) : null}

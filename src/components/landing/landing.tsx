@@ -3,9 +3,11 @@
 import { X } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 
+import { useT } from "~/i18n/client";
 import { AuthHeading } from "~/components/auth/auth-heading";
 import { SignInForm } from "~/components/auth/sign-in-form";
 import { BrandMark, Wordmark } from "~/components/brand";
+import { LanguageSwitch } from "~/components/shell/language-switch";
 import { Button } from "~/components/ui/button";
 
 import { GatherGlyph, KeepGlyph, ReadGlyph, Seal } from "./glyphs";
@@ -22,6 +24,7 @@ function SignInDialog({
   emailResets: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const t = useT();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -42,7 +45,7 @@ function SignInDialog({
         if (event.target === ref.current) onClose();
       }}
       aria-labelledby="sign-in-title"
-      className="card text-ink open:animate-pop m-auto w-[calc(100%-2rem)] max-w-[26rem] overflow-hidden p-0 shadow-[0_40px_120px_-30px_rgb(0_0_0/0.95)]"
+      className="card text-ink open:animate-pop m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[26rem] overflow-y-auto p-0 shadow-[0_40px_120px_-30px_rgb(0_0_0/0.95)]"
     >
       {open ? (
         <div className="relative p-7 sm:p-9">
@@ -53,15 +56,15 @@ function SignInDialog({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t.common.actions.close}
             className="rounded-ctl text-ink-3 hover:bg-wash hover:text-ink absolute top-4 right-4 grid size-9 place-items-center transition-colors"
           >
             <X className="size-[18px]" />
           </button>
           <BrandMark className="mb-6 size-9" />
           <div id="sign-in-title">
-            <AuthHeading title="Sign in">
-              Invite only. Ask whoever runs this Finfolio for a link.
+            <AuthHeading title={t.landing.home.signIn}>
+              {t.landing.home.invite}
             </AuthHeading>
           </div>
           <Suspense>
@@ -72,27 +75,6 @@ function SignInDialog({
     </dialog>
   );
 }
-
-const steps = [
-  {
-    title: "Add your accounts",
-    Glyph: GatherGlyph,
-    body: (count: number, currencies: number) =>
-      `Pick from ${count} brokers and banks (IBKR, moomoo, Tiger, DBS and the rest) or add your own. Each account keeps its own currency, and ${currencies} currencies are supported.`,
-  },
-  {
-    title: "Record what changed",
-    Glyph: ReadGlyph,
-    body: () =>
-      "Upload a statement or screenshot and an AI model you pick reads it; nothing is saved until you check it line by line. Balances, holdings and spending can be entered by hand too.",
-  },
-  {
-    title: "Keep it to yourself",
-    Glyph: KeepGlyph,
-    body: () =>
-      "It runs on your own server. New users need an invite, sign-in takes a passkey or a two-step code, and AI provider keys are stored encrypted.",
-  },
-];
 
 export function Landing({
   institutionCount,
@@ -106,6 +88,25 @@ export function Landing({
   /** Outgoing email is set up, so "Forgot password" can send a link. */
   emailResets: boolean;
 }) {
+  const t = useT();
+  const steps = [
+    {
+      title: t.landing.home.add,
+      Glyph: GatherGlyph,
+      body: (count: number, currencies: number) =>
+        t.landing.home.addBody(count, currencies),
+    },
+    {
+      title: t.landing.home.record,
+      Glyph: ReadGlyph,
+      body: () => t.landing.home.recordBody,
+    },
+    {
+      title: t.landing.home.keep,
+      Glyph: KeepGlyph,
+      body: () => t.landing.home.keepBody,
+    },
+  ];
   const [open, setOpen] = useState(openSignIn);
   const [month, setMonth] = useState(0);
   const signIn = () => setOpen(true);
@@ -114,15 +115,16 @@ export function Landing({
     <div className="relative min-h-dvh overflow-x-clip">
       <header className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
         <Wordmark />
-        <nav className="flex items-center gap-6 text-[13px]">
+        <nav className="flex shrink-0 items-center gap-2 text-[13px] sm:gap-6">
           <a
             href="#how-it-works"
             className="text-ink-2 hover:text-ink hidden transition-colors sm:inline"
           >
-            How it works
+            {t.landing.home.how}
           </a>
+          <LanguageSwitch compact />
           <Button size="sm" onClick={signIn}>
-            Sign in
+            {t.landing.home.signIn}
           </Button>
         </nav>
       </header>
@@ -133,24 +135,19 @@ export function Landing({
             className="font-poster animate-rise text-[56px] leading-[0.92] font-bold tracking-[-0.03em] sm:text-[84px] xl:text-[100px]"
             style={{ fontVariationSettings: '"wdth" 82' }}
           >
-            <span className="text-ink-3">Every account,</span>
+            <span className="text-ink-3">{t.landing.home.headlineFirst}</span>
             <br />
-            one number.
+            {t.landing.home.headlineSecond}
           </h1>
           <div className="animate-rise max-w-md [animation-delay:100ms] lg:pb-3">
             <p className="text-ink-2 text-[16px] leading-relaxed">
-              Finfolio keeps your brokerage, bank and card accounts in one
-              place. Balances are converted to the currency you choose and added
-              up, so you can see what you&apos;re worth and where this
-              month&apos;s money went.
+              {t.landing.home.intro}
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-3">
               <Button size="lg" onClick={signIn}>
-                Sign in
+                {t.landing.home.signIn}
               </Button>
-              <p className="text-ink-3 text-[13px]">
-                Invite only. Ask whoever runs this Finfolio for a link.
-              </p>
+              <p className="text-ink-3 text-[13px]">{t.landing.home.invite}</p>
             </div>
           </div>
         </section>
@@ -166,7 +163,7 @@ export function Landing({
         <section id="how-it-works" className="scroll-mt-10 pb-24">
           <div className="border-line flex items-end justify-between gap-6 border-t pt-8">
             <h2 className="font-poster text-[40px] leading-none font-bold uppercase sm:text-[56px]">
-              How it works
+              {t.landing.home.how}
             </h2>
             <span className="ink-strip mb-3 hidden h-1.5 w-24 sm:block" />
           </div>
@@ -202,9 +199,7 @@ export function Landing({
             <BrandMark className="size-4" />
             Finfolio
           </span>
-          <span>
-            The poster uses made-up figures, not anyone&apos;s real data.
-          </span>
+          <span>{t.landing.home.sample}</span>
         </div>
       </footer>
 

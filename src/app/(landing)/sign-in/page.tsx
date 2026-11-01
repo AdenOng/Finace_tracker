@@ -1,4 +1,5 @@
 import { eq, isNull } from "drizzle-orm";
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
@@ -8,7 +9,10 @@ import { db } from "~/server/db";
 import { currency, institution, user } from "~/server/db/schema";
 import { isEmailConfigured } from "~/server/lib/mailer";
 
-export const metadata: Metadata = { title: "Sign in" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.landing.meta.title };
+}
 export const dynamic = "force-dynamic";
 
 export default async function SignInPage({

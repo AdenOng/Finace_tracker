@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { useT } from "~/i18n/client";
+
 import { Button, type ButtonProps } from "./button";
 
 /**
@@ -10,13 +12,14 @@ import { Button, type ButtonProps } from "./button";
  */
 export function ConfirmButton({
   onConfirm,
-  confirmLabel = "Click again to confirm",
+  confirmLabel,
   children,
   ...props
 }: Omit<ButtonProps, "onClick"> & {
   onConfirm: () => void;
   confirmLabel?: string;
 }) {
+  const t = useT();
   const [armed, setArmed] = useState(false);
 
   useEffect(() => {
@@ -34,7 +37,7 @@ export function ConfirmButton({
         onConfirm();
       }}
     >
-      {armed ? confirmLabel : children}
+      {armed ? (confirmLabel ?? t.common.actions.confirmAgain) : children}
     </Button>
   );
 }

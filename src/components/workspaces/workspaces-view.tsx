@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { categoryLabel, useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { Field, Input, Select } from "~/components/ui/field";
 import { EmptyState, Notice, Section, Tag } from "~/components/ui/panel";
@@ -11,6 +12,7 @@ import { formText } from "~/lib/form";
 import { api } from "~/trpc/react";
 
 export function WorkspacesView() {
+  const t = useT();
   const router = useRouter();
   const utils = api.useUtils();
   const list = api.workspaces.list.useQuery();
@@ -27,17 +29,18 @@ export function WorkspacesView() {
   return (
     <div className="space-y-12">
       <Section
-        title="Your workspaces"
-        description="Each workspace is a separate audience. Only explicitly shared accounts appear there."
+        title={t.workspaces.workspacesView.yourWorkspaces}
+        description={
+          t.workspaces.workspacesView.eachWorkspaceIsASeparateAudienceOnly
+        }
       >
         {list.error ? (
           <Notice tone="error">{list.error.message}</Notice>
         ) : !list.data ? (
-          <p>Loading workspaces…</p>
+          <p>{t.workspaces.workspacesView.loadingWorkspaces}</p>
         ) : list.data.length === 0 ? (
-          <EmptyState title="No workspaces yet">
-            Create a family workspace or a shared portfolio for your fund
-            viewers.
+          <EmptyState title={t.workspaces.workspacesView.noWorkspacesYet}>
+            {t.workspaces.workspacesView.createAFamilyWorkspaceOrAShared}
           </EmptyState>
         ) : (
           <ul className="divide-line divide-y">
@@ -49,16 +52,18 @@ export function WorkspacesView() {
                 >
                   {w.name}
                 </Link>
-                <Tag>{w.kind}</Tag>
-                <Tag tone="outline">{w.role}</Tag>
+                <Tag>{t.workspaces.kinds[w.kind]}</Tag>
+                <Tag tone="outline">{t.workspaces.roles[w.role]}</Tag>
               </li>
             ))}
           </ul>
         )}
       </Section>
       <Section
-        title="Create workspace"
-        description="Accounts stay private until you share them. Everyone in a workspace can view all its shared accounts."
+        title={t.workspaces.workspacesView.createWorkspace}
+        description={
+          t.workspaces.workspacesView.accountsStayPrivateUntilYouShareThem
+        }
       >
         <form
           className="max-w-md space-y-4"
@@ -74,17 +79,30 @@ export function WorkspacesView() {
           }}
         >
           {error ? <Notice tone="error">{error}</Notice> : null}
-          <Field label="Workspace name" htmlFor="workspace-name">
+          <Field
+            label={t.workspaces.workspacesView.workspaceName}
+            htmlFor="workspace-name"
+          >
             <Input id="workspace-name" name="name" maxLength={120} required />
           </Field>
-          <Field label="Purpose" htmlFor="workspace-kind">
+          <Field
+            label={t.workspaces.workspacesView.purpose}
+            htmlFor="workspace-kind"
+          >
             <Select id="workspace-kind" name="kind">
-              <option value="family">Family</option>
-              <option value="fund">Fund</option>
-              <option value="custom">Other</option>
+              <option value="family">
+                {t.workspaces.workspacesView.family}
+              </option>
+              <option value="fund">{t.workspaces.workspacesView.fund}</option>
+              <option value="custom">
+                {t.workspaces.workspacesView.other}
+              </option>
             </Select>
           </Field>
-          <Field label="Display currency" htmlFor="workspace-currency">
+          <Field
+            label={t.workspaces.workspacesView.displayCurrency}
+            htmlFor="workspace-currency"
+          >
             <Select
               id="workspace-currency"
               name="currency"
@@ -93,7 +111,7 @@ export function WorkspacesView() {
             >
               {(currencies.data ?? []).map((c) => (
                 <option key={c.code} value={c.code}>
-                  {c.code} · {c.name}
+                  {c.code} · {categoryLabel(t, c.name)}
                 </option>
               ))}
             </Select>
@@ -106,7 +124,7 @@ export function WorkspacesView() {
             loading={create.isPending}
             disabled={!currencies.data?.length || create.isPending}
           >
-            Create workspace
+            {t.workspaces.workspacesView.createWorkspace}
           </Button>
         </form>
       </Section>

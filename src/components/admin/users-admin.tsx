@@ -1,5 +1,7 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+
 import { Link2, Search } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -37,6 +39,8 @@ function matches(u: AdminUser, filter: UserFilter, query: string) {
 }
 
 export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
+  const locale = useLocale();
+  const t = useT();
   const utils = api.useUtils();
   const params = useSearchParams();
   const [users] = api.admin.users.list.useSuspenseQuery();
@@ -76,23 +80,35 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
       />
 
       <Section
-        title="People"
-        description="Admins manage this console. Members only see their own data."
+        title={t.adminManage.users.people}
+        description={t.adminManage.users.rolesHelp}
       >
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <FilterTabs
-            label="Filter people"
+            label={t.adminManage.users.filterPeople}
             value={filter}
             onChange={setFilter}
             options={[
-              { value: "all", label: "Everyone", count: counts.all },
-              { value: "admins", label: "Admins", count: counts.admins },
-              { value: "no2fa", label: "No two-step", count: counts.no2fa },
+              {
+                value: "all",
+                label: t.adminManage.users.everyone,
+                count: counts.all,
+              },
+              {
+                value: "admins",
+                label: t.adminManage.users.admins,
+                count: counts.admins,
+              },
+              {
+                value: "no2fa",
+                label: t.adminManage.users.noTwostep,
+                count: counts.no2fa,
+              },
               ...(counts.disabled
                 ? [
                     {
                       value: "disabled" as const,
-                      label: "Disabled",
+                      label: t.adminManage.users.disabled,
                       count: counts.disabled,
                     },
                   ]
@@ -102,8 +118,8 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
           <div className="relative ml-auto w-full max-w-xs">
             <Search className="text-ink-3 pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
             <Input
-              aria-label="Search people"
-              placeholder="Search name or email"
+              aria-label={t.adminManage.users.searchPeople}
+              placeholder={t.adminManage.users.searchNameOrEmail}
               className="pl-9"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -112,20 +128,20 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
         </div>
 
         {visible.length === 0 ? (
-          <EmptyState title="No one matches">
-            Try another filter or search.
+          <EmptyState title={t.adminManage.users.noOneMatches}>
+            {t.adminManage.users.tryAnotherFilterOrSearch}
           </EmptyState>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Name</Th>
-                <Th>Two-step</Th>
-                <Th>Joined</Th>
-                <Th>Last active</Th>
-                <Th>Role</Th>
+                <Th>{t.adminManage.users.name}</Th>
+                <Th>{t.adminManage.users.twoStep}</Th>
+                <Th>{t.adminManage.users.joined}</Th>
+                <Th>{t.adminManage.users.lastActive}</Th>
+                <Th>{t.adminManage.users.role}</Th>
                 <Th className="text-right">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t.adminManage.users.actions}</span>
                 </Th>
               </tr>
             </thead>
@@ -142,12 +158,12 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                         {u.name}
                         {self ? (
                           <Tag tone="soft" className="ml-2">
-                            You
+                            {t.adminManage.users.you}
                           </Tag>
                         ) : null}
                         {u.banned ? (
                           <Tag tone="loss" className="ml-2">
-                            Disabled
+                            {t.adminManage.users.disabled}
                           </Tag>
                         ) : null}
                       </p>
@@ -155,37 +171,43 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                     </Td>
                     <Td>
                       {u.twoFactorEnabled ? (
-                        <Tag tone="brand">On</Tag>
+                        <Tag tone="brand">{t.adminManage.users.on}</Tag>
                       ) : (
-                        <Tag tone="warn">Off</Tag>
+                        <Tag tone="warn">{t.adminManage.users.off}</Tag>
                       )}
                       {u.passkeys ? (
                         <span className="text-ink-3 ml-2 text-[12px]">
-                          {u.passkeys} passkey{u.passkeys === 1 ? "" : "s"}
+                          {t.adminManage.users.passkeys(u.passkeys)}
                         </span>
                       ) : null}
                     </Td>
                     <Td className="text-ink-2 whitespace-nowrap">
-                      {formatDate(u.createdAt)}
+                      {formatDate(u.createdAt, locale)}
                     </Td>
                     <Td
                       className="text-ink-2 whitespace-nowrap"
                       title={
                         u.lastActiveAt
-                          ? formatDateTime(u.lastActiveAt)
+                          ? formatDateTime(u.lastActiveAt, locale)
                           : undefined
                       }
                     >
-                      {u.lastActiveAt ? formatRelative(u.lastActiveAt) : "—"}
+                      {u.lastActiveAt
+                        ? formatRelative(u.lastActiveAt, undefined, locale)
+                        : "—"}
                     </Td>
-                    <Td>{u.role === "admin" ? "Admin" : "Member"}</Td>
+                    <Td>
+                      {u.role === "admin"
+                        ? t.adminManage.users.admin
+                        : t.adminManage.users.member}
+                    </Td>
                     <Td className="text-right">
                       {self ? (
                         <Link
                           href="/settings"
                           className="text-ink-2 text-[13px] font-semibold underline-offset-4 hover:underline"
                         >
-                          Your settings
+                          {t.adminManage.users.yourSettings}
                         </Link>
                       ) : (
                         <Button
@@ -193,7 +215,7 @@ export function UsersAdmin({ currentUserId }: { currentUserId: string }) {
                           size="sm"
                           onClick={() => setManagingId(u.id)}
                         >
-                          Manage
+                          {t.adminManage.users.manage}
                         </Button>
                       )}
                     </Td>
@@ -223,6 +245,8 @@ function InviteSection({
   emailConfigured: boolean;
   onChanged: () => Promise<unknown>;
 }) {
+  const locale = useLocale();
+  const t = useT();
   const [invites] = api.admin.users.invitations.useSuspenseQuery();
   const [created, setCreated] = useState<{
     url: string;
@@ -235,7 +259,7 @@ function InviteSection({
   const invite = api.admin.users.invite.useMutation();
   const revoke = api.admin.users.revokeInvite.useMutation({
     onSuccess: async () => {
-      success("Invitation revoked. Its link no longer works.");
+      success(t.adminManage.users.invitationRevoked);
       await onChanged();
     },
     onError: error,
@@ -259,8 +283,8 @@ function InviteSection({
 
   return (
     <Section
-      title="Invite someone"
-      description="Links are single-use and expire after 7 days. The link is shown once, here."
+      title={t.adminManage.users.inviteSomeone}
+      description={t.adminManage.users.invitationHelp}
     >
       <form
         className="grid gap-4 sm:grid-cols-[1fr_10rem_auto] sm:items-end"
@@ -277,40 +301,40 @@ function InviteSection({
           );
         }}
       >
-        <Field label="Email" htmlFor="invite-email">
+        <Field label={t.common.fields.email} htmlFor="invite-email">
           <Input
             id="invite-email"
             name="email"
             type="email"
             required
-            placeholder="family@example.com"
+            placeholder={t.adminManage.users.inviteEmailPlaceholder}
           />
         </Field>
-        <Field label="Role" htmlFor="invite-role">
+        <Field label={t.adminManage.users.role} htmlFor="invite-role">
           <Select id="invite-role" name="role" defaultValue="user">
-            <option value="user">Member</option>
-            <option value="admin">Admin</option>
+            <option value="user">{t.adminManage.users.member}</option>
+            <option value="admin">{t.adminManage.users.admin}</option>
           </Select>
         </Field>
         <Button type="submit" loading={invite.isPending}>
           <Link2 className="size-4" />
-          Create link
+          {t.adminManage.users.createLink}
         </Button>
         {emailConfigured ? (
           <Checkbox
             name="sendEmail"
-            label="Also email the link to them"
+            label={t.adminManage.users.emailInviteLabel}
             defaultChecked
             className="sm:col-span-3"
           />
         ) : (
           <p className="text-ink-3 text-[13px] sm:col-span-3">
-            Email is not set up, so hand the link over yourself.{" "}
+            {t.adminManage.users.emailUnavailableHelp}{" "}
             <Link
               href="/admin/system"
               className="font-semibold underline underline-offset-4"
             >
-              Set up email
+              {t.adminManage.users.setUpEmail}
             </Link>
           </p>
         )}
@@ -320,11 +344,13 @@ function InviteSection({
       {created ? (
         <div className="mt-5 space-y-2">
           {created.emailed ? (
-            <Notice tone="success">Emailed the link to {created.email}.</Notice>
+            <Notice tone="success">
+              {t.adminManage.users.invitedEmail(created.email)}
+            </Notice>
           ) : created.emailError ? (
             <Notice tone="warn">
-              The invite was created but the email failed: {created.emailError}{" "}
-              Copy the link below instead.
+              {t.adminManage.users.inviteFailed(created.emailError)}
+              {t.adminManage.users.copyTheLinkBelowInstead}
             </Notice>
           ) : null}
           <CopyField key={created.url} value={created.url} />
@@ -333,15 +359,17 @@ function InviteSection({
 
       {invites.length ? (
         <div className="mt-8">
-          <h3 className="mb-2 text-sm font-semibold">Invitations</h3>
+          <h3 className="mb-2 text-sm font-semibold">
+            {t.adminManage.users.invitations}
+          </h3>
           <Table>
             <thead>
               <tr>
-                <Th>Email</Th>
-                <Th>Role</Th>
-                <Th>Status</Th>
+                <Th>{t.common.fields.email}</Th>
+                <Th>{t.adminManage.users.role}</Th>
+                <Th>{t.common.fields.status}</Th>
                 <Th className="text-right">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t.adminManage.users.actions}</span>
                 </Th>
               </tr>
             </thead>
@@ -349,13 +377,23 @@ function InviteSection({
               {invites.map((inv) => (
                 <Tr key={inv.id}>
                   <Td className="font-medium">{inv.email}</Td>
-                  <Td>{inv.role === "admin" ? "Admin" : "Member"}</Td>
+                  <Td>
+                    {inv.role === "admin"
+                      ? t.adminManage.users.admin
+                      : t.adminManage.users.member}
+                  </Td>
                   <Td>
                     {inv.expired ? (
-                      <Tag tone="warn">Expired {formatDate(inv.expiresAt)}</Tag>
+                      <Tag tone="warn">
+                        {t.adminManage.users.expired(
+                          formatDate(inv.expiresAt, locale),
+                        )}
+                      </Tag>
                     ) : (
                       <span className="text-ink-2">
-                        Expires {formatDate(inv.expiresAt)}
+                        {t.adminManage.users.expires(
+                          formatDate(inv.expiresAt, locale),
+                        )}
                       </span>
                     )}
                   </Td>
@@ -376,16 +414,16 @@ function InviteSection({
                           })
                         }
                       >
-                        Send new link
+                        {t.adminManage.users.sendNewLink}
                       </Button>
                     ) : (
                       <ConfirmButton
                         variant="ghost"
                         size="sm"
-                        confirmLabel="Revoke link?"
+                        confirmLabel={t.adminManage.users.revokeLink}
                         onConfirm={() => revoke.mutate({ id: inv.id })}
                       >
-                        Revoke
+                        {t.adminManage.users.revoke}
                       </ConfirmButton>
                     )}
                   </Td>
@@ -410,6 +448,8 @@ function UserDrawer({
   onClose: () => void;
   onChanged: () => Promise<unknown>;
 }) {
+  const locale = useLocale();
+  const t = useT();
   const userId = user?.id ?? "";
   const utils = api.useUtils();
   const sessions = api.admin.users.sessions.useQuery(
@@ -445,38 +485,33 @@ function UserDrawer({
     onSuccess: (_, input) =>
       after(
         input.role === "admin"
-          ? `${user?.name} is now an admin.`
-          : `${user?.name} is now a member.`,
+          ? t.adminManage.users.adminGranted(user?.name)
+          : t.adminManage.users.memberGranted(user?.name),
       )(),
     onError: error,
   });
   const revokeSession = api.admin.users.revokeSession.useMutation(
-    handlers("Signed out of that device."),
+    handlers(t.adminManage.users.signedOutOfThatDevice),
   );
   const revokeSessions = api.admin.users.revokeSessions.useMutation({
     onMutate: clear,
-    onSuccess: (r) =>
-      after(
-        `Signed out of ${r.revoked} session${r.revoked === 1 ? "" : "s"}.`,
-      )(),
+    onSuccess: (r) => after(t.adminManage.users.sessionsRevoked(r.revoked))(),
     onError: error,
   });
   const resetTwoFactor = api.admin.users.resetTwoFactor.useMutation(
-    handlers(
-      "Two-step removed and signed out. They set it up again at next sign-in.",
-    ),
+    handlers(t.adminManage.users.twoStepReset),
   );
   const createReset = api.admin.users.createPasswordReset.useMutation({
     onMutate: clear,
     onSuccess: async (data) => {
       setReset(data);
       if (data.emailError) {
-        error(`Reset link created, but the email failed: ${data.emailError}`);
+        error(t.adminManage.users.resetEmailFailed(data.emailError));
       } else {
         await after(
           data.emailed
-            ? `Reset link emailed to ${user?.email}. Older links no longer work.`
-            : "Reset link created. Older links no longer work.",
+            ? t.adminManage.users.resetEmailSent(user?.email)
+            : t.adminManage.users.resetLinkCreated,
         )();
       }
     },
@@ -487,8 +522,8 @@ function UserDrawer({
     onSuccess: (_, input) =>
       after(
         input.banned
-          ? "Account disabled and signed out."
-          : "Account re-enabled.",
+          ? t.adminManage.users.accountDisabledAndSignedOut
+          : t.adminManage.users.accountReenabled,
       )(),
     onError: error,
   });
@@ -507,11 +542,11 @@ function UserDrawer({
           <FlashNotice flash={flash} />
 
           <Section
-            title="Role"
+            title={t.adminManage.users.role}
             description={
               isAdmin
-                ? "Admin: can change every setting in this console, but still cannot see other people's finances."
-                : "Member: sees only their own accounts and the workspaces shared with them."
+                ? t.adminManage.users.adminRoleHelp
+                : t.adminManage.users.memberRoleHelp
             }
             actions={
               <ConfirmButton
@@ -519,7 +554,9 @@ function UserDrawer({
                 size="sm"
                 loading={setRole.isPending}
                 confirmLabel={
-                  isAdmin ? "Remove admin access?" : "Give admin access?"
+                  isAdmin
+                    ? t.adminManage.users.removeAdminAccess
+                    : t.adminManage.users.giveAdminAccess
                 }
                 onConfirm={() =>
                   setRole.mutate({
@@ -528,30 +565,32 @@ function UserDrawer({
                   })
                 }
               >
-                {isAdmin ? "Make member" : "Make admin"}
+                {isAdmin
+                  ? t.adminManage.users.makeMember
+                  : t.adminManage.users.makeAdmin}
               </ConfirmButton>
             }
           />
 
           <Section
-            title="Sessions"
-            description="Devices signed in to this account."
+            title={t.adminManage.users.sessions}
+            description={t.adminManage.users.sessionsHelp}
             actions={
               sessions.data && sessions.data.length > 1 ? (
                 <ConfirmButton
                   variant="danger"
                   size="sm"
-                  confirmLabel="Sign out all?"
+                  confirmLabel={t.adminManage.users.signOutAll}
                   loading={revokeSessions.isPending}
                   onConfirm={() => revokeSessions.mutate({ userId })}
                 >
-                  Sign out everywhere
+                  {t.adminManage.users.signOutEverywhere}
                 </ConfirmButton>
               ) : null
             }
           >
             {sessions.isLoading ? (
-              <p className="text-ink-3 text-sm">Loading…</p>
+              <p className="text-ink-3 text-sm">{t.common.status.loading}</p>
             ) : sessions.data?.length ? (
               <ul className="border-line divide-line divide-y border-t">
                 {sessions.data.map((s) => (
@@ -572,15 +611,17 @@ function UserDrawer({
                         ) : null}
                       </p>
                       <p className="text-ink-2 text-[13px]">
-                        {s.ipAddress ?? "Unknown IP"} · active{" "}
-                        {formatRelative(s.lastActiveAt)} · signed in{" "}
-                        {formatDate(s.createdAt)}
+                        {t.adminManage.users.sessionActivity(
+                          s.ipAddress ?? t.adminManage.users.unknownIP,
+                          formatRelative(s.lastActiveAt, undefined, locale),
+                          formatDate(s.createdAt, locale),
+                        )}
                       </p>
                     </div>
                     <ConfirmButton
                       variant="ghost"
                       size="sm"
-                      confirmLabel="Sign out?"
+                      confirmLabel={t.adminManage.users.signOut}
                       loading={
                         revokeSession.isPending &&
                         revokeSession.variables?.sessionId === s.id
@@ -589,24 +630,26 @@ function UserDrawer({
                         revokeSession.mutate({ userId, sessionId: s.id })
                       }
                     >
-                      Sign out
+                      {t.adminManage.users.signOut}
                     </ConfirmButton>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-ink-3 text-sm">Not signed in anywhere.</p>
+              <p className="text-ink-3 text-sm">
+                {t.adminManage.users.notSignedInAnywhere}
+              </p>
             )}
           </Section>
 
           <Section
-            title="Recent sign-ins"
+            title={t.adminManage.users.recentSignins}
             actions={
               <Link
                 href={`/admin/security?user=${encodeURIComponent(userId)}`}
                 className="text-brand text-[13px] font-semibold underline-offset-4 hover:underline"
               >
-                Full history
+                {t.adminManage.users.fullHistory}
               </Link>
             }
           >
@@ -619,48 +662,55 @@ function UserDrawer({
                         e.success ? "text-ink" : "text-loss font-semibold"
                       }
                     >
-                      {e.success ? "Signed in" : "Failed"}
+                      {e.success
+                        ? t.adminManage.users.signedIn
+                        : t.adminManage.users.failed}
                     </span>
                     <span className="text-ink-2">
-                      {e.device} · {e.ipAddress ?? "unknown IP"} ·{" "}
-                      {formatRelative(e.createdAt)}
+                      {e.device} ·{" "}
+                      {e.ipAddress ?? t.adminManage.users.unknownIP} ·{" "}
+                      {formatRelative(e.createdAt, undefined, locale)}
                     </span>
-                    {e.newDevice ? <Tag tone="warn">New device</Tag> : null}
+                    {e.newDevice ? (
+                      <Tag tone="warn">{t.adminManage.users.newDevice}</Tag>
+                    ) : null}
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="text-ink-3 text-sm">
-                {signIns.isLoading ? "Loading…" : "No sign-ins recorded yet."}
+                {signIns.isLoading
+                  ? t.common.status.loading
+                  : t.adminManage.users.noSigninsRecordedYet}
               </p>
             )}
           </Section>
 
           <Section
-            title="Two-step verification"
+            title={t.adminManage.users.twoStepVerification}
             description={
               user.twoFactorEnabled
-                ? "On. For someone who lost their authenticator: resetting removes it and signs them out; they enrol again at next sign-in."
-                : "Not set up yet."
+                ? t.adminManage.users.twoStepResetHelp
+                : t.adminManage.users.notSetUpYet
             }
             actions={
               user.twoFactorEnabled ? (
                 <ConfirmButton
                   variant="danger"
                   size="sm"
-                  confirmLabel="Reset two-step?"
+                  confirmLabel={t.adminManage.users.resetTwostep}
                   loading={resetTwoFactor.isPending}
                   onConfirm={() => resetTwoFactor.mutate({ userId })}
                 >
-                  Reset two-step
+                  {t.adminManage.users.resetTwostep}
                 </ConfirmButton>
               ) : null
             }
           />
 
           <Section
-            title="Password"
-            description="A single-use reset link, valid for 24 hours. Using it signs them out everywhere."
+            title={t.adminManage.users.password}
+            description={t.adminManage.users.passwordResetHelp}
             actions={
               <Button
                 variant="secondary"
@@ -674,7 +724,7 @@ function UserDrawer({
                 }
               >
                 <Link2 className="size-3.5" />
-                Create reset link
+                {t.adminManage.users.createResetLink}
               </Button>
             }
           >
@@ -682,7 +732,7 @@ function UserDrawer({
               <div className="space-y-3">
                 {emailConfigured ? (
                   <Checkbox
-                    label={`Email it to ${user.email}`}
+                    label={t.adminManage.users.emailItTo(user.email)}
                     checked={emailReset}
                     onChange={(e) => setEmailReset(e.target.checked)}
                   />
@@ -691,7 +741,9 @@ function UserDrawer({
                   <>
                     <CopyField value={reset.url} />
                     <p className="text-ink-3 text-[13px]">
-                      Shown once. Expires {formatDateTime(reset.expiresAt)}.
+                      {t.adminManage.users.resetExpires(
+                        formatDateTime(reset.expiresAt, locale),
+                      )}
                     </p>
                   </>
                 ) : null}
@@ -700,11 +752,11 @@ function UserDrawer({
           </Section>
 
           <Section
-            title="Access"
+            title={t.adminManage.users.access}
             description={
               user.banned
-                ? "This account is disabled and cannot sign in."
-                : "Disabling signs them out and blocks sign-in. Their data is kept."
+                ? t.adminManage.users.disabledAccountHelp
+                : t.adminManage.users.disableAccountHelp
             }
             actions={
               user.banned ? (
@@ -714,17 +766,17 @@ function UserDrawer({
                   loading={setBanned.isPending}
                   onClick={() => setBanned.mutate({ userId, banned: false })}
                 >
-                  Re-enable
+                  {t.adminManage.users.reenable}
                 </Button>
               ) : (
                 <ConfirmButton
                   variant="danger"
                   size="sm"
-                  confirmLabel="Disable account?"
+                  confirmLabel={t.adminManage.users.disableAccount}
                   loading={setBanned.isPending}
                   onConfirm={() => setBanned.mutate({ userId, banned: true })}
                 >
-                  Disable
+                  {t.adminManage.users.disable}
                 </ConfirmButton>
               )
             }

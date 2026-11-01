@@ -4,16 +4,21 @@ import { Suspense } from "react";
 
 import { CurrencySelect } from "~/components/settings/currency-select";
 import { HideAmounts } from "~/components/settings/hide-amounts";
+import { LanguageSwitch } from "~/components/shell/language-switch";
 import { PasskeysCard } from "~/components/settings/passkeys-card";
 import { PasswordCard } from "~/components/settings/password-card";
 import { ProfileCard } from "~/components/settings/profile-card";
 import { SessionsCard } from "~/components/settings/sessions-card";
 import { TwoFactorCard } from "~/components/settings/two-factor-card";
 import { Notice, PageHeader, Section } from "~/components/ui/panel";
+import { getT } from "~/i18n/server";
 import { needsTwoFactorEnrollment, requireSession } from "~/server/auth";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Settings" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.settings.page.settings };
+}
 
 export default async function SettingsPage({
   searchParams,
@@ -23,46 +28,55 @@ export default async function SettingsPage({
   const session = await requireSession();
   const params = await searchParams;
   const mustEnrol = needsTwoFactorEnrollment(session.user);
+  const t = await getT();
   void api.catalog.currencies.prefetch();
   void api.settings.get.prefetch();
 
   return (
     <HydrateClient>
       <PageHeader
-        title="Settings"
-        description="Your preferences and how you sign in."
+        title={t.settings.page.settings}
+        description={t.settings.page.yourPreferencesAndHowYou}
       />
 
       {mustEnrol ? (
         <Notice tone="warn" className="mb-10">
-          {params.welcome ? "Welcome aboard. " : ""}This instance requires
-          two-step sign-in. Set up an authenticator app below to unlock the rest
-          of the app.
+          {t.settings.page.enrolment(!!params.welcome)}
         </Notice>
       ) : null}
 
       <div className="space-y-14">
         {!mustEnrol ? (
-          <Section title="Profile" description="How you appear to others.">
+          <Section
+            title={t.settings.page.profile}
+            description={t.settings.page.howYouAppearToOthers}
+          >
             <ProfileCard name={session.user.name} email={session.user.email} />
           </Section>
         ) : null}
         {!mustEnrol ? (
           <Section
-            title="Shared workspaces"
-            description="Create a family or fund workspace and choose which accounts to share."
+            title={t.settings.page.sharedWorkspaces}
+            description={t.settings.page.createAFamilyOrFund}
           >
             <Link
               className="font-semibold underline underline-offset-4"
               href="/workspaces"
             >
-              Manage workspaces
+              {t.settings.page.manageWorkspaces}
             </Link>
           </Section>
         ) : null}
         <Section
-          title="Display currency"
-          description="Totals and charts are converted into this currency. Each record keeps its original currency."
+          title={t.common.language.label}
+          description={t.common.language.description}
+        >
+          <LanguageSwitch />
+        </Section>
+
+        <Section
+          title={t.settings.page.displayCurrency}
+          description={t.settings.page.totalsAndChartsAreConverted}
         >
           <Suspense fallback={<div className="bg-wash h-10 w-64" />}>
             <CurrencySelect className="w-72" />
@@ -71,40 +85,40 @@ export default async function SettingsPage({
 
         {!mustEnrol ? (
           <Section
-            title="Privacy"
-            description="Keep your numbers off screen when someone is looking over your shoulder or you are sharing your screen."
+            title={t.settings.page.privacy}
+            description={t.settings.page.keepYourNumbersOffScreen}
           >
             <HideAmounts />
           </Section>
         ) : null}
 
         <Section
-          title="Two-step sign-in"
-          description="A time-based code from an authenticator app, asked for after your password."
+          title={t.settings.page.twostepSignin}
+          description={t.settings.page.aTimebasedCodeFromAn}
         >
           <TwoFactorCard enabled={!!session.user.twoFactorEnabled} />
         </Section>
 
         {!mustEnrol ? (
           <Section
-            title="Password"
-            description="Change the password you sign in with."
+            title={t.settings.page.password}
+            description={t.settings.page.changeThePasswordYouSign}
           >
             <PasswordCard />
           </Section>
         ) : null}
 
         <Section
-          title="Passkeys"
-          description="Sign in without a password using your device's biometrics or security key."
+          title={t.settings.page.passkeys}
+          description={t.settings.page.signInWithoutAPassword}
         >
           <PasskeysCard />
         </Section>
 
         {!mustEnrol ? (
           <Section
-            title="Signed-in devices"
-            description="Where your account is signed in. Sign out anything you don't recognise."
+            title={t.settings.page.signedinDevices}
+            description={t.settings.page.whereYourAccountIsSigned}
           >
             <SessionsCard />
           </Section>

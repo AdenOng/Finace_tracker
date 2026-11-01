@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "~/i18n/client";
+
 import { ArrowRight, CircleAlert, CircleCheck, Info } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -10,15 +12,6 @@ import { cn } from "~/lib/cn";
 import { api } from "~/trpc/react";
 
 const integer = new Intl.NumberFormat("en-SG");
-
-export const jobStatusLabels: Record<string, string> = {
-  queued: "Queued",
-  running: "Running",
-  needs_review: "Needs review",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-};
 
 const statusOrder = [
   "queued",
@@ -65,22 +58,23 @@ const toneStyles = {
 } as const;
 
 function Attention() {
+  const t = useT();
   const [items] = api.admin.overview.attention.useSuspenseQuery();
   if (items.length === 0) {
     return (
       <div className="card flex items-center gap-3 p-5 text-sm">
         <CircleCheck className="text-gain size-5 shrink-0" />
         <span>
-          <strong>Nothing needs attention.</strong> Providers, imports, backups
-          and sign-ins all look normal.
+          <strong>{t.admin.overview.nothingNeedsAttention}</strong>{" "}
+          {t.admin.overview.providersImportsBackupsAndSignInsAllLookNormal}
         </span>
       </div>
     );
   }
   return (
     <Section
-      title="Needs attention"
-      description={`${items.length} thing${items.length === 1 ? "" : "s"} to look at, most urgent first.`}
+      title={t.admin.overview.needsAttention}
+      description={t.admin.overview.attentionCount(items.length)}
     >
       <ul className="border-line divide-line -my-1 divide-y">
         {items.map((item) => {
@@ -116,6 +110,7 @@ function Attention() {
 }
 
 export function AdminOverview() {
+  const t = useT();
   const [stats] = api.admin.overview.stats.useSuspenseQuery();
   const withoutTwoFactor = stats.users.total - stats.users.twoFactor;
   const counts = new Map(stats.jobsByStatus.map((s) => [s.status, s.count]));
@@ -125,21 +120,24 @@ export function AdminOverview() {
     <div className="space-y-6">
       <Attention />
 
-      <Section title="People">
+      <Section title={t.admin.overview.people}>
         <dl className="grid grid-cols-2 gap-6 sm:grid-cols-4">
           <Figure
-            label="Users"
+            label={t.admin.overview.users}
             href="/admin/users"
             value={integer.format(stats.users.total)}
-            note={`${stats.users.admins} admin${stats.users.admins === 1 ? "" : "s"}${stats.users.disabled ? `, ${stats.users.disabled} disabled` : ""}`}
+            note={t.admin.overview.usersNote(
+              stats.users.admins,
+              stats.users.disabled,
+            )}
           />
           <Figure
-            label="Active in 30 days"
+            label={t.admin.overview.activeIn30Days}
             value={integer.format(stats.activeUsers)}
-            note={`${stats.activeSessions} signed-in session${stats.activeSessions === 1 ? "" : "s"}`}
+            note={t.admin.overview.sessions(stats.activeSessions)}
           />
           <Figure
-            label="Two-step on"
+            label={t.admin.overview.twoStepOn}
             href={
               withoutTwoFactor > 0 ? "/admin/users?filter=no2fa" : undefined
             }
@@ -147,31 +145,35 @@ export function AdminOverview() {
             note={
               withoutTwoFactor > 0 ? (
                 <span className="text-warn">
-                  {withoutTwoFactor} without two-step
+                  {t.admin.overview.withoutTwoStep(withoutTwoFactor)}
                 </span>
               ) : (
-                "Everyone is covered"
+                t.admin.overview.everyoneIsCovered
               )
             }
           />
           <Figure
-            label="Pending invites"
+            label={t.admin.overview.pendingInvites}
             href="/admin/users"
             value={integer.format(stats.pendingInvites)}
-            note="Single-use, 7 days"
+            note={t.admin.overview.singleUse7Days}
           />
         </dl>
       </Section>
 
       <Section
-        title="Imports this week"
-        description={`Default provider: ${stats.defaultProvider ?? "none"}. ${integer.format(jobsThisWeek)} statement${jobsThisWeek === 1 ? "" : "s"} read in the last 7 days.`}
+        title={t.admin.overview.importsThisWeek}
+        description={t.admin.overview.importsDescription(
+          stats.defaultProvider,
+          jobsThisWeek,
+          integer.format(jobsThisWeek),
+        )}
         actions={
           <Link
             href="/admin/imports"
             className="text-brand inline-flex items-center gap-1 text-[13px] font-semibold underline-offset-4 hover:underline"
           >
-            All import jobs
+            {t.admin.overview.allImportJobs}
             <ArrowRight className="size-3.5" />
           </Link>
         }
@@ -182,7 +184,7 @@ export function AdminOverview() {
             return (
               <Figure
                 key={status}
-                label={jobStatusLabels[status]!}
+                label={t.admin.jobStatus[status]}
                 href={`/admin/imports?filter=${status}`}
                 value={
                   <span
@@ -201,28 +203,30 @@ export function AdminOverview() {
       </Section>
 
       <Section
-        title="AI usage, last 30 days"
+        title={t.admin.overview.aiUsageLast30Days}
         actions={
           <Link
             href="/admin/ai/usage"
             className="text-brand inline-flex items-center gap-1 text-[13px] font-semibold underline-offset-4 hover:underline"
           >
-            Usage &amp; cost
+            {t.admin.overview.usageCost}
             <ArrowRight className="size-3.5" />
           </Link>
         }
       >
         {stats.usage.length === 0 ? (
-          <p className="text-ink-3 text-sm">No statements read yet.</p>
+          <p className="text-ink-3 text-sm">
+            {t.admin.overview.noStatementsReadYet}
+          </p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Provider</Th>
-                <Th>Model</Th>
-                <Th className="text-right">Jobs</Th>
-                <Th className="text-right">Input tokens</Th>
-                <Th className="text-right">Output tokens</Th>
+                <Th>{t.admin.overview.provider}</Th>
+                <Th>{t.admin.overview.model}</Th>
+                <Th className="text-right">{t.admin.overview.jobs}</Th>
+                <Th className="text-right">{t.admin.overview.inputTokens}</Th>
+                <Th className="text-right">{t.admin.overview.outputTokens}</Th>
               </tr>
             </thead>
             <tbody>
@@ -231,13 +235,16 @@ export function AdminOverview() {
                   <Td className="font-medium">
                     {u.providerName ??
                       (u.providerId ? (
-                        "Deleted provider"
+                        t.admin.overview.deletedProvider
                       ) : (
                         <span
                           className="text-ink-3"
-                          title="Imports read before provider tracking was added"
+                          title={
+                            t.admin.overview
+                              .importsReadBeforeProviderTrackingWasAdded
+                          }
                         >
-                          Not recorded
+                          {t.admin.overview.notRecorded}
                         </span>
                       ))}
                   </Td>

@@ -1,27 +1,31 @@
+"use client";
+import { useT } from "~/i18n/client";
 import { LinkTabs } from "~/components/ui/link-tabs";
 
 export function AiTabs() {
+  const t = useT();
   return (
     <LinkTabs
-      label="AI sections"
+      label={t.admin.tabs.aiSections}
       tabs={[
-        { href: "/admin/ai", label: "Providers" },
-        { href: "/admin/ai/usage", label: "Usage & cost" },
-        { href: "/admin/ai/playground", label: "Playground" },
+        { href: "/admin/ai", label: t.admin.tabs.providers },
+        { href: "/admin/ai/usage", label: t.admin.tabs.usageCost },
+        { href: "/admin/ai/playground", label: t.admin.tabs.playground },
       ]}
     />
   );
 }
 
 export function DataTabs() {
+  const t = useT();
   return (
     <LinkTabs
-      label="Data sections"
+      label={t.admin.tabs.dataSections}
       tabs={[
-        { href: "/admin/data", label: "Backups" },
-        { href: "/admin/data/market", label: "Market data" },
-        { href: "/admin/data/storage", label: "Storage" },
-        { href: "/admin/data/presets", label: "Data packs" },
+        { href: "/admin/data", label: t.admin.tabs.backups },
+        { href: "/admin/data/market", label: t.admin.tabs.marketData },
+        { href: "/admin/data/storage", label: t.admin.tabs.storage },
+        { href: "/admin/data/presets", label: t.admin.tabs.dataPacks },
       ]}
     />
   );

@@ -39,6 +39,7 @@ using the same database and encrypted provider credentials. The Compose project 
 | Reconciliation: statement-period review, exact balance checks, protected entries and reopening                                                                                                                | Done  |
 | Merchant rules: per-user text matching, automatic categorization and previewed application                                                                                                                    | Done  |
 | Bulk editing: categories, merchant, notes, transfer/cleared status and reviewed deletion                                                                                                                      | Done  |
+| Cash flow: recurring income/bills, reviewed transaction matching, 30/60/90-day forecasts and card statement payment tracking                                                                                  | Done  |
 | Import pipeline: upload → background job → review & dedupe → commit, restart recovery, review reminders                                                                                                       | Done  |
 | Daily FX conversion, combined net worth and investment account totals                                                                                                                                         | Done  |
 | Hourly market prices for stocks, ETFs and crypto                                                                                                                                                              | Done  |
@@ -181,6 +182,71 @@ never merges another account or moves its records.
 The new reconciliation schema is applied by the existing startup migrations. No additional
 configuration is required.
 
+## Recurring bills, cash flow and card payments
+
+Open **Cash flow** from the menu. Add a recurring item for a bank or cash account,
+using a positive amount for income and a negative amount for a bill. Choose a weekly,
+monthly or yearly cadence, the first due date and an optional final date. Monthly
+dates remain anchored to the original day (31 January → the last day of February →
+31 March); annual leap-day items use 28 February in non-leap years. Plans never post
+transactions or change saved account balances. Pause an item to exclude it; to change
+its amount or cadence, pause it and create a replacement. Removing a plan removes
+its review decisions, while recorded transactions remain.
+
+The **30/60/90-day forecast** keeps each account in its native currency. Its starting
+estimate is the latest recorded closing cash balance plus transactions posted after
+that date through today, including transfers. It then applies outstanding recurring
+items and card bills. Record a balance in the account currency to enable projected
+totals; missing balances are never treated as zero. Old balances are flagged as stale.
+Only entered plans are forecast: this is not a prediction of unrecorded spending.
+Overdue recurring items from the past 90 days are reserved today; older occurrences
+are outside the review window. Paused and archived accounts' recurring items are excluded.
+
+Under **Match recorded payments**, review suggestions with the same account,
+currency and signed amount, posted within seven days of the due date. Confirm the
+correct transaction to remove that planned occurrence from the forecast. A recorded
+transaction can match only one occurrence. **Skip** excludes just that occurrence;
+**Clear decision** restores it. Financial edits that no longer match, or deletion of
+the matched transaction, restore the expected occurrence. Variable-amount payments
+can be handled by skipping the expectation once the actual amount is recorded.
+Until a suggestion is confirmed, a posted payment and its expectation can both affect
+the estimate; review matches before relying on the forecast.
+
+### Is a credit-card bill paid off?
+
+Use **Cash flow → Credit-card bills**, or open a credit-card account under **Accounts**:
+
+1. Select its **Payment bank**, an owned checking/savings account in the same currency.
+   This is a tracking link, not an institution connection or a direct-debit instruction.
+2. **Add statement bill** with the statement closing date, payment due date and full
+   positive statement balance, including carried debt. A zero bill is also allowed.
+   These details are entered manually; statement import does not create a bill or infer
+   a payment due date. The current account balance alone does not establish bill status.
+3. Import or record the bank debit and matching card payment credit. Mark them as
+   transfers and confirm their pair under **Spending → Transfers**. They remain
+   excluded from spending totals.
+
+The bill shows **Unpaid**, **Partially paid**, **Paid off**, or **Overdue**, together
+with paid and remaining amounts and the payoff date (including a late-payment label).
+Only confirmed transfers from that bill's payment bank to the card, credited strictly
+after its closing date and no later than today, count. Both sides must be posted,
+have the expected signs and share the bill currency. Refunds, unpaired payments and
+payments from another bank do not automatically settle it. Unlinking or deleting a
+payment, or editing its financial fields, updates the status on refresh. Changes made
+elsewhere refresh on focus and every 30 seconds while these screens are open.
+
+Newer statement balances include carried debt, so only the **latest statement per
+card** reserves its remaining amount in the bank forecast. A later confirmed payment
+can satisfy an older outstanding statement as well; overlapping statement balances
+are not added together. A new payment-bank selection affects new bills; existing bills
+retain their original bank. Removing a bill preserves transactions and transfer links.
+Accounts referenced by plans or billing settings are archived rather than deleted;
+archived bank/card accounts are excluded from forecasts. These features are personal
+and do not expose plans, payment-bank settings or bills to shared-workspace viewers.
+
+The schema is installed by the normal startup migrations. No new configuration or
+external service is required.
+
 ## Quick start (local development)
 
 ```bash
@@ -272,6 +338,20 @@ daily reminder email to their owner.
 their account with how and when they signed in. Any other device can be signed out there, or all
 of them at once; changing the password signs the others out by default. Email addresses are
 changed by an admin.
+
+### Language
+
+Finfolio speaks English and Simplified Chinese (简体中文). Switch with the **EN · 中文** control
+in the sidebar, the phone menu, **Settings → Language**, or the top of the sign-in and setup pages.
+The choice is remembered per browser in the `finfolio-locale` cookie, so it applies before
+signing in too. Preset categories are shown in the chosen language; names you type (accounts,
+workspaces, your own categories) stay as entered. Amounts keep one format (S$1,234.50) in both
+languages; dates follow the language (29 Oct 2026 / 2026年10月29日).
+
+Interface copy lives in `src/i18n/messages/<language>/<area>.ts`: client components read it with
+`useT()` from `~/i18n/client`, server components with `await getT()` from `~/i18n/server`. Each
+Chinese file is typed against its English counterpart, so a missing or extra key fails
+`bun run check`. Terminology for Chinese is fixed in `src/i18n/GLOSSARY.md`.
 
 ### Backups and restore
 

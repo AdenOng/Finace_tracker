@@ -1,11 +1,13 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import { useRouter } from "next/navigation";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/panel";
 import { api } from "~/trpc/react";
 
 export function AcceptWorkspaceInvitation({ token }: { token: string }) {
+  const t = useT();
   const router = useRouter();
   const utils = api.useUtils();
   const accept = api.workspaces.acceptInvitation.useMutation({
@@ -24,7 +26,7 @@ export function AcceptWorkspaceInvitation({ token }: { token: string }) {
         loading={accept.isPending}
         onClick={() => accept.mutate({ token })}
       >
-        Join workspace
+        {t.workspaces.acceptInvitation.joinWorkspace}
       </Button>
     </div>
   );

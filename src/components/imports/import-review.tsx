@@ -1,5 +1,8 @@
 "use client";
 
+import type { Locale } from "~/i18n/config";
+import type { Messages } from "~/i18n/messages";
+import { useT, useLocale, categoryLabel } from "~/i18n/client";
 import Decimal from "decimal.js";
 import {
   AlertTriangle,
@@ -21,12 +24,7 @@ import { transactionType } from "~/lib/transaction-classification";
 import { Button } from "~/components/ui/button";
 import { Input, Select } from "~/components/ui/field";
 import { Notice, Section, Tag } from "~/components/ui/panel";
-import {
-  accountGroupOf,
-  accountTypeLabels,
-  assetClassLabels,
-  cpfBucketLabels,
-} from "~/lib/accounts";
+import { accountGroupOf } from "~/lib/accounts";
 import { orderCategories } from "~/lib/categories";
 import { cn } from "~/lib/cn";
 import { checkImportBalance } from "~/lib/import-balance-check";
@@ -58,33 +56,34 @@ const RowControls = createContext<{
   onConfirmAmount: () => undefined,
 });
 
-const DOCUMENT_LABELS: Record<string, string> = {
-  bank_statement: "Bank statement",
-  card_statement: "Card statement",
-  brokerage_statement: "Brokerage statement",
-  trade_confirmation: "Trade confirmation",
-  screenshot: "Screenshot",
-  other: "Document",
-};
+const documentLabels = (t: Messages): Record<string, string> => ({
+  bank_statement: t.imports.importReview.bankStatement,
+  card_statement: t.imports.importReview.cardStatement,
+  brokerage_statement: t.imports.importReview.brokerageStatement,
+  trade_confirmation: t.imports.importReview.tradeConfirmation,
+  screenshot: t.imports.importReview.screenshot,
+  other: t.imports.importReview.document,
+});
 
-const ACTIVITY_LABELS: Record<string, string> = {
-  buy: "Buy",
-  sell: "Sell",
-  dividend: "Dividend",
-  interest: "Interest",
-  fee: "Fee",
-  tax: "Tax",
-  deposit: "Deposit",
-  withdrawal: "Withdrawal",
-  transfer_in: "Transfer in",
-  transfer_out: "Transfer out",
-  split: "Split",
-  fx: "FX",
-  other: "Other",
-};
+const activityLabels = (t: Messages): Record<string, string> => ({
+  buy: t.imports.importReview.buy,
+  sell: t.imports.importReview.sell,
+  dividend: t.imports.importReview.dividend,
+  interest: t.imports.importReview.interest,
+  fee: t.imports.importReview.fee,
+  tax: t.imports.importReview.tax,
+  deposit: t.imports.importReview.deposit,
+  withdrawal: t.imports.importReview.withdrawal,
+  transfer_in: t.imports.importReview.transferIn,
+  transfer_out: t.imports.importReview.transferOut,
+  split: t.imports.importReview.split,
+  fx: t.imports.importReview.fx,
+  other: t.imports.importReview.other,
+});
 
 /** "12 Sept" — the statement period already gives the year. */
-const shortDate = (iso: string) => formatDate(iso).replace(/ \d{4}$/, "");
+const shortDate = (iso: string, locale: Locale) =>
+  formatDate(iso, locale).replace(locale === "zh" ? /^\d{4}年/ : / \d{4}$/, "");
 
 const money = (
   amount: string | number | Decimal,
@@ -93,6 +92,8 @@ const money = (
 ) => formatMoney(new Decimal(amount).toFixed(2), currency, { signed });
 
 export function ImportReview({ id }: { id: string }) {
+  const t = useT();
+  const locale = useLocale();
   const router = useRouter();
   const utils = api.useUtils();
   const [job] = api.imports.get.useSuspenseQuery(
@@ -153,15 +154,7 @@ export function ImportReview({ id }: { id: string }) {
   });
   const commit = api.imports.commit.useMutation({
     onSuccess: async (counts) => {
-      const parts = [
-        counts.transactions && `${counts.transactions} transactions`,
-        counts.holdings && `${counts.holdings} holdings`,
-        counts.activity && `${counts.activity} trades and payments`,
-        counts.balances && `the balance`,
-      ].filter(Boolean);
-      setFlash(
-        `Saved ${parts.join(", ") || "nothing"}.${counts.duplicates ? ` ${counts.duplicates} already recorded were left out.` : ""}`,
-      );
+      setFlash(t.imports.importReview.saved(counts));
       await Promise.all([
         utils.imports.invalidate(),
         utils.accounts.invalidate(),
@@ -182,9 +175,7 @@ export function ImportReview({ id }: { id: string }) {
   });
   const restore = api.accounts.restore.useMutation({
     onSuccess: async () => {
-      setFlash(
-        "Original account restored. Its imports and saved records remain attached.",
-      );
+      setFlash(t.imports.importReview.originalAccountRestoredItsImports);
       await Promise.all([
         utils.accounts.invalidate(),
         utils.imports.invalidate(),
@@ -246,7 +237,7 @@ export function ImportReview({ id }: { id: string }) {
         className="text-ink-2 hover:text-ink mb-4 inline-flex items-center gap-1.5 text-sm font-semibold"
       >
         <ArrowLeft className="size-4" />
-        Imports
+        {t.imports.importReview.imports}
       </Link>
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
@@ -268,11 +259,11 @@ export function ImportReview({ id }: { id: string }) {
                   {job.accountName}
                 </Link>
                 <span className="text-ink-3">
-                  {accountTypeLabels[job.accountType!]}
+                  {t.common.accountTypes[job.accountType!]}
                 </span>
               </>
             ) : (
-              "The account was removed"
+              t.imports.importReview.theAccountWasRemoved
             )}
           </p>
         </div>
@@ -282,14 +273,12 @@ export function ImportReview({ id }: { id: string }) {
       {job.accountArchivedAt && job.accountId ? (
         <Notice tone="warn" className="mb-4">
           <p>
-            This import belongs to the archived account{" "}
-            <strong>{job.accountName}</strong>. Its saved records are still
-            there. Adding this broker again creates a separate account; it does
-            not move older imports.
+            {t.imports.importReview.thisImportBelongsToThe}{" "}
+            <strong>{job.accountName}</strong>
+            {t.imports.importReview.itsSavedRecordsAreStill}
           </p>
           <p className="mt-2">
-            Restore the original account to manage these rows and include its
-            holdings in your totals again.
+            {t.imports.importReview.restoreTheOriginalAccountTo}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button
@@ -300,13 +289,13 @@ export function ImportReview({ id }: { id: string }) {
                 if (job.accountId) restore.mutate({ id: job.accountId });
               }}
             >
-              Restore original account
+              {t.imports.importReview.restoreOriginalAccount}
             </Button>
             <Link
               className="font-semibold underline underline-offset-4"
               href={`/accounts/${job.accountId}`}
             >
-              View original account
+              {t.imports.importReview.viewOriginalAccount}
             </Link>
           </div>
           {restore.error ? (
@@ -315,16 +304,13 @@ export function ImportReview({ id }: { id: string }) {
         </Notice>
       ) : !job.accountId ? (
         <Notice tone="warn" className="mb-4">
-          The original account was deleted. This upload is kept for reference.
-          Adding the broker again creates a separate account and does not
-          transfer this import or restore deleted records.
+          {t.imports.importReview.theOriginalAccountWasDeleted}
         </Notice>
       ) : null}
 
       {job.status === "completed" && job.accountId && !job.accountArchivedAt ? (
         <p className="text-ink-2 mb-4 text-sm">
-          Use the trash button beside a saved row to review its removal. The
-          original upload and extracted rows stay available.
+          {t.imports.importReview.useTheTrashButtonBeside}
         </p>
       ) : null}
 
@@ -339,7 +325,9 @@ export function ImportReview({ id }: { id: string }) {
             }
             className="font-semibold underline underline-offset-4"
           >
-            {group === "banking" ? "See them in Spending" : "Open the account"}
+            {group === "banking"
+              ? t.imports.importReview.seeThemInSpending
+              : t.imports.importReview.openTheAccount}
           </Link>
         </Notice>
       ) : null}
@@ -355,24 +343,24 @@ export function ImportReview({ id }: { id: string }) {
             <ReadGlyph />
           </div>
           <p className="font-poster mt-4 text-[26px] font-bold">
-            Reading your statement
+            {t.imports.importReview.readingYourStatement}
           </p>
           <p className="text-ink-2 mt-1 max-w-md text-sm">
-            Every line is being read and sorted. A few pages usually take under
-            a minute; you can leave this page and come back.
+            {t.imports.importReview.everyLineIsBeingRead}
           </p>
         </section>
       ) : failed ? (
         <section className="card p-6 sm:p-8">
           <p className="font-poster text-[24px] font-bold">
-            This one couldn&apos;t be read
+            {t.imports.importReview.thisOneCouldntBeRead}
           </p>
           <p className="text-ink-2 mt-2 text-sm">
             {job.stale
               ? job.status === "queued"
-                ? "Reading never started, probably because the server restarted."
-                : "Reading stopped part-way, probably because the server restarted."
-              : (job.error ?? "Something went wrong reading the file.")}
+                ? t.imports.importReview.readingNeverStartedProbablyBecause
+                : t.imports.importReview.readingStoppedPartwayProbablyBecause
+              : (job.error ??
+                t.imports.importReview.somethingWentWrongReadingThe)}
           </p>
           <div className="mt-5 flex flex-wrap gap-2">
             <Button
@@ -380,7 +368,7 @@ export function ImportReview({ id }: { id: string }) {
               loading={retry.isPending}
             >
               <RotateCcw className="size-4" />
-              Try again
+              {t.imports.importReview.tryAgain}
             </Button>
             <Button
               variant="ghost"
@@ -388,7 +376,7 @@ export function ImportReview({ id }: { id: string }) {
               loading={discard.isPending}
             >
               <Trash2 className="size-4" />
-              Remove upload
+              {t.imports.importReview.removeUpload}
             </Button>
           </div>
           {retry.error ? (
@@ -403,10 +391,7 @@ export function ImportReview({ id }: { id: string }) {
           {job.status === "needs_review" &&
           balanceCheck.requiresAcknowledgment ? (
             <Notice tone="warn">
-              <p>
-                Compare the rows with your statement. Correct the difference or
-                confirm you have checked it.
-              </p>
+              <p>{t.imports.importReview.compareTheRowsWithYour}</p>
               <label className="mt-3 flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -421,28 +406,24 @@ export function ImportReview({ id }: { id: string }) {
                   }
                   className="accent-ink size-4"
                 />
-                I&apos;ve checked this — save anyway
+                {t.imports.importReview.iveCheckedThisSaveAnyway}
               </label>
             </Notice>
           ) : null}
           {job.status === "needs_review" && undecided.length > 0 ? (
             <Notice tone="warn">
-              {undecided.length} possible{" "}
-              {undecided.length === 1 ? "duplicate needs" : "duplicates need"} a
-              decision. Choose Keep or Skip on each highlighted row before
-              saving.
+              {t.imports.importReview.duplicates(undecided.length)}
             </Notice>
           ) : null}
           {job.status === "completed" && job.importedHoldingsAdjusted ? (
             <Notice>
-              The holdings from this import have been adjusted in the account.
-              The rows below show the original extraction.{" "}
+              {t.imports.importReview.theHoldingsFromThisImport}{" "}
               {job.accountId ? (
                 <Link
                   className="font-semibold underline underline-offset-4"
                   href={`/accounts/${job.accountId}`}
                 >
-                  View adjusted holdings
+                  {t.imports.importReview.viewAdjustedHoldings}
                 </Link>
               ) : null}
             </Notice>
@@ -455,19 +436,17 @@ export function ImportReview({ id }: { id: string }) {
               r.committedRecordId,
           ) ? (
             <Notice tone="warn">
-              The holdings or balance entry from this import has been removed or
-              replaced. The upload and any imported trades remain saved.
+              {t.imports.importReview.theHoldingsOrBalanceEntry}
             </Notice>
           ) : null}
           {isHistorical ? (
             <Notice tone="warn">
-              {job.status === "completed"
-                ? "Saved"
-                : "This statement will be saved"}{" "}
-              for {formatDate(holdingsDate)}. Your account has a newer{" "}
-              {group === "banking" ? "balance" : "holdings entry"} dated{" "}
-              {formatDate(job.latestHoldingsAsOf!)}. The newer entry remains the
-              current account value.
+              {t.imports.importReview.historical(
+                job.status === "completed",
+                formatDate(holdingsDate, locale),
+                group === "banking",
+                formatDate(job.latestHoldingsAsOf!, locale),
+              )}
               {job.accountId ? (
                 <>
                   {" "}
@@ -475,7 +454,7 @@ export function ImportReview({ id }: { id: string }) {
                     className="font-semibold underline underline-offset-4"
                     href={`/accounts/${job.accountId}`}
                   >
-                    View account
+                    {t.imports.importReview.viewAccount}
                   </Link>
                 </>
               ) : null}
@@ -483,18 +462,14 @@ export function ImportReview({ id }: { id: string }) {
           ) : null}
           {job.status === "needs_review" && needsDate && !asOf ? (
             <Notice tone="warn">
-              Choose the statement date before saving. Enter the date these
-              holdings, balances or trades belong to in &ldquo;As of&rdquo;
-              below.
+              {t.imports.importReview.chooseTheStatementDateBefore}
             </Notice>
           ) : null}
           {job.status === "needs_review" &&
           hasHoldings &&
           job.statementDates.includes(asOf) ? (
             <Notice tone="warn">
-              Saving replaces the statement holdings or balance already saved
-              for {formatDate(asOf)}. The selected rows become the complete
-              entry for that date; existing transactions and trades stay saved.
+              {t.imports.importReview.replaceDate(formatDate(asOf, locale))}
             </Notice>
           ) : null}
 
@@ -545,18 +520,22 @@ export function ImportReview({ id }: { id: string }) {
           {job.status === "needs_review" ? (
             <div className="card fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center gap-3 px-4 py-3 lg:sticky lg:inset-x-auto lg:bottom-4">
               <p className="text-ink-2 mr-auto text-[13px]">
-                <span className="text-ink font-semibold">
-                  {accepted.length}
-                </span>{" "}
-                of {rows.length} selected
-                {undecided.length > 0 ? ` · ${undecided.length} undecided` : ""}
+                {t.imports.importReview.selected(
+                  accepted.length,
+                  rows.length,
+                  undecided.length,
+                )}
                 {mismatches.length > 0 ? (
-                  <span className="text-warn">{` · ${mismatches.length} amount/direction warnings (saving allowed)`}</span>
+                  <span className="text-warn">
+                    {t.imports.importReview.warnings(mismatches.length)}
+                  </span>
                 ) : null}
               </p>
               {needsDate ? (
                 <label className="flex items-center gap-2 text-[13px]">
-                  <span className="text-ink-2">As of</span>
+                  <span className="text-ink-2">
+                    {t.imports.importReview.asOf}
+                  </span>
                   <Input
                     type="date"
                     value={asOf}
@@ -571,7 +550,7 @@ export function ImportReview({ id }: { id: string }) {
                 onClick={() => discard.mutate({ jobId: id })}
                 loading={discard.isPending}
               >
-                Discard
+                {t.imports.importReview.discard}
               </Button>
               <Button
                 onClick={() =>
@@ -594,7 +573,10 @@ export function ImportReview({ id }: { id: string }) {
                 }
               >
                 <Check className="size-4" />
-                Save {accepted.length} to {job.accountName}
+                {t.imports.importReview.saveTo(
+                  accepted.length,
+                  job.accountName,
+                )}
               </Button>
               {commit.error ? (
                 <Notice tone="error" className="w-full">
@@ -612,9 +594,7 @@ export function ImportReview({ id }: { id: string }) {
         onClose={() => setRemoving(null)}
         onRemoved={async () => {
           setRemoving(null);
-          setFlash(
-            "Row removed from the account. The original extraction is retained below.",
-          );
+          setFlash(t.imports.importReview.rowRemovedFromTheAccount);
           await Promise.all([
             utils.imports.invalidate(),
             utils.accounts.invalidate(),
@@ -635,27 +615,43 @@ function Summary({
   job: Job;
   check: ReturnType<typeof checkImportBalance>;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const s = job.summary;
   if (!s) return null;
   const currency = check.currency;
   const facts = [
-    { label: "Document", value: DOCUMENT_LABELS[s.documentType] ?? "Document" },
     {
-      label: "Period",
+      label: t.imports.importReview.document,
+      value:
+        documentLabels(t)[s.documentType] ?? t.imports.importReview.document,
+    },
+    {
+      label: t.imports.importReview.period,
       value:
         s.periodStart && s.periodEnd
           ? s.periodStart === s.periodEnd
-            ? formatDate(s.periodEnd)
-            : `${s.periodStart.slice(0, 4) === s.periodEnd.slice(0, 4) ? shortDate(s.periodStart) : formatDate(s.periodStart)} – ${formatDate(s.periodEnd)}`
+            ? formatDate(s.periodEnd, locale)
+            : `${s.periodStart.slice(0, 4) === s.periodEnd.slice(0, 4) ? shortDate(s.periodStart, locale) : formatDate(s.periodStart, locale)} – ${formatDate(s.periodEnd, locale)}`
           : s.periodEnd
-            ? formatDate(s.periodEnd)
-            : "Not shown",
+            ? formatDate(s.periodEnd, locale)
+            : t.imports.importReview.notShown,
     },
     ...(check.openingBalance !== null
-      ? [{ label: "Opening", value: money(check.openingBalance, currency) }]
+      ? [
+          {
+            label: t.imports.importReview.opening,
+            value: money(check.openingBalance, currency),
+          },
+        ]
       : []),
     ...(check.closingBalance !== null
-      ? [{ label: "Closing", value: money(check.closingBalance, currency) }]
+      ? [
+          {
+            label: t.imports.importReview.closing,
+            value: money(check.closingBalance, currency),
+          },
+        ]
       : []),
   ];
   return (
@@ -674,58 +670,61 @@ function Summary({
         </dl>
         <div className="mt-5 space-y-3 text-[13px]">
           {check.provisional ? (
-            <Tag tone="warn">Provisional — decide possible duplicates</Tag>
+            <Tag tone="warn">
+              {t.imports.importReview.provisionalDecidePossibleDuplicates}
+            </Tag>
           ) : null}
           {!check.complete ? (
             <p className="text-ink-2">
-              Unverified — no opening/closing balance to check against
-              {check.openingBalance !== null && check.closingBalance !== null
-                ? " for a complete statement"
-                : ""}
-              .
+              {t.imports.summary.unverified(
+                check.openingBalance !== null && check.closingBalance !== null,
+              )}
             </p>
           ) : null}
           {check.currencies.map((c) =>
             c.extraction.difference === null ? (
               c.lineCount > 0 ? (
                 <p key={c.currency} className="text-ink-2">
-                  {c.lineCount} {c.lineCount === 1 ? "line" : "lines"} in{" "}
-                  {c.currency} not included — no opening/closing balances.
+                  {t.imports.summary.excluded(c.lineCount, c.currency)}
                 </p>
               ) : null
             ) : (
               <div key={c.currency} className="space-y-1">
-                <p className="font-semibold">Balance check · {c.currency}</p>
+                <p className="font-semibold">
+                  {t.imports.summary.balanceCheck(c.currency)}
+                </p>
                 {(
                   [
-                    ["Extraction balances", c.extraction],
-                    ["Saved records will balance", c.saved],
+                    [t.imports.importReview.extractionBalances, c.extraction],
+                    [t.imports.importReview.savedRecordsWillBalance, c.saved],
                   ] as const
                 ).map(([label, result]) => (
                   <p
                     key={label}
                     className={result.balances ? "text-gain" : "text-warn"}
                   >
-                    {label}:{" "}
-                    {result.balances
-                      ? "matches"
-                      : `${money(new Decimal(result.difference!).abs(), c.currency)} ${new Decimal(result.difference!).isPositive() ? "over" : "short of"} closing`}
-                    .
+                    {t.imports.summary.result(
+                      label,
+                      result.balances,
+                      money(new Decimal(result.difference!).abs(), c.currency),
+                      new Decimal(result.difference!).isPositive(),
+                    )}
                   </p>
                 ))}
                 {c.skippedRows.length > 0 ? (
                   <div className="text-ink-2">
                     <p>
-                      {c.skippedExplainDifference
-                        ? "Skipped rows explain the difference"
-                        : "Skipped rows not being saved"}
-                      : {money(c.skippedTotal, c.currency, true)}. Already
-                      recorded rows are included.
+                      {t.imports.summary.skipped(
+                        c.skippedExplainDifference,
+                        money(c.skippedTotal, c.currency, true),
+                      )}
                     </p>
                     <ul className="mt-1 space-y-1">
                       {c.skippedRows.map((r) => (
                         <li key={r.id}>
-                          {r.postedDate ? `${shortDate(r.postedDate)} · ` : ""}
+                          {r.postedDate
+                            ? `${shortDate(r.postedDate, locale)} · `
+                            : ""}
                           {r.description} · {money(r.amount, c.currency, true)}
                         </li>
                       ))}
@@ -736,7 +735,9 @@ function Summary({
             ),
           )}
           {s.balanceAcknowledgment ? (
-            <Tag tone="warn">Saved with an acknowledged balance mismatch</Tag>
+            <Tag tone="warn">
+              {t.imports.importReview.savedWithAnAcknowledgedBalance}
+            </Tag>
           ) : null}
         </div>
         {s.warnings.length > 0 ? (
@@ -751,7 +752,7 @@ function Summary({
         ) : null}
         {job.model ? (
           <p className="text-ink-3 mt-4 font-mono text-[11px] tracking-wide">
-            READ BY {job.model.toUpperCase()}
+            {t.imports.summary.readBy(job.model.toUpperCase())}
           </p>
         ) : null}
       </div>
@@ -769,21 +770,23 @@ function RowControl({
   onChange: (checked: boolean) => void;
   label: string;
 }) {
+  const t = useT();
   const controls = useContext(RowControls);
   if (!controls.completed)
     return (
       <Toggle {...props} disabled={props.disabled || !controls.canRemove} />
     );
-  if (row.removed) return <Tag>Removed</Tag>;
-  if (!row.committedRecordId) return <Tag>Excluded</Tag>;
+  if (row.removed) return <Tag>{t.imports.importReview.removed}</Tag>;
+  if (!row.committedRecordId)
+    return <Tag>{t.imports.importReview.excluded}</Tag>;
   return (
     <button
       type="button"
-      aria-label={`Remove ${props.label.replace(/^Save /, "")}`}
+      aria-label={t.imports.importReview.remove(props.label)}
       title={
         controls.canRemove
-          ? "Review removal"
-          : "Restore the original account to manage this row"
+          ? t.imports.importReview.reviewRemoval
+          : t.imports.importReview.restoreTheOriginalAccountToText
       }
       disabled={!controls.canRemove}
       onClick={() => controls.onRemove(row)}
@@ -826,6 +829,7 @@ function SelectAll({
   disabled: boolean;
   onDecision: (ids: string[], decision: "accept" | "skip") => void;
 }) {
+  const t = useT();
   if (disabled || rows.length < 2) return null;
   return (
     <div className="flex gap-1">
@@ -839,7 +843,7 @@ function SelectAll({
           )
         }
       >
-        All
+        {t.imports.importReview.all}
       </Button>
       <Button
         variant="ghost"
@@ -851,16 +855,18 @@ function SelectAll({
           )
         }
       >
-        None
+        {t.imports.importReview.none}
       </Button>
     </div>
   );
 }
 
 function MatchTag({ status }: { status: Row["matchStatus"] }) {
-  if (status === "duplicate") return <Tag tone="outline">Already recorded</Tag>;
+  const t = useT();
+  if (status === "duplicate")
+    return <Tag tone="outline">{t.imports.importReview.alreadyRecorded}</Tag>;
   if (status === "possible_duplicate")
-    return <Tag tone="warn">Similar one recorded</Tag>;
+    return <Tag tone="warn">{t.imports.importReview.similarOneRecorded}</Tag>;
   return null;
 }
 
@@ -873,11 +879,12 @@ function DuplicateDecision({
   disabled: boolean;
   onDecision: (ids: string[], decision: "accept" | "skip") => void;
 }) {
+  const t = useT();
   if (disabled || row.matchStatus !== "possible_duplicate") return null;
   return (
     <span className="mt-2 flex items-center gap-2">
       {row.decision === "pending" ? (
-        <Tag tone="warn">Needs decision</Tag>
+        <Tag tone="warn">{t.imports.importReview.needsDecision}</Tag>
       ) : null}
       <Button
         variant="secondary"
@@ -885,7 +892,7 @@ function DuplicateDecision({
         disabled={row.decision === "accept"}
         onClick={() => onDecision([row.id], "accept")}
       >
-        Keep
+        {t.imports.importReview.keep}
       </Button>
       <Button
         variant="ghost"
@@ -893,7 +900,7 @@ function DuplicateDecision({
         disabled={row.decision === "skip"}
         onClick={() => onDecision([row.id], "skip")}
       >
-        Skip
+        {t.imports.importReview.skip}
       </Button>
     </span>
   );
@@ -912,14 +919,17 @@ function TransactionsSection({
   onCategory: (rowId: string, categoryId: string | null) => void;
   onTransfer: (rowId: string, isTransfer: boolean) => void;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const ordered = orderCategories(categories);
-  const currency = rows[0]?.data.currency ?? "SGD";
-  const sum = (sign: 1 | -1) =>
+  const currencies = [...new Set(rows.map((r) => r.data.currency))];
+  const sum = (currency: string, sign: 1 | -1) =>
     rows
       .filter(
         (r) =>
           r.decision === "accept" &&
+          r.data.currency === currency &&
           !r.data.isTransfer &&
           new Decimal(r.data.amount).isPositive() === sign > 0,
       )
@@ -928,10 +938,17 @@ function TransactionsSection({
 
   return (
     <Section
-      title={`Transactions · ${rows.length}`}
+      title={t.imports.importReview.transactions(rows.length)}
       description={
         !disabled && rows.length > 0
-          ? `Selected: ${money(sum(1), currency)} in, ${money(sum(-1), currency)} out. Uncheck anything you don't want saved.`
+          ? t.imports.importReview.totals(
+              currencies
+                .map((currency) => money(sum(currency, 1), currency))
+                .join(" · "),
+              currencies
+                .map((currency) => money(sum(currency, -1), currency))
+                .join(" · "),
+            )
           : undefined
       }
       actions={
@@ -939,7 +956,9 @@ function TransactionsSection({
       }
     >
       {rows.length === 0 ? (
-        <p className="text-ink-2 text-sm">No transactions were found.</p>
+        <p className="text-ink-2 text-sm">
+          {t.imports.importReview.noTransactionsWereFound}
+        </p>
       ) : (
         <ul className="-mx-1">
           {rows.map((r) => {
@@ -959,12 +978,12 @@ function TransactionsSection({
                     row={r}
                     checked={r.decision === "accept"}
                     disabled={disabled}
-                    label={`Save ${r.data.description}`}
+                    label={t.imports.importReview.saveRow(r.data.description)}
                     onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
                   />
                 </span>
                 <span className="figures text-ink-3 hidden font-mono text-[12px] sm:block">
-                  {shortDate(r.data.postedDate)}
+                  {shortDate(r.data.postedDate, locale)}
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-[14px] font-semibold">
@@ -972,20 +991,26 @@ function TransactionsSection({
                   </span>
                   <span className="text-ink-3 block truncate text-[12px]">
                     <span className="sm:hidden">
-                      {shortDate(r.data.postedDate)}
+                      {shortDate(r.data.postedDate, locale)}
                       {r.data.merchant ? " · " : ""}
                     </span>
                     {r.data.merchant ? r.data.description : null}
-                    {r.data.reference ? ` · Ref ${r.data.reference}` : null}
+                    {r.data.reference
+                      ? t.imports.importReview.reference(r.data.reference)
+                      : null}
                     {r.data.originalAmount && r.data.originalCurrency
                       ? ` · ${money(r.data.originalAmount, r.data.originalCurrency)}`
                       : null}
                   </span>
                   <span className="mt-1 flex flex-wrap gap-1">
-                    {r.data.isTransfer ? <Tag>Transfer</Tag> : null}
+                    {r.data.isTransfer ? (
+                      <Tag>{t.imports.importReview.transfer}</Tag>
+                    ) : null}
                     <MatchTag status={r.matchStatus} />
                     {r.data.signMismatch ? (
-                      <Tag tone="warn">Check amount/direction</Tag>
+                      <Tag tone="warn">
+                        {t.imports.importReview.checkAmountdirection}
+                      </Tag>
                     ) : null}
                   </span>
                   <AmountWarning row={r} disabled={disabled} />
@@ -1037,6 +1062,7 @@ function AmountWarning({
   row: RowOf<"transaction">;
   disabled: boolean;
 }) {
+  const t = useT();
   const controls = useContext(RowControls);
   const data = row.data;
   if (!data.signMismatch) return null;
@@ -1048,8 +1074,10 @@ function AmountWarning({
         : "";
   return (
     <span className="text-warn mt-1 block text-[12px]">
-      Statement shows {direction}
-      {data.printedAmount ?? new Decimal(data.amount).abs().toFixed()}.
+      {t.imports.importReview.printed(
+        direction,
+        data.printedAmount ?? new Decimal(data.amount).abs().toFixed(),
+      )}
       {!disabled ? (
         <span className="mt-1 flex flex-wrap gap-1">
           {data.suggestedAmount !== null ? (
@@ -1059,7 +1087,9 @@ function AmountWarning({
               variant="secondary"
               onClick={() => controls.onAmount(row.id, data.suggestedAmount!)}
             >
-              Use {money(data.suggestedAmount, data.currency, true)}
+              {t.imports.importReview.useAmount(
+                money(data.suggestedAmount, data.currency, true),
+              )}
             </Button>
           ) : null}
           <Button
@@ -1068,7 +1098,7 @@ function AmountWarning({
             variant="ghost"
             onClick={() => controls.onConfirmAmount(row.id)}
           >
-            Confirm current amount
+            {t.imports.importReview.confirmCurrentAmount}
           </Button>
         </span>
       ) : null}
@@ -1086,6 +1116,7 @@ function RowAmount({
     | RowOf<"investment_transaction">;
   disabled: boolean;
 }) {
+  const t = useT();
   const controls = useContext(RowControls);
   const [draft, setDraft] = useState(row.data.amount);
   const editing = controls.editingAmount === row.id;
@@ -1094,8 +1125,14 @@ function RowAmount({
     row.kind === "transaction"
       ? row.data.description
       : row.kind === "cash_balance"
-        ? `${row.data.currency} ${row.data.bucket ?? "closing/cash"} balance`
-        : `${row.data.type} ${row.data.symbol ?? "activity"}`;
+        ? t.imports.importReview.balanceLabel(
+            row.data.currency,
+            row.data.bucket ? t.common.cpfBuckets[row.data.bucket] : null,
+          )
+        : t.imports.importReview.activityLabel(
+            activityLabels(t)[row.data.type] ?? row.data.type,
+            row.data.symbol,
+          );
   return (
     <span className="inline-grid gap-1">
       {money(row.data.amount, row.data.currency, row.kind !== "cash_balance")}
@@ -1103,19 +1140,19 @@ function RowAmount({
         <button
           type="button"
           className="text-ink-3 text-right font-sans text-[12px] font-normal underline"
-          aria-label={`Edit amount for ${label}`}
+          aria-label={t.imports.importReview.editAmountFor(label)}
           onClick={() => {
             setDraft(row.data.amount);
             controls.setEditingAmount(row.id);
           }}
         >
-          Edit amount
+          {t.imports.importReview.editAmount}
         </button>
       ) : null}
       {!disabled && editing ? (
         <span className="grid max-w-52 gap-1 font-sans font-normal">
           <Input
-            aria-label={`Amount for ${label}`}
+            aria-label={t.imports.importReview.amountFor(label)}
             inputMode="decimal"
             value={draft}
             aria-invalid={!valid}
@@ -1124,8 +1161,8 @@ function RowAmount({
           />
           <span className="text-ink-3 text-[11px]">
             {row.kind === "cash_balance"
-              ? "Negative = debt/overdraft; positive = cash/credit"
-              : "Negative = money out; positive = money in"}
+              ? t.imports.importReview.negativeDebtoverdraftPositiveCashcredit
+              : t.imports.importReview.negativeMoneyOutPositiveMoney}
           </span>
           <Button
             type="button"
@@ -1136,7 +1173,7 @@ function RowAmount({
               setDraft(new Decimal(draft.trim()).negated().toFixed())
             }
           >
-            Flip direction
+            {t.imports.importReview.flipDirection}
           </Button>
           <span className="flex justify-end gap-1">
             <Button
@@ -1145,7 +1182,7 @@ function RowAmount({
               variant="ghost"
               onClick={() => controls.setEditingAmount(null)}
             >
-              Cancel
+              {t.imports.importReview.cancel}
             </Button>
             <Button
               type="button"
@@ -1156,7 +1193,7 @@ function RowAmount({
                 controls.setEditingAmount(null);
               }}
             >
-              Apply amount
+              {t.imports.importReview.applyAmount}
             </Button>
           </span>
         </span>
@@ -1178,6 +1215,7 @@ function CategoryPicker({
   onCategory: (rowId: string, categoryId: string | null) => void;
   onTransfer: (rowId: string, isTransfer: boolean) => void;
 }) {
+  const t = useT();
   return (
     <span className="grid gap-1">
       <TransactionTypeSelect
@@ -1188,16 +1226,18 @@ function CategoryPicker({
         onChange={(value) => onTransfer(row.id, value === "transfer")}
       />
       <Select
-        aria-label="Category"
+        aria-label={t.imports.importReview.category}
         value={row.data.categoryId ?? ""}
         disabled={disabled}
         onChange={(e) => onCategory(row.id, e.target.value || null)}
         className={cn("h-8 text-[12px]", !row.data.categoryId && "text-ink-3")}
       >
-        <option value="">Uncategorised</option>
+        <option value="">{t.imports.importReview.uncategorised}</option>
         {categories.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.parentId ? `— ${c.name}` : c.name}
+            {c.parentId
+              ? `— ${categoryLabel(t, c.name)}`
+              : categoryLabel(t, c.name)}
           </option>
         ))}
       </Select>
@@ -1216,11 +1256,13 @@ function BalanceSection({
   disabled: boolean;
   onDecision: (ids: string[], decision: "accept" | "skip") => void;
 }) {
+  const t = useT();
+  const locale = useLocale();
   if (rows.length === 0) return null;
   return (
     <Section
-      title="Closing balance"
-      description="Saved as the account's balance, so your net worth matches the statement."
+      title={t.imports.importReview.closingBalance}
+      description={t.imports.importReview.savedAsTheAccountsBalance}
     >
       {rows.map((r) => (
         <div key={r.id} className="flex items-center gap-3 py-2 text-sm">
@@ -1230,18 +1272,24 @@ function BalanceSection({
             disabled={disabled}
             label={
               r.data.bucket
-                ? `Save the ${cpfBucketLabels[r.data.bucket]} balance`
-                : "Save the closing balance"
+                ? t.imports.importReview.saveBucket(
+                    t.common.cpfBuckets[r.data.bucket],
+                  )
+                : t.imports.importReview.saveTheClosingBalance
             }
             onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
           />
           <span>
-            Record{" "}
+            {t.imports.importReview.recordBefore}{" "}
             <span className="figures font-mono font-semibold">
               <RowAmount row={r} disabled={disabled} />
             </span>{" "}
-            as the {r.data.bucket ? `${cpfBucketLabels[r.data.bucket]} ` : ""}
-            balance on {asOf ? formatDate(asOf) : "the statement date"}
+            {t.imports.importReview.recordAfter(
+              r.data.bucket ? t.common.cpfBuckets[r.data.bucket] : null,
+              asOf
+                ? formatDate(asOf, locale)
+                : t.imports.importReview.statementDate,
+            )}
           </span>
         </div>
       ))}
@@ -1260,17 +1308,20 @@ function HoldingsSection({
   disabled: boolean;
   onDecision: (ids: string[], decision: "accept" | "skip") => void;
 }) {
+  const t = useT();
   const all = [...positions, ...cash];
   return (
     <Section
-      title={`Holdings · ${positions.length}`}
-      description="Saved together as what the account held on the date below. A later statement replaces it."
+      title={t.imports.importReview.holdings(positions.length)}
+      description={t.imports.importReview.savedTogetherAsWhatThe}
       actions={
         <SelectAll rows={all} disabled={disabled} onDecision={onDecision} />
       }
     >
       {all.length === 0 ? (
-        <p className="text-ink-2 text-sm">No holdings or cash were found.</p>
+        <p className="text-ink-2 text-sm">
+          {t.imports.importReview.noHoldingsOrCashWere}
+        </p>
       ) : (
         <ul className="-mx-1">
           {positions.map((r) => (
@@ -1285,7 +1336,7 @@ function HoldingsSection({
                 row={r}
                 checked={r.decision === "accept"}
                 disabled={disabled}
-                label={`Save ${r.data.symbol}`}
+                label={t.imports.importReview.saveSymbol(r.data.symbol)}
                 onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
               />
               <span className="min-w-0">
@@ -1299,7 +1350,7 @@ function HoldingsSection({
                 </span>
                 <span className="text-ink-3 block truncate text-[12px]">
                   {[
-                    assetClassLabels[r.data.assetClass],
+                    t.common.assetClasses[r.data.assetClass],
                     r.data.name,
                     `${formatQuantity(r.data.quantity)}${r.data.price ? ` × ${money(r.data.price, r.data.currency)}` : ""}`,
                   ]
@@ -1315,7 +1366,7 @@ function HoldingsSection({
                         new Decimal(r.data.quantity).times(r.data.price),
                         r.data.currency,
                       )
-                    : "No price"}
+                    : t.imports.importReview.noPrice}
               </span>
             </li>
           ))}
@@ -1331,11 +1382,11 @@ function HoldingsSection({
                 row={r}
                 checked={r.decision === "accept"}
                 disabled={disabled}
-                label={`Save ${r.data.currency} cash`}
+                label={t.imports.importReview.saveCash(r.data.currency)}
                 onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
               />
               <span className="text-[14px] font-semibold">
-                Cash · {r.data.currency}
+                {t.imports.importReview.cash(r.data.currency)}
               </span>
               <span className="figures text-right font-mono text-[13px] font-semibold">
                 <RowAmount row={r} disabled={disabled} />
@@ -1357,11 +1408,13 @@ function ActivitySection({
   disabled: boolean;
   onDecision: (ids: string[], decision: "accept" | "skip") => void;
 }) {
+  const t = useT();
+  const locale = useLocale();
   if (rows.length === 0) return null;
   return (
     <Section
-      title={`Trades and payments · ${rows.length}`}
-      description="Buys, sells, dividends, fees and deposits listed on the statement."
+      title={t.imports.importReview.activity(rows.length)}
+      description={t.imports.importReview.buysSellsDividendsFeesAnd}
       actions={
         <SelectAll rows={rows} disabled={disabled} onDecision={onDecision} />
       }
@@ -1380,22 +1433,27 @@ function ActivitySection({
               row={r}
               checked={r.decision === "accept"}
               disabled={disabled}
-              label={`Save ${r.data.type} ${r.data.symbol ?? ""}`}
+              label={t.imports.importReview.saveActivity(
+                activityLabels(t)[r.data.type] ?? r.data.type,
+                r.data.symbol,
+              )}
               onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
             />
             <span className="min-w-0">
               <span className="block truncate text-[14px] font-semibold">
-                {ACTIVITY_LABELS[r.data.type]}
+                {activityLabels(t)[r.data.type]}
                 {r.data.symbol ? ` · ${r.data.symbol}` : ""}
               </span>
               <span className="text-ink-3 block truncate text-[12px]">
                 {[
-                  formatDate(r.data.tradeDate),
+                  formatDate(r.data.tradeDate, locale),
                   r.data.quantity && r.data.price
                     ? `${formatQuantity(r.data.quantity)} × ${money(r.data.price, r.data.currency)}`
                     : null,
                   r.data.description,
-                  r.data.reference ? `Ref ${r.data.reference}` : null,
+                  r.data.reference
+                    ? t.imports.importReview.ref(r.data.reference)
+                    : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}

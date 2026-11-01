@@ -1,3 +1,4 @@
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 import { requireEnrolledSession } from "~/server/auth";
 
@@ -5,13 +6,17 @@ import { AccountsView } from "~/components/accounts/accounts-view";
 import { PageHeader } from "~/components/ui/panel";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Accounts" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.accounts.meta.title };
+}
 
 export default async function AccountsPage({
   searchParams,
 }: {
   searchParams: Promise<{ add?: string }>;
 }) {
+  const t = await getT();
   await requireEnrolledSession();
   const { add } = await searchParams;
   void api.accounts.list.prefetch();
@@ -21,8 +26,8 @@ export default async function AccountsPage({
   return (
     <HydrateClient>
       <PageHeader
-        title="Accounts"
-        description="Investments are valued from what they hold; bank and card accounts from their balance and transactions. Each keeps its own currency."
+        title={t.accounts.meta.title}
+        description={t.accounts.meta.description}
       />
       <AccountsView
         initialAdd={

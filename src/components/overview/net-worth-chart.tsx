@@ -1,4 +1,5 @@
 "use client";
+import { useT, useLocale } from "~/i18n/client";
 
 import Decimal from "decimal.js";
 import { useMemo, useState } from "react";
@@ -21,12 +22,12 @@ type Kind = "recorded" | "estimated" | "backfilled";
 const kindOf = (p: NetWorthPoint): Kind =>
   p.backfilled ? "backfilled" : p.estimated ? "estimated" : "recorded";
 
-const RANGES = [
-  { key: "3m", label: "3M", months: 3 },
-  { key: "1y", label: "1Y", months: 12 },
-  { key: "all", label: "All", months: null },
+const RANGE_VALUES = [
+  { key: "3m", months: 3 },
+  { key: "1y", months: 12 },
+  { key: "all", months: null },
 ] as const;
-type RangeKey = (typeof RANGES)[number]["key"];
+type RangeKey = (typeof RANGE_VALUES)[number]["key"];
 
 const DAY_MS = 86_400_000;
 const time = (date: string) => new Date(`${date}T00:00:00Z`).getTime();
@@ -74,6 +75,12 @@ export function NetWorthChart({
   series: NetWorthSeries[];
   currency: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
+  const RANGES = RANGE_VALUES.map((r) => ({
+    ...r,
+    label: t.overview.netWorthChart.ranges[r.key],
+  }));
   const [selected, setSelected] = useState(series[0]!.key);
   const current = series.find((s) => s.key === selected) ?? series[0]!;
   const points = current.points;
@@ -88,7 +95,7 @@ export function NetWorthChart({
   const [active, setActive] = useState<number | null>(null);
 
   const shown = useMemo(() => {
-    const months = RANGES.find((r) => r.key === range)?.months;
+    const months = RANGE_VALUES.find((r) => r.key === range)?.months;
     if (!months) return points;
     const from = monthsBefore(last.date, months);
     // Start from the last figure before the range so the line enters from its true level.
@@ -156,7 +163,7 @@ export function NetWorthChart({
         {series.length > 1 ? (
           <div className="mb-4">
             <FilterTabs
-              label="Net worth chart data"
+              label={t.overview.netWorthChart.netWorthChartData}
               // Four options do not fit across a phone; a 2×2 grid keeps every one in view.
               className="max-sm:grid max-sm:w-full max-sm:grid-cols-2 max-sm:rounded-[1.25rem] max-sm:[&>button]:justify-center"
               value={current.key}
@@ -180,7 +187,9 @@ export function NetWorthChart({
                 </span>
               </>
             ) : (
-              <span className="eyebrow mr-2">Over time</span>
+              <span className="eyebrow mr-2">
+                {t.overview.netWorthChart.overTime}
+              </span>
             )}
             {!change.isZero() ? (
               <span
@@ -193,19 +202,25 @@ export function NetWorthChart({
                   {formatMoney(change.toFixed(2), currency, { signed: true })}
                 </span>
                 {first.backfilled ? (
-                  <span aria-label="backfilled">*</span>
+                  <span aria-label={t.overview.netWorthChart.backfilledLabel}>
+                    *
+                  </span>
                 ) : null}
               </span>
             ) : (
-              <span className="text-ink-2">No change</span>
+              <span className="text-ink-2">
+                {t.overview.netWorthChart.noChange}
+              </span>
             )}{" "}
-            <span className="text-ink-2">since {formatDate(first.date)}</span>
+            <span className="text-ink-2">
+              {t.overview.netWorthChart.since(formatDate(first.date, locale))}
+            </span>
           </p>
           {ranges.length > 1 ? (
             <div
               className="flex gap-1"
               role="group"
-              aria-label="Net worth chart range"
+              aria-label={t.overview.netWorthChart.netWorthChartRange}
             >
               {ranges.map((r) => (
                 <button
@@ -248,7 +263,13 @@ export function NetWorthChart({
           className="relative h-40 min-w-0 flex-1 touch-pan-y outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-art-cobalt)]"
           tabIndex={0}
           role="group"
-          aria-label={`${current.label} from ${formatDate(first.date)} to ${formatDate(last.date)}: ${formatMoney(first.total, currency)} to ${formatMoney(last.total, currency)}. Use the left and right arrow keys to read each date.`}
+          aria-label={t.overview.netWorthChart.chartDescription(
+            current.label,
+            formatDate(first.date, locale),
+            formatDate(last.date, locale),
+            formatMoney(first.total, currency),
+            formatMoney(last.total, currency),
+          )}
           onPointerMove={(e) =>
             setActive(
               nearest(e.clientX, e.currentTarget.getBoundingClientRect()),
@@ -280,7 +301,7 @@ export function NetWorthChart({
             >
               {band.to - band.from > 12 ? (
                 <span className="text-ink-3 absolute top-1 left-1.5 text-[10px] font-medium">
-                  Backfilled*
+                  {t.overview.netWorthChart.backfilled}
                 </span>
               ) : null}
             </div>
@@ -348,7 +369,7 @@ export function NetWorthChart({
             >
               <p className="text-ink-2">
                 {isGroup ? `${current.label} · ` : ""}
-                {formatDate(focus.date)}
+                {formatDate(focus.date, locale)}
               </p>
               <p className="figures mt-0.5 text-[14px] font-semibold">
                 <span className="sensitive">
@@ -359,9 +380,10 @@ export function NetWorthChart({
                 <p className="text-ink-3 mt-0.5">
                   {[
                     focus.backfilled
-                      ? "Backfilled*"
-                      : focus.estimated && "Estimated from your entries",
-                    focus.partial && "partial total",
+                      ? t.overview.netWorthChart.backfilled
+                      : focus.estimated &&
+                        t.overview.netWorthChart.estimatedFromYourEntries,
+                    focus.partial && t.overview.netWorthChart.partialTotal,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
@@ -372,8 +394,8 @@ export function NetWorthChart({
         </div>
       </div>
       <div className="text-ink-3 mt-2 flex justify-between pl-[3.25rem] text-[11px]">
-        <span>{formatDate(first.date)}</span>
-        <span>{formatDate(last.date)}</span>
+        <span>{formatDate(first.date, locale)}</span>
+        <span>{formatDate(last.date, locale)}</span>
       </div>
 
       {anyEstimated ? (
@@ -394,10 +416,9 @@ export function NetWorthChart({
               strokeDasharray="4 3"
             />
           </svg>
-          Estimated from your account entries and past market prices
-          {firstRecorded
-            ? `, until daily figures began on ${formatDate(firstRecorded.date)}.`
-            : ". Daily figures are recorded from today."}
+          {t.overview.netWorthChart.estimateNotice(
+            firstRecorded ? formatDate(firstRecorded.date, locale) : null,
+          )}
         </p>
       ) : null}
       {anyBackfilled ? (
@@ -419,22 +440,22 @@ export function NetWorthChart({
               strokeDasharray="1 3"
             />
           </svg>
-          * Data is backfilled before each account&rsquo;s first entry. Unable
-          to determine the cost price or purchase date of items, so that
-          entry&rsquo;s holdings are valued at past market prices. Shows market
-          movement, not your actual gains.
+          {
+            t.overview.netWorthChart
+              .dataIsBackfilledBeforeEachAccountsFirstEntry
+          }
         </p>
       ) : null}
 
       <details className="mt-2 text-[12px]">
         <summary className="text-ink-3 hover:text-ink cursor-pointer">
-          Show as table
+          {t.overview.netWorthChart.showAsTable}
         </summary>
         <div className="mt-2 max-h-56 overflow-y-auto">
           <table className="w-full max-w-sm">
             <thead>
               <tr className="text-ink-3 text-left">
-                <th className="py-1 font-medium">Date</th>
+                <th className="py-1 font-medium">{t.common.fields.date}</th>
                 <th className="py-1 text-right font-medium">{current.label}</th>
               </tr>
             </thead>
@@ -442,10 +463,12 @@ export function NetWorthChart({
               {[...shown].reverse().map((p) => (
                 <tr key={p.date} className="border-line border-t">
                   <td className="py-1">
-                    {formatDate(p.date)}
+                    {formatDate(p.date, locale)}
                     {p.estimated ? (
                       <span className="text-ink-3">
-                        {p.backfilled ? " · backfilled*" : " · estimated"}
+                        {p.backfilled
+                          ? t.overview.netWorthChart.backfilledSuffix
+                          : t.overview.netWorthChart.estimated}
                       </span>
                     ) : null}
                   </td>
@@ -454,7 +477,10 @@ export function NetWorthChart({
                       {formatMoney(p.total, currency)}
                     </span>
                     {p.partial ? (
-                      <span className="text-ink-3"> · partial</span>
+                      <span className="text-ink-3">
+                        {" "}
+                        {t.overview.netWorthChart.partial}
+                      </span>
                     ) : null}
                   </td>
                 </tr>

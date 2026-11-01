@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "~/i18n/client";
+
 import {
   ArrowLeft,
   CandlestickChart,
@@ -17,7 +19,6 @@ import {
   type AccountType,
   accountGroupOf,
   accountGroups,
-  accountTypeLabels,
   accountTypes,
   holdsSecurities,
 } from "~/lib/accounts";
@@ -39,29 +40,6 @@ export type EditableAccount = Pick<
   | "archivedAt"
 >;
 
-const institutionKindLabels: Record<string, string> = {
-  broker: "Brokers and robo-advisers",
-  crypto_exchange: "Crypto exchanges",
-  depository: "Depository",
-  bank: "Banks",
-  card_issuer: "Card issuers",
-  other: "Government",
-};
-
-const typeHints: Partial<Record<AccountType, string>> = {
-  brokerage: "Shares, ETFs, funds and the cash waiting to be invested.",
-  retirement:
-    "CPF Investment Scheme or an overseas retirement account that invests.",
-  crypto_wallet: "Coins on an exchange or in your own wallet.",
-  savings: "Savings and multiplier accounts that pay interest.",
-  checking: "The account your salary lands in and bills leave from.",
-  credit_card: "Record what you owe as a negative balance.",
-  cash: "Physical cash you want counted.",
-  other: "Anything else with a balance.",
-  cpf: "Your Ordinary, Special, MediSave and Retirement balances.",
-  srs: "Your SRS cash and whatever it has bought.",
-};
-
 const defaultType: Record<AccountGroup, AccountType> = {
   investments: "brokerage",
   banking: "savings",
@@ -72,50 +50,6 @@ const groupColour: Record<AccountGroup, string> = {
   investments: "bg-art-cobalt text-white",
   banking: "bg-art-red text-white",
   cpf_srs: "bg-art-mustard text-[#16130f]",
-};
-
-const GROUP_COPY: Record<
-  AccountGroup,
-  {
-    Icon: typeof CandlestickChart;
-    title: string;
-    blurb: string;
-    examples: string;
-    institution: string;
-    next: string;
-    submit: string;
-  }
-> = {
-  investments: {
-    Icon: CandlestickChart,
-    title: "Add an investment account",
-    blurb:
-      "Valued from what it holds. You'll list the shares, units and coins, and any cash.",
-    examples: "IBKR, moomoo, Endowus, Syfe, Coinhako",
-    institution: "Broker or platform",
-    next: "Next, you'll enter its holdings.",
-    submit: "Add and enter holdings",
-  },
-  banking: {
-    Icon: CreditCard,
-    title: "Add a bank account or card",
-    blurb:
-      "Carries a balance and your spending. You'll record the balance, then add transactions.",
-    examples: "DBS, OCBC, UOB, Trust, Amex",
-    institution: "Bank or card issuer",
-    next: "Next, you'll record its balance.",
-    submit: "Add and record balance",
-  },
-  cpf_srs: {
-    Icon: Landmark,
-    title: "Add CPF or SRS",
-    blurb:
-      "Money set aside for retirement. Kept apart from your other accounts because you can't spend it yet.",
-    examples: "CPF, DBS SRS, OCBC SRS, Endowus SRS",
-    institution: "Held with",
-    next: "Next, you'll record its balances.",
-    submit: "Add and record balances",
-  },
 };
 
 /**
@@ -138,6 +72,74 @@ export function AccountDrawer({
     createdId?: string,
   ) => Promise<void> | void;
 }) {
+  const t = useT();
+
+  const institutionKindLabels: Record<string, string> = {
+    broker: t.accounts.drawer.brokersAndRoboAdvisers,
+    crypto_exchange: t.accounts.drawer.cryptoExchanges,
+    depository: t.accounts.drawer.depository,
+    bank: t.accounts.drawer.banks,
+    card_issuer: t.accounts.drawer.cardIssuers,
+    other: t.accounts.drawer.government,
+  };
+
+  const typeHints: Partial<Record<AccountType, string>> = {
+    brokerage: t.accounts.drawer.sharesETFsFundsAndTheCashWaitingToBeInvested,
+    retirement:
+      t.accounts.drawer
+        .cPFInvestmentSchemeOrAnOverseasRetirementAccountThatInvests,
+    crypto_wallet: t.accounts.drawer.coinsOnAnExchangeOrInYourOwnWallet,
+    savings: t.accounts.drawer.savingsAndMultiplierAccountsThatPayInterest,
+    checking: t.accounts.drawer.theAccountYourSalaryLandsInAndBillsLeaveFrom,
+    credit_card: t.accounts.drawer.recordWhatYouOweAsANegativeBalance,
+    cash: t.accounts.drawer.physicalCashYouWantCounted,
+    other: t.accounts.drawer.anythingElseWithABalance,
+    cpf: t.accounts.drawer.yourOrdinarySpecialMediSaveAndRetirementBalances,
+    srs: t.accounts.drawer.yourSRSCashAndWhateverItHasBought,
+  };
+
+  const GROUP_COPY: Record<
+    AccountGroup,
+    {
+      Icon: typeof CandlestickChart;
+      title: string;
+      blurb: string;
+      examples: string;
+      institution: string;
+      next: string;
+      submit: string;
+    }
+  > = {
+    investments: {
+      Icon: CandlestickChart,
+      title: t.accounts.drawer.addAnInvestmentAccount,
+      blurb: t.accounts.drawer.valuedFromWhatItHoldsYouLlListTheShares,
+      examples: t.accounts.drawer.iBKRMoomooEndowusSyfeCoinhako,
+      institution: t.accounts.drawer.brokerOrPlatform,
+      next: t.accounts.drawer.nextYouLlEnterItsHoldings,
+      submit: t.accounts.drawer.addAndEnterHoldings,
+    },
+    banking: {
+      Icon: CreditCard,
+      title: t.accounts.drawer.addABankAccountOrCard,
+      blurb: t.accounts.drawer.carriesABalanceAndYourSpendingYouLlRecordThe,
+      examples: t.accounts.drawer.dBSOCBCUOBTrustAmex,
+      institution: t.accounts.drawer.bankOrCardIssuer,
+      next: t.accounts.drawer.nextYouLlRecordItsBalance,
+      submit: t.accounts.drawer.addAndRecordBalance,
+    },
+    cpf_srs: {
+      Icon: Landmark,
+      title: t.accounts.drawer.addCPFOrSRS,
+      blurb: t.accounts.drawer.moneySetAsideForRetirementKeptApartFromYourOther,
+      examples: t.accounts.drawer.cPFDBSSRSOCBCSRSEndowusSRS,
+      institution: t.accounts.drawer.heldWith,
+      next: t.accounts.drawer.nextYouLlRecordItsBalances,
+      submit: t.accounts.drawer.addAndRecordBalances,
+    },
+  };
+
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const existing = account && account !== "new" ? account : null;
   const [group, setGroup] = useState<AccountGroup | null>(
     existing ? accountGroupOf(existing.type) : (initialGroup ?? null),
@@ -179,10 +181,10 @@ export function AccountDrawer({
     };
     if (existing) {
       await update.mutateAsync({ id: existing.id, ...values });
-      await onSaved(`Saved ${values.name}.`, "saved");
+      await onSaved(t.accounts.drawer.saved(values.name), "saved");
     } else {
       const created = await create.mutateAsync(values);
-      await onSaved(`Added ${values.name}.`, "saved", created.id);
+      await onSaved(t.accounts.drawer.added(values.name), "saved", created.id);
     }
   }
 
@@ -191,8 +193,8 @@ export function AccountDrawer({
     const result = await remove.mutateAsync({ id: existing.id });
     await onSaved(
       result.outcome === "deleted"
-        ? `Removed ${existing.name}.`
-        : `${existing.name} has balances or transactions, so it was archived. Restore it from the archived list.`,
+        ? t.accounts.drawer.removed(existing.name)
+        : t.accounts.drawer.archived(existing.name),
       result.outcome,
     );
   }
@@ -202,8 +204,10 @@ export function AccountDrawer({
       <Drawer
         open={account !== null}
         onClose={onClose}
-        title="Add account"
-        description="What kind of account is it? Each is tracked differently."
+        title={t.accounts.drawer.addAccount}
+        description={
+          t.accounts.drawer.whatKindOfAccountIsItEachIsTrackedDifferently
+        }
       >
         <div className="space-y-3">
           {(Object.keys(accountGroups) as AccountGroup[])
@@ -227,7 +231,7 @@ export function AccountDrawer({
                       <copy.Icon className="size-5" strokeWidth={1.8} />
                     </span>
                     <span className="font-poster text-[22px] font-bold">
-                      {accountGroups[g].label}
+                      {t.common.accountGroups[g]}
                     </span>
                   </span>
                   <span className="text-ink-2 mt-3 block text-sm">
@@ -275,10 +279,15 @@ export function AccountDrawer({
             <Button
               variant="danger"
               className="mr-auto"
-              onClick={() => void onRemove().catch(() => undefined)}
+              onClick={() => {
+                setConfirmRemove(true);
+                document
+                  .getElementById("account-form")
+                  ?.scrollIntoView({ block: "start" });
+              }}
               loading={remove.isPending}
             >
-              Remove
+              {t.common.actions.remove}
             </Button>
           ) : null}
           {!existing && !initialGroup ? (
@@ -288,18 +297,18 @@ export function AccountDrawer({
               onClick={() => setGroup(null)}
             >
               <ArrowLeft className="size-4" />
-              Back
+              {t.common.actions.back}
             </Button>
           ) : null}
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             type="submit"
             form="account-form"
             loading={create.isPending || update.isPending}
           >
-            {existing ? "Save" : copy.submit}
+            {existing ? t.common.actions.save : copy.submit}
           </Button>
         </>
       }
@@ -310,18 +319,40 @@ export function AccountDrawer({
         className="space-y-6"
       >
         {error ? <Notice tone="error">{errorMessage(error)}</Notice> : null}
+        {confirmRemove ? (
+          <Notice tone="warn">
+            <p>{t.accounts.drawer.removeExplanation}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setConfirmRemove(false)}
+                type="button"
+              >
+                {t.common.actions.cancel}
+              </Button>
+              <Button
+                variant="danger"
+                type="button"
+                loading={remove.isPending}
+                onClick={() => void onRemove().catch(() => undefined)}
+              >
+                {t.accounts.drawer.confirmRemove}
+              </Button>
+            </div>
+          </Notice>
+        ) : null}
 
         <fieldset>
           <legend className="text-ink-2 mb-2 text-[13px] font-medium">
-            Type
+            {t.common.fields.type}
           </legend>
           <div className="flex flex-wrap gap-2">
-            {typeChoices.map((t) => (
+            {typeChoices.map((accountType) => (
               <label
-                key={t}
+                key={accountType}
                 className={cn(
                   "border-line-2 has-[:focus-visible]:outline-brand flex h-9 cursor-pointer items-center rounded-full border px-3.5 text-[13px] font-medium transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2",
-                  type === t
+                  type === accountType
                     ? "bg-brand text-on-brand border-brand"
                     : "hover:border-ink",
                 )}
@@ -329,18 +360,19 @@ export function AccountDrawer({
                 <input
                   type="radio"
                   name="type"
-                  value={t}
-                  checked={type === t}
-                  onChange={() => setType(t)}
+                  value={accountType}
+                  checked={type === accountType}
+                  onChange={() => setType(accountType)}
                   className="sr-only"
                 />
-                {accountTypeLabels[t]}
+                {t.common.accountTypes[accountType]}
               </label>
             ))}
           </div>
           <p className="text-ink-3 mt-2 text-[13px]">
             {existing && !holdsSecurities(existing.type)
-              ? "Type can only change before balances, transactions or reconciliations are recorded."
+              ? t.accounts.drawer
+                  .typeCanOnlyChangeBeforeBalancesTransactionsOrReconciliationsAre
               : typeHints[type]}
           </p>
         </fieldset>
@@ -355,7 +387,7 @@ export function AccountDrawer({
               if (picked && !nameEdited) setName(picked.name);
             }}
           >
-            <option value="">Not listed</option>
+            <option value="">{t.accounts.drawer.notListed}</option>
             {keepsArchivedInstitution ? (
               <option value={existing.institutionId!}>
                 {existing.institutionName}
@@ -377,9 +409,9 @@ export function AccountDrawer({
         </Field>
 
         <Field
-          label="Name"
+          label={t.common.fields.name}
           htmlFor="account-name"
-          hint="How it shows in your lists."
+          hint={t.accounts.drawer.howItShowsInYourLists}
         >
           <Input
             id="account-name"
@@ -392,13 +424,15 @@ export function AccountDrawer({
               setNameEdited(true);
             }}
             placeholder={
-              group === "investments" ? "e.g. IBKR Pro" : "e.g. DBS Multiplier"
+              group === "investments"
+                ? t.accounts.drawer.eGIBKRPro
+                : t.accounts.drawer.eGDBSMultiplier
             }
           />
         </Field>
 
         <div className="grid grid-cols-[1fr_auto] gap-4">
-          <Field label="Currency" htmlFor="account-currency">
+          <Field label={t.common.fields.currency} htmlFor="account-currency">
             <Select
               id="account-currency"
               name="currency"
@@ -412,7 +446,10 @@ export function AccountDrawer({
             </Select>
           </Field>
           {group === "banking" ? (
-            <Field label="Last four digits" htmlFor="account-last4">
+            <Field
+              label={t.accounts.drawer.lastFourDigits}
+              htmlFor="account-last4"
+            >
               <Input
                 id="account-last4"
                 name="last4"
@@ -420,7 +457,7 @@ export function AccountDrawer({
                 pattern="\d{4}"
                 maxLength={4}
                 defaultValue={existing?.last4 ?? ""}
-                placeholder="Optional"
+                placeholder={t.accounts.drawer.optional}
                 className="figures w-28"
               />
             </Field>
@@ -429,7 +466,7 @@ export function AccountDrawer({
           )}
         </div>
 
-        <Field label="Notes" htmlFor="account-notes">
+        <Field label={t.common.fields.notes} htmlFor="account-notes">
           <Textarea
             id="account-notes"
             name="notes"

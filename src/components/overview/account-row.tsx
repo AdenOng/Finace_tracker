@@ -1,9 +1,10 @@
+"use client";
+import { useT } from "~/i18n/client";
 import Decimal from "decimal.js";
 import Link from "next/link";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { BalanceDate } from "~/components/finance/balance-date";
-import { accountTypeLabels } from "~/lib/accounts";
 import { cn } from "~/lib/cn";
 import { formatMoney } from "~/lib/format";
 import type { RouterOutputs } from "~/trpc/react";
@@ -17,6 +18,8 @@ export function AccountRow({
   account: WorthAccount;
   currency: string;
 }) {
+  const t = useT();
+
   const owed = account.total && new Decimal(account.total).isNegative();
   return (
     <li>
@@ -38,7 +41,7 @@ export function AccountRow({
             ) : null}
           </span>
           <span className="text-ink-3 block truncate text-[12px]">
-            {[account.institutionName, accountTypeLabels[account.type]]
+            {[account.institutionName, t.common.accountTypes[account.type]]
               .filter(Boolean)
               .join(" · ")}
           </span>
@@ -50,20 +53,24 @@ export function AccountRow({
         </span>
         <span className="shrink-0 text-right">
           {!account.asOf ? (
-            <span className="text-ink-3 text-[13px]">Not recorded</span>
+            <span className="text-ink-3 text-[13px]">
+              {t.overview.accountRow.notRecorded}
+            </span>
           ) : account.unpriced > 0 && account.totals.length === 0 ? (
-            <span className="text-warn text-[13px]">Awaiting prices</span>
+            <span className="text-warn text-[13px]">
+              {t.overview.accountRow.awaitingPrices}
+            </span>
           ) : account.unconverted.length > 0 ? (
             <span className="text-warn block text-[13px]">
               {account.total === null ? (
-                "Rate unavailable"
+                t.overview.accountRow.rateUnavailable
               ) : (
                 <span className="sensitive">
                   {formatMoney(account.total, currency)}
                 </span>
               )}
               <span className="block text-[11px]">
-                Partial · FX unavailable
+                {t.overview.accountRow.partialFXUnavailable}
               </span>
             </span>
           ) : (
@@ -80,12 +87,13 @@ export function AccountRow({
           )}
           {account.unpriced > 0 && account.totals.length > 0 ? (
             <span className="text-warn block text-[11px]">
-              {account.unpriced} unpriced holding
-              {account.unpriced === 1 ? "" : "s"}
+              {t.overview.accountRow.unpriced(account.unpriced)}
             </span>
           ) : null}
           {owed ? (
-            <span className="text-ink-3 block text-[11px]">owed</span>
+            <span className="text-ink-3 block text-[11px]">
+              {t.overview.accountRow.owed}
+            </span>
           ) : null}
         </span>
       </Link>

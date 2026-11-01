@@ -3,6 +3,7 @@
 import { Check, Copy } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { useT } from "~/i18n/client";
 import { cn } from "~/lib/cn";
 import { Button } from "./button";
 
@@ -17,6 +18,7 @@ export function CopyField({
   value: string;
   className?: string;
 }) {
+  const t = useT();
   const input = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<"idle" | "copied" | "manual">("idle");
 
@@ -41,7 +43,7 @@ export function CopyField({
           ref={input}
           readOnly
           value={value}
-          aria-label="Link"
+          aria-label={t.common.fields.link}
           onFocus={(e) => e.currentTarget.select()}
           className="min-w-0 flex-1 bg-transparent font-mono text-[13px] outline-none"
         />
@@ -51,14 +53,13 @@ export function CopyField({
           ) : (
             <Copy className="size-3.5" />
           )}
-          {state === "copied" ? "Copied" : "Copy link"}
+          {state === "copied"
+            ? t.common.actions.copied
+            : t.common.actions.copyLink}
         </Button>
       </div>
       {state === "manual" ? (
-        <p className="text-ink-2 text-[13px]">
-          This browser blocked copying on this address. The link is selected:
-          press Ctrl+C (⌘C on a Mac) to copy it.
-        </p>
+        <p className="text-ink-2 text-[13px]">{t.common.copyBlocked}</p>
       ) : null}
     </div>
   );

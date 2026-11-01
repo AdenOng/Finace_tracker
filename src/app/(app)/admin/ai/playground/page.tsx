@@ -1,3 +1,4 @@
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 import { requireAdminSession } from "~/server/auth";
 
@@ -6,21 +7,31 @@ import { ExtractionPlayground } from "~/components/admin/extraction-playground";
 import { PageHeader, Section } from "~/components/ui/panel";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Extraction playground" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.admin.playgroundPage.extractionPlayground };
+}
 
 export default async function AdminAiPlaygroundPage() {
+  const t = await getT();
   await requireAdminSession();
   void api.admin.ai.list.prefetch();
   return (
     <HydrateClient>
       <PageHeader
-        title="AI providers"
-        description="Run a document through one or more providers and compare what comes back. Nothing is saved."
+        title={t.admin.playgroundPage.aiProviders}
+        description={
+          t.admin.playgroundPage
+            .runADocumentThroughOneOrMoreProvidersAndCompareWhatComesBackNothingIsSaved
+        }
       />
       <AiTabs />
       <Section
-        title="Extraction playground"
-        description="Pick several providers to compare them side by side before switching the default."
+        title={t.admin.playgroundPage.extractionPlayground}
+        description={
+          t.admin.playgroundPage
+            .pickSeveralProvidersToCompareThemSideBySideBeforeSwitchingTheDefault
+        }
       >
         <ExtractionPlayground />
       </Section>

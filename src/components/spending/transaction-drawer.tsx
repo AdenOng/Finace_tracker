@@ -3,8 +3,15 @@
 import Decimal from "decimal.js";
 import { useState } from "react";
 
+import { categoryLabel, useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
+import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Drawer } from "~/components/ui/dialog";
+import {
+  type Direction,
+  DirectionToggle,
+  signedAmount,
+} from "~/components/ui/direction-toggle";
 import {
   Checkbox,
   Field,
@@ -15,7 +22,6 @@ import {
 import { Notice } from "~/components/ui/panel";
 import { accountGroupOf } from "~/lib/accounts";
 import { type CategoryKind, orderCategories } from "~/lib/categories";
-import { cn } from "~/lib/cn";
 import { todayIso } from "~/lib/dates";
 import { errorMessage } from "~/lib/errors";
 import { formText } from "~/lib/form";
@@ -40,12 +46,13 @@ export function TransactionDrawer({
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
+  const t = useT();
   const existing = transaction && transaction !== "new" ? transaction : null;
   const locked = !!existing?.reconciliationId;
   const [accounts] = api.accounts.list.useSuspenseQuery();
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const [currencies] = api.catalog.currencies.useSuspenseQuery();
-  const [direction, setDirection] = useState<"out" | "in">(
+  const [direction, setDirection] = useState<Direction>(
     existing && new Decimal(existing.amount).isPositive() ? "in" : "out",
   );
   const [classification, setClassification] = useState({
@@ -95,7 +102,7 @@ export function TransactionDrawer({
       postedDate: formText(form, "postedDate"),
       description: formText(form, "description"),
       merchant: formText(form, "merchant"),
-      amount: direction === "out" ? `-${magnitude}` : magnitude,
+      amount: signedAmount(direction, magnitude),
       currency: currency === "" ? null : currency,
       ...classification,
       cleared: locked ? existing.cleared : form.get("cleared") === "on",
@@ -103,45 +110,49 @@ export function TransactionDrawer({
     };
     if (existing) {
       await update.mutateAsync({ id: existing.id, ...values });
-      await onSaved("Transaction saved.");
+      await onSaved(t.spending.transactionDrawer.transactionSaved);
     } else {
       await create.mutateAsync(values);
-      await onSaved("Transaction added.");
+      await onSaved(t.spending.transactionDrawer.transactionAdded);
     }
   }
 
   async function onRemove() {
     if (!existing) return;
     await remove.mutateAsync({ id: existing.id });
-    await onSaved("Transaction deleted.");
+    await onSaved(t.spending.transactionDrawer.transactionDeleted);
   }
 
   return (
     <Drawer
       open={transaction !== null}
       onClose={onClose}
-      title={existing ? "Edit transaction" : "Add transaction"}
+      title={
+        existing
+          ? t.spending.transactionDrawer.editTransaction
+          : t.spending.transactionDrawer.addTransaction
+      }
       footer={
         <>
           {existing && !locked ? (
-            <Button
+            <ConfirmButton
               variant="danger"
               className="mr-auto"
-              onClick={() => void onRemove().catch(() => undefined)}
+              onConfirm={() => void onRemove().catch(() => undefined)}
               loading={remove.isPending}
             >
-              Delete
-            </Button>
+              {t.common.actions.delete}
+            </ConfirmButton>
           ) : null}
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             type="submit"
             form="transaction-form"
             loading={create.isPending || update.isPending}
           >
-            {existing ? "Save" : "Add"}
+            {existing ? t.common.actions.save : t.common.actions.add}
           </Button>
         </>
       }
@@ -154,14 +165,14 @@ export function TransactionDrawer({
         {error ? <Notice tone="error">{errorMessage(error)}</Notice> : null}
         {locked ? (
           <Notice tone="warn">
-            This entry is reconciled. You can edit its category, merchant,
-            transfer label and notes. Reopen the statement period from its
-            account to change the amount, date or description.
+            {t.spending.transactionDrawer.thisEntryIsReconciledYouCanEdit}
           </Notice>
         ) : null}
         <Field
-          label="Transaction type"
-          hint="Transfers are left out of spending totals."
+          label={t.spending.transactionDrawer.transactionType}
+          hint={
+            t.spending.transactionDrawer.transfersAreLeftOutOfSpendingTotals
+          }
         >
           <TransactionTypeSelect
             value={
@@ -176,47 +187,23 @@ export function TransactionDrawer({
             incomeDisabled={locked && direction === "out"}
           />
         </Field>
-        <div
-          role="radiogroup"
-          aria-label="Direction"
-          className="border-line grid grid-cols-2 border"
-        >
-          {(
-            [
-              ["out", "Money out"],
-              ["in", "Money in"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              disabled={locked}
-              role="radio"
-              aria-checked={direction === value}
-              onClick={() => {
-                setDirection(value);
-                if (!classification.isTransfer) {
-                  const kind = categoryKind(
-                    categories,
-                    classification.categoryId,
-                  );
-                  if (kind && kind !== (value === "out" ? "expense" : "income"))
-                    setClassification({ ...classification, categoryId: null });
-                }
-              }}
-              className={cn(
-                "h-10 text-sm font-semibold transition-colors",
-                direction === value
-                  ? "bg-brand text-on-brand"
-                  : "text-ink-2 hover:bg-wash",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <DirectionToggle
+          value={direction}
+          disabled={locked}
+          label={t.spending.transactionDrawer.direction}
+          outLabel={t.spending.transactionDrawer.moneyOut}
+          inLabel={t.spending.transactionDrawer.moneyIn}
+          onChange={(value) => {
+            setDirection(value);
+            if (!classification.isTransfer) {
+              const kind = categoryKind(categories, classification.categoryId);
+              if (kind && kind !== (value === "out" ? "expense" : "income"))
+                setClassification({ ...classification, categoryId: null });
+            }
+          }}
+        />
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Amount" htmlFor="txn-amount">
+          <Field label={t.common.fields.amount} htmlFor="txn-amount">
             <Input
               id="txn-amount"
               name="amount"
@@ -224,14 +211,16 @@ export function TransactionDrawer({
               required
               inputMode="decimal"
               pattern="\d+(\.\d{1,4})?"
-              title="A positive amount, up to four decimals"
+              title={
+                t.spending.transactionDrawer.aPositiveAmountUpToFourDecimals
+              }
               defaultValue={
                 existing ? new Decimal(existing.amount).abs().toFixed() : ""
               }
               className="figures"
             />
           </Field>
-          <Field label="Currency" htmlFor="txn-currency">
+          <Field label={t.common.fields.currency} htmlFor="txn-currency">
             <Select
               id="txn-currency"
               name="currency"
@@ -240,13 +229,17 @@ export function TransactionDrawer({
             >
               <option value="">
                 {accountCurrency
-                  ? `${accountCurrency} (account)`
-                  : "Account currency"}
+                  ? t.spending.transactionDrawer.accountCurrencyLabel(
+                      accountCurrency,
+                    )
+                  : t.spending.transactionDrawer.accountCurrency}
               </option>
               {existing &&
               !currencies.some((c) => c.code === existing.currency) ? (
                 <option value={existing.currency}>
-                  {existing.currency} (inactive)
+                  {t.spending.transactionDrawer.inactiveCurrency(
+                    existing.currency,
+                  )}
                 </option>
               ) : null}
               {currencies.map((c) => (
@@ -258,7 +251,10 @@ export function TransactionDrawer({
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Account" htmlFor="txn-account">
+          <Field
+            label={t.spending.transactionDrawer.account}
+            htmlFor="txn-account"
+          >
             <Select
               id="txn-account"
               disabled={locked}
@@ -273,7 +269,7 @@ export function TransactionDrawer({
               ))}
             </Select>
           </Field>
-          <Field label="Date" htmlFor="txn-date">
+          <Field label={t.common.fields.date} htmlFor="txn-date">
             <Input
               id="txn-date"
               name="postedDate"
@@ -284,7 +280,10 @@ export function TransactionDrawer({
             />
           </Field>
         </div>
-        <Field label="Description" htmlFor="txn-description">
+        <Field
+          label={t.spending.transactionDrawer.description}
+          htmlFor="txn-description"
+        >
           <Input
             id="txn-description"
             name="description"
@@ -295,9 +294,9 @@ export function TransactionDrawer({
           />
         </Field>
         <Field
-          label="Merchant"
+          label={t.spending.transactionDrawer.merchant}
           htmlFor="txn-merchant"
-          hint="Optional. A clean name shown instead of the description."
+          hint={t.spending.transactionDrawer.optionalACleanNameShownInsteadOf}
         >
           <Input
             id="txn-merchant"
@@ -306,7 +305,10 @@ export function TransactionDrawer({
             defaultValue={existing?.merchant ?? ""}
           />
         </Field>
-        <Field label="Category" htmlFor="txn-category">
+        <Field
+          label={t.spending.transactionDrawer.category}
+          htmlFor="txn-category"
+        >
           <Select
             id="txn-category"
             name="categoryId"
@@ -321,28 +323,36 @@ export function TransactionDrawer({
               )
             }
           >
-            <option value="">Uncategorised</option>
+            <option value="">
+              {t.spending.transactionDrawer.uncategorised}
+            </option>
             {existing?.categoryId &&
             !categories.some((c) => c.id === existing.categoryId) ? (
               <option value={existing.categoryId}>
-                {existing.categoryName} (archived)
+                {t.spending.transactionDrawer.archivedCategory(
+                  categoryLabel(t, existing.categoryName ?? ""),
+                )}
               </option>
             ) : null}
             {orderCategories(categories).map((c) => (
               <option key={c.id} value={c.id}>
-                {c.parentId ? `— ${c.name}` : c.name}
+                {c.parentId
+                  ? `— ${categoryLabel(t, c.name)}`
+                  : categoryLabel(t, c.name)}
               </option>
             ))}
           </Select>
         </Field>
         <Checkbox
           name="cleared"
-          label="Cleared"
-          description="Checked against your bank records."
+          label={t.spending.transactionDrawer.cleared}
+          description={
+            t.spending.transactionDrawer.checkedAgainstYourBankRecords
+          }
           defaultChecked={existing?.cleared}
           disabled={locked}
         />
-        <Field label="Notes" htmlFor="txn-notes">
+        <Field label={t.common.fields.notes} htmlFor="txn-notes">
           <Textarea
             id="txn-notes"
             name="notes"

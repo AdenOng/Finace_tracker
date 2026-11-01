@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import { Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -15,19 +18,18 @@ import { useFlash } from "~/components/ui/use-flash";
 import { cn } from "~/lib/cn";
 import { formatBytes, formatDateTime, formatRelative } from "~/lib/format";
 import { api, type RouterInputs } from "~/trpc/react";
-import { jobStatusLabels } from "./admin-overview";
 
 type JobFilter = NonNullable<RouterInputs["admin"]["jobs"]["list"]["filter"]>;
 
-const filters: { value: JobFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "failed", label: "Failed" },
-  { value: "stuck", label: "Stuck" },
-  { value: "waiting", label: "Waiting for review" },
-  { value: "queued", label: "Queued" },
-  { value: "running", label: "Running" },
-  { value: "needs_review", label: "Needs review" },
-  { value: "completed", label: "Completed" },
+const filterOptions = (t: Messages): { value: JobFilter; label: string }[] => [
+  { value: "all", label: t.adminManage.imports.all },
+  { value: "failed", label: t.adminManage.imports.failed },
+  { value: "stuck", label: t.adminManage.imports.stuck },
+  { value: "waiting", label: t.adminManage.imports.waitingForReview },
+  { value: "queued", label: t.adminManage.imports.queued },
+  { value: "running", label: t.adminManage.imports.running },
+  { value: "needs_review", label: t.adminManage.imports.needsReview },
+  { value: "completed", label: t.adminManage.imports.completed },
 ];
 
 const statusTones = {
@@ -39,21 +41,25 @@ const statusTones = {
   cancelled: "outline",
 } as const;
 
-const kindLabels: Record<string, string> = {
-  bank_statement: "Bank statement",
-  card_statement: "Card statement",
-  brokerage_statement: "Brokerage statement",
-  trade_confirmation: "Trade confirmation",
-  screenshot: "Screenshot",
-  csv: "CSV",
-  other: "Document",
-};
+const getKindLabels = (t: Messages): Record<string, string> => ({
+  bank_statement: t.adminManage.imports.bankStatement,
+  card_statement: t.adminManage.imports.cardStatement,
+  brokerage_statement: t.adminManage.imports.brokerageStatement,
+  trade_confirmation: t.adminManage.imports.tradeConfirmation,
+  screenshot: t.adminManage.imports.screenshot,
+  csv: t.adminManage.imports.csv,
+  other: t.adminManage.imports.document,
+});
 
 export function ImportJobsAdmin({
   emailConfigured,
 }: {
   emailConfigured: boolean;
 }) {
+  const locale = useLocale();
+  const t = useT();
+  const filters = filterOptions(t);
+  const kindLabels = getKindLabels(t);
   const utils = api.useUtils();
   const params = useSearchParams();
   const [filter, setFilter] = useState<JobFilter>(() => {
@@ -90,7 +96,7 @@ export function ImportJobsAdmin({
   const retry = api.admin.jobs.retry.useMutation({
     onMutate: clear,
     onSuccess: async () => {
-      success("Queued to be read again.");
+      success(t.adminManage.imports.queuedToBeReadAgain);
       await refresh();
     },
     onError: error,
@@ -98,25 +104,25 @@ export function ImportJobsAdmin({
   const cancel = api.admin.jobs.cancel.useMutation({
     onMutate: clear,
     onSuccess: async () => {
-      success("Stopped. The owner can read it again from Imports.");
+      success(t.adminManage.imports.readStopped);
       await refresh();
     },
     onError: error,
   });
   const remind = api.admin.jobs.remind.useMutation({
     onMutate: clear,
-    onSuccess: () => success("Reminder sent."),
+    onSuccess: () => success(t.adminManage.imports.reminderSent),
     onError: error,
   });
 
   return (
     <Section
-      title="Jobs"
-      description="Metadata only. File names, contents and what the AI read stay private to their owner."
+      title={t.adminManage.imports.jobs}
+      description={t.adminManage.imports.privacyHelp}
     >
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <FilterTabs
-          label="Filter import jobs"
+          label={t.adminManage.imports.filterImportJobs}
           value={filter}
           onChange={setFilter}
           options={filters
@@ -136,8 +142,8 @@ export function ImportJobsAdmin({
         >
           <Search className="text-ink-3 pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
-            aria-label="Search by owner"
-            placeholder="Owner name or email, then Enter"
+            aria-label={t.adminManage.imports.searchByOwner}
+            placeholder={t.adminManage.imports.ownerNameOrEmailThenEnter}
             className="pl-9"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -147,33 +153,35 @@ export function ImportJobsAdmin({
       <FlashNotice flash={flash} className="mb-4" />
 
       {jobs.isLoading ? (
-        <p className="text-ink-3 text-sm">Loading…</p>
+        <p className="text-ink-3 text-sm">{t.common.status.loading}</p>
       ) : items.length === 0 ? (
         <EmptyState
           title={
             filter === "failed" || filter === "stuck"
-              ? "Nothing here"
-              : "No imports"
+              ? t.adminManage.imports.nothingHere
+              : t.adminManage.imports.noImports
           }
         >
           {filter === "stuck"
-            ? "No job has been queued or running for more than six minutes."
+            ? t.adminManage.imports.noStuckJobs
             : filter === "failed"
-              ? "Failed statement reads show up here with the provider's error."
-              : "Statements people upload will be listed here."}
+              ? t.adminManage.imports.failedJobsHelp
+              : t.adminManage.imports.emptyJobsHelp}
         </EmptyState>
       ) : (
         <>
           <Table>
             <thead>
               <tr>
-                <Th>Uploaded</Th>
-                <Th>Owner</Th>
-                <Th>Document</Th>
-                <Th>Status</Th>
-                <Th>Provider</Th>
+                <Th>{t.adminManage.imports.uploaded}</Th>
+                <Th>{t.adminManage.imports.owner}</Th>
+                <Th>{t.adminManage.imports.document}</Th>
+                <Th>{t.common.fields.status}</Th>
+                <Th>{t.adminManage.imports.provider}</Th>
                 <Th className="text-right">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">
+                    {t.adminManage.imports.actions}
+                  </span>
                 </Th>
               </tr>
             </thead>
@@ -182,33 +190,39 @@ export function ImportJobsAdmin({
                 <Tr key={job.id}>
                   <Td
                     className="text-ink-2 whitespace-nowrap"
-                    title={formatDateTime(job.createdAt)}
+                    title={formatDateTime(job.createdAt, locale)}
                   >
-                    {formatRelative(job.createdAt)}
+                    {formatRelative(job.createdAt, undefined, locale)}
                   </Td>
                   <Td>
                     <p className="font-medium">{job.ownerName}</p>
                     <p className="text-ink-3 text-[12px]">{job.ownerEmail}</p>
                   </Td>
                   <Td className="text-ink-2 text-[13px]">
-                    {kindLabels[job.documentKind] ?? "Document"} ·{" "}
-                    {formatBytes(job.sizeBytes)}
+                    {kindLabels[job.documentKind] ??
+                      t.adminManage.imports.document}{" "}
+                    · {formatBytes(job.sizeBytes)}
                     {job.filePurged ? (
-                      <span className="text-ink-3"> · file removed</span>
+                      <span className="text-ink-3">
+                        {" "}
+                        {t.adminManage.imports.fileRemoved}
+                      </span>
                     ) : null}
                   </Td>
                   <Td className="max-w-80">
                     <Tag tone={statusTones[job.status]}>
-                      {jobStatusLabels[job.status]}
+                      {(
+                        t.admin.jobStatus as Record<string, string | undefined>
+                      )[job.status] ?? job.status}
                     </Tag>
                     {job.stale ? (
                       <Tag tone="warn" className="ml-1">
-                        Stuck
+                        {t.adminManage.imports.stuck}
                       </Tag>
                     ) : null}
                     {job.attempts > 1 ? (
                       <span className="text-ink-3 ml-2 text-[12px]">
-                        {job.attempts} attempts
+                        {t.adminManage.imports.attempts(job.attempts)}
                       </span>
                     ) : null}
                     {job.error ? (
@@ -244,7 +258,7 @@ export function ImportJobsAdmin({
                         }
                         onClick={() => retry.mutate({ id: job.id })}
                       >
-                        Retry
+                        {t.common.actions.retry}
                       </Button>
                     ) : null}
                     {job.status === "queued" || job.status === "running" ? (
@@ -252,10 +266,10 @@ export function ImportJobsAdmin({
                         variant="ghost"
                         size="sm"
                         className="ml-1"
-                        confirmLabel="Stop this read?"
+                        confirmLabel={t.adminManage.imports.stopThisRead}
                         onConfirm={() => cancel.mutate({ id: job.id })}
                       >
-                        Stop
+                        {t.adminManage.imports.stop}
                       </ConfirmButton>
                     ) : null}
                     {job.status === "needs_review" && emailConfigured ? (
@@ -267,7 +281,7 @@ export function ImportJobsAdmin({
                         }
                         onClick={() => remind.mutate({ id: job.id })}
                       >
-                        Email reminder
+                        {t.adminManage.imports.emailReminder}
                       </Button>
                     ) : null}
                   </Td>
@@ -283,7 +297,7 @@ export function ImportJobsAdmin({
               loading={jobs.isFetchingNextPage}
               onClick={() => void jobs.fetchNextPage()}
             >
-              Load older
+              {t.adminManage.imports.loadOlder}
             </Button>
           ) : null}
         </>

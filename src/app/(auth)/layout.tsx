@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Wordmark } from "~/components/brand";
+import { LanguageSwitch } from "~/components/shell/language-switch";
 
 /** Setup, two-step, invitations and resets: one focused card on the grid. */
 export default function AuthLayout({ children }: { children: ReactNode }) {
@@ -11,10 +12,11 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         aria-hidden
         className="grid-lines pointer-events-none absolute inset-0 -z-10 [mask-image:radial-gradient(ellipse_60%_55%_at_50%_40%,black,transparent)] opacity-60"
       />
-      <header className="mx-auto flex h-16 w-full max-w-7xl items-center px-5 sm:px-8">
+      <header className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-5 sm:px-8">
         <Link href="/sign-in">
           <Wordmark />
         </Link>
+        <LanguageSwitch compact />
       </header>
       <main className="flex flex-1 items-center justify-center px-5 py-10">
         <div className="slab animate-pop relative w-full max-w-[26rem] overflow-hidden p-7 shadow-[0_40px_120px_-40px_rgb(0_0_0/0.9)] sm:p-9">

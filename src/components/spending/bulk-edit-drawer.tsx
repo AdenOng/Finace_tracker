@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { categoryLabel, useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { Drawer } from "~/components/ui/dialog";
 import {
@@ -32,6 +33,7 @@ export function BulkEditDrawer({
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
+  const t = useT();
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const [changeMerchant, setChangeMerchant] = useState(false);
   const [changeNotes, setChangeNotes] = useState(false);
@@ -77,7 +79,7 @@ export function BulkEditDrawer({
         ...(changeNotes ? { notes: formText(form, "notes") } : {}),
       },
     });
-    await onSaved(`${result.count} transactions updated.`);
+    await onSaved(t.spending.bulkEditDrawer.updated(result.count));
   }
 
   return (
@@ -86,16 +88,16 @@ export function BulkEditDrawer({
       onClose={onClose}
       title={
         action === "edit"
-          ? "Edit selected transactions"
+          ? t.spending.bulkEditDrawer.editSelectedTransactions
           : action === "rules"
-            ? "Apply merchant rules"
-            : "Delete selected transactions"
+            ? t.spending.bulkEditDrawer.applyMerchantRules
+            : t.spending.bulkEditDrawer.deleteSelectedTransactions
       }
-      description={`${rows.length} selected transactions.`}
+      description={t.spending.bulkEditDrawer.selected(rows.length)}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           {action === "edit" ? (
             <Button
@@ -103,7 +105,7 @@ export function BulkEditDrawer({
               form="bulk-edit-form"
               loading={update.isPending}
             >
-              Save changes
+              {t.spending.bulkEditDrawer.saveChanges}
             </Button>
           ) : null}
           {action === "rules" ? (
@@ -119,12 +121,14 @@ export function BulkEditDrawer({
                   void apply
                     .mutateAsync({ ids, revision: preview.data.revision })
                     .then((r) =>
-                      onSaved(`${r.count} transactions categorised.`),
+                      onSaved(t.spending.bulkEditDrawer.categorised(r.count)),
                     )
                     .catch(() => undefined);
               }}
             >
-              Apply {preview.data?.changes.length ?? 0} changes
+              {t.spending.bulkEditDrawer.applyChanges(
+                preview.data?.changes.length ?? 0,
+              )}
             </Button>
           ) : null}
           {action === "delete" ? (
@@ -135,11 +139,13 @@ export function BulkEditDrawer({
               onClick={() =>
                 void remove
                   .mutateAsync({ ids })
-                  .then((r) => onSaved(`${r.count} transactions deleted.`))
+                  .then((r) =>
+                    onSaved(t.spending.bulkEditDrawer.deleted(r.count)),
+                  )
                   .catch(() => undefined)
               }
             >
-              Delete {rows.length} transactions
+              {t.spending.bulkEditDrawer.deleteTransactions(rows.length)}
             </Button>
           ) : null}
         </>
@@ -157,10 +163,12 @@ export function BulkEditDrawer({
           onSubmit={(e) => void submit(e).catch(() => undefined)}
         >
           <p className="text-ink-2 text-sm">
-            Only the fields you choose will change. A blank value clears that
-            field.
+            {t.spending.bulkEditDrawer.onlyTheFieldsYouChooseWillChange}
           </p>
-          <Field label="Category" htmlFor="bulk-category">
+          <Field
+            label={t.spending.bulkEditDrawer.category}
+            htmlFor="bulk-category"
+          >
             <Select
               id="bulk-category"
               value={categoryId}
@@ -179,19 +187,23 @@ export function BulkEditDrawer({
                   );
               }}
             >
-              <option value="keep">Keep existing categories</option>
-              <option value="">Clear category</option>
+              <option value="keep">
+                {t.spending.bulkEditDrawer.keepExistingCategories}
+              </option>
+              <option value="">
+                {t.spending.bulkEditDrawer.clearCategory}
+              </option>
               {orderCategories(categories).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.parentId ? "— " : ""}
-                  {c.name}
+                  {categoryLabel(t, c.name)}
                 </option>
               ))}
             </Select>
           </Field>
           <Field
-            label="Transaction type"
-            hint="Expense is money out; income is money in. Amounts stay unchanged. For mixed directions, select each direction separately to remove transfer status."
+            label={t.spending.bulkEditDrawer.transactionType}
+            hint={t.spending.bulkEditDrawer.expenseIsMoneyOutIncomeIsMoney}
           >
             <TransactionTypeSelect
               keep
@@ -202,12 +214,14 @@ export function BulkEditDrawer({
             />
           </Field>
           <Field
-            label="Cleared"
+            label={t.spending.bulkEditDrawer.cleared}
             htmlFor="bulk-cleared"
             hint={
               reconciled
-                ? "Reopen reconciled periods before changing cleared status."
-                : "Cleared means checked against your bank records."
+                ? t.spending.bulkEditDrawer
+                    .reopenReconciledPeriodsBeforeChangingClearedStatus
+                : t.spending.bulkEditDrawer
+                    .clearedMeansCheckedAgainstYourBankRecords
             }
           >
             <Select
@@ -216,31 +230,40 @@ export function BulkEditDrawer({
               defaultValue="keep"
               disabled={reconciled}
             >
-              <option value="keep">Keep existing cleared status</option>
-              <option value="yes">Mark cleared</option>
-              <option value="no">Mark uncleared</option>
+              <option value="keep">
+                {t.spending.bulkEditDrawer.keepExistingClearedStatus}
+              </option>
+              <option value="yes">
+                {t.spending.bulkEditDrawer.markCleared}
+              </option>
+              <option value="no">
+                {t.spending.bulkEditDrawer.markUncleared}
+              </option>
             </Select>
           </Field>
           <Checkbox
-            label="Change merchant"
+            label={t.spending.bulkEditDrawer.changeMerchant}
             checked={changeMerchant}
             onChange={(e) => setChangeMerchant(e.target.checked)}
           />
           {changeMerchant ? (
             <Field
-              label="Merchant for all selected entries"
+              label={t.spending.bulkEditDrawer.merchantForAllSelectedEntries}
               htmlFor="bulk-merchant"
             >
               <Input id="bulk-merchant" name="merchant" maxLength={200} />
             </Field>
           ) : null}
           <Checkbox
-            label="Change notes"
+            label={t.spending.bulkEditDrawer.changeNotes}
             checked={changeNotes}
             onChange={(e) => setChangeNotes(e.target.checked)}
           />
           {changeNotes ? (
-            <Field label="Notes for all selected entries" htmlFor="bulk-notes">
+            <Field
+              label={t.spending.bulkEditDrawer.notesForAllSelectedEntries}
+              htmlFor="bulk-notes"
+            >
               <Textarea id="bulk-notes" name="notes" maxLength={2000} />
             </Field>
           ) : null}
@@ -249,15 +272,21 @@ export function BulkEditDrawer({
       {action === "rules" ? (
         <div className="space-y-4">
           <p className="text-ink-2 text-sm">
-            Review the proposed categories. Manual choices and transfers are
-            preserved.
+            {
+              t.spending.bulkEditDrawer
+                .reviewTheProposedCategoriesManualChoicesAnd
+            }
           </p>
-          {preview.isLoading ? <p>Checking rules…</p> : null}
+          {preview.isLoading ? (
+            <p>{t.spending.bulkEditDrawer.checkingRules}</p>
+          ) : null}
           {preview.data ? (
             <>
               <p className="text-sm">
-                {preview.data.changes.length} changes; {preview.data.skipped}{" "}
-                entries unchanged.
+                {t.spending.bulkEditDrawer.previewSummary(
+                  preview.data.changes.length,
+                  preview.data.skipped,
+                )}
               </p>
               <ul className="divide-line divide-y">
                 {preview.data.changes.map((change) => (
@@ -266,7 +295,10 @@ export function BulkEditDrawer({
                       {change.merchant ?? change.description}
                     </p>
                     <p className="text-ink-2 text-sm">
-                      {change.categoryName} · matches “{change.pattern}”
+                      {t.spending.bulkEditDrawer.ruleMatch(
+                        categoryLabel(t, change.categoryName),
+                        change.pattern,
+                      )}
                     </p>
                   </li>
                 ))}
@@ -282,7 +314,7 @@ export function BulkEditDrawer({
             }}
             disabled={preview.isFetching || apply.isPending}
           >
-            Refresh preview
+            {t.spending.bulkEditDrawer.refreshPreview}
           </Button>
         </div>
       ) : null}
@@ -290,13 +322,17 @@ export function BulkEditDrawer({
         <div className="space-y-4">
           {reconciled ? (
             <Notice tone="warn">
-              Your selection includes reconciled transactions. Reopen those
-              statement periods before deleting.
+              {
+                t.spending.bulkEditDrawer
+                  .yourSelectionIncludesReconciledTransactionsReopenThose
+              }
             </Notice>
           ) : (
             <Notice tone="warn">
-              Deleting these entries removes them from your spending history and
-              cannot be undone.
+              {
+                t.spending.bulkEditDrawer
+                  .deletingTheseEntriesRemovesThemFromYour
+              }
             </Notice>
           )}
           <ul className="text-sm">

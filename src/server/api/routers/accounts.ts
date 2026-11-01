@@ -13,6 +13,9 @@ import {
   institution,
   investmentTransaction,
   transaction,
+  recurringSchedule,
+  cardStatement,
+  cardPaymentAccount,
   user,
 } from "~/server/db/schema";
 import {
@@ -110,6 +113,9 @@ async function hasAccountHistory(db: Pick<Database, "select">, id: string) {
         or exists(select 1 from ${transaction} where ${transaction.accountId} = ${id})
         or exists(select 1 from ${investmentTransaction} where ${investmentTransaction.accountId} = ${id})
         or exists(select 1 from ${accountReconciliation} where ${accountReconciliation.accountId} = ${id})
+        or exists(select 1 from ${recurringSchedule} where ${recurringSchedule.accountId} = ${id})
+        or exists(select 1 from ${cardStatement} where ${cardStatement.cardAccountId} = ${id} or ${cardStatement.bankAccountId} = ${id})
+        or exists(select 1 from ${cardPaymentAccount} where ${cardPaymentAccount.cardAccountId} = ${id} or ${cardPaymentAccount.bankAccountId} = ${id})
       `,
     })
     .from(financialAccount)
@@ -214,11 +220,30 @@ export const accountsRouter = createTRPCRouter({
           .select({
             institutionId: financialAccount.institutionId,
             type: financialAccount.type,
+            currency: financialAccount.currency,
           })
           .from(financialAccount)
           .where(where)
           .limit(1);
         if (!current) throw new TRPCError({ code: "NOT_FOUND" });
+        if (values.currency !== current.currency) {
+          const [plans] = await tx
+            .select({
+              linked: sql<boolean>`
+            exists(select 1 from ${recurringSchedule} where ${recurringSchedule.accountId} = ${id})
+            or exists(select 1 from ${cardStatement} where ${cardStatement.cardAccountId} = ${id} or ${cardStatement.bankAccountId} = ${id})
+            or exists(select 1 from ${cardPaymentAccount} where ${cardPaymentAccount.cardAccountId} = ${id} or ${cardPaymentAccount.bankAccountId} = ${id})
+          `,
+            })
+            .from(financialAccount)
+            .where(where);
+          if (plans?.linked)
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "Remove linked plans, payment-bank settings and statement bills before changing this account's currency",
+            });
+        }
         // Holdings carry over between securities types (e.g. retirement to SRS); nothing else does.
         const keepsShape =
           holdsSecurities(current.type) && holdsSecurities(values.type);

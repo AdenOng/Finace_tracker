@@ -1,3 +1,4 @@
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { z } from "zod";
@@ -6,7 +7,10 @@ import { ImportReview } from "~/components/imports/import-review";
 import { requireEnrolledSession } from "~/server/auth";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Review import" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.imports.reviewPage.reviewImport };
+}
 
 export default async function ImportPage({
   params,

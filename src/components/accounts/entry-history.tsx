@@ -1,5 +1,7 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+
 import { FileUp, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -27,6 +29,8 @@ export function EntryHistory({
   onAdd: () => void;
   onChanged: (message: string) => Promise<void>;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const history = api.portfolio.history.useInfiniteQuery(
     { accountId: account.id },
     { getNextPageParam: (page) => page.nextCursor ?? undefined },
@@ -40,7 +44,7 @@ export function EntryHistory({
     onSuccess: async () => {
       setDeleting(null);
       await onChanged(
-        "Entry deleted. The account now uses its latest remaining dated entry.",
+        t.accounts.history.entryDeletedTheAccountNowUsesItsLatestRemainingDated,
       );
     },
   });
@@ -49,8 +53,11 @@ export function EntryHistory({
   return (
     <>
       <Section
-        title="Entry history"
-        description="Manage holdings and cash entered manually or imported from statements."
+        title={t.accounts.history.entryHistory}
+        description={
+          t.accounts.history
+            .manageHoldingsAndCashEnteredManuallyOrImportedFromStatements
+        }
         actions={
           <Button
             variant="secondary"
@@ -59,7 +66,7 @@ export function EntryHistory({
             disabled={!!account.archivedAt}
           >
             <Plus className="size-3.5" />
-            Add entry
+            {t.accounts.history.addEntry}
           </Button>
         }
       >
@@ -74,19 +81,26 @@ export function EntryHistory({
               className="underline"
               onClick={() => onEdit(null)}
             >
-              Dismiss
+              {t.accounts.history.dismiss}
             </button>
           </Notice>
         ) : null}
         {detail.isFetching && editId ? (
-          <p className="text-ink-3 text-sm">Loading entry…</p>
+          <p className="text-ink-3 text-sm">
+            {t.accounts.history.loadingEntry}
+          </p>
         ) : null}
         {history.isLoading ? (
-          <p className="text-ink-3 text-sm">Loading history…</p>
+          <p className="text-ink-3 text-sm">
+            {t.accounts.history.loadingHistory}
+          </p>
         ) : null}
         {!history.isLoading && !history.error && !entries.length ? (
           <p className="text-ink-3 text-sm">
-            No entries yet. Add holdings manually or import a statement image.
+            {
+              t.accounts.history
+                .noEntriesYetAddHoldingsManuallyOrImportAStatement
+            }
           </p>
         ) : null}
         <ul className="divide-line divide-y">
@@ -98,30 +112,35 @@ export function EntryHistory({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold">
-                    {formatDate(entry.asOf)}
+                    {formatDate(entry.asOf, locale)}
                   </span>
-                  {entry.id === currentId ? <Tag>Current</Tag> : null}
+                  {entry.id === currentId ? (
+                    <Tag>{t.accounts.history.current}</Tag>
+                  ) : null}
                   {!entry.positionCount && !entry.cashCount ? (
-                    <Tag tone="warn">Blank entry</Tag>
+                    <Tag tone="warn">{t.accounts.history.blankEntry}</Tag>
                   ) : null}
                 </div>
                 <p className="text-ink-3 mt-1 text-[12px]">
-                  {entry.source === "manual"
-                    ? "Manual"
-                    : entry.source === "statement"
-                      ? "Imported"
-                      : "Synced"}
-                  {entry.adjusted ? " · Adjusted" : ""} · {entry.positionCount}{" "}
-                  holding{entry.positionCount === 1 ? "" : "s"} ·{" "}
-                  {entry.cashCount} cash balance
-                  {entry.cashCount === 1 ? "" : "s"}
+                  {t.accounts.history.summary(
+                    entry.source === "manual"
+                      ? t.accounts.history.manual
+                      : entry.source === "statement"
+                        ? t.accounts.history.imported
+                        : t.accounts.history.synced,
+                    entry.adjusted,
+                    entry.positionCount,
+                    entry.cashCount,
+                  )}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {entry.importId ? (
                   <Link
                     href={`/imports/${entry.importId}`}
-                    aria-label={`View import for ${formatDate(entry.asOf)}`}
+                    aria-label={t.accounts.history.viewImport(
+                      formatDate(entry.asOf, locale),
+                    )}
                     className="hover:bg-wash rounded-ctl grid size-10 place-items-center"
                   >
                     <FileUp className="size-4" />
@@ -133,10 +152,12 @@ export function EntryHistory({
                   className="h-10"
                   disabled={!!account.archivedAt}
                   onClick={() => onEdit(entry.id)}
-                  aria-label={`Edit entry for ${formatDate(entry.asOf)}`}
+                  aria-label={t.accounts.history.editEntry(
+                    formatDate(entry.asOf, locale),
+                  )}
                 >
                   <Pencil className="size-3.5" />
-                  Edit
+                  {t.common.actions.edit}
                 </Button>
                 <Button
                   variant="ghost"
@@ -147,7 +168,9 @@ export function EntryHistory({
                     remove.reset();
                     setDeleting(entry);
                   }}
-                  aria-label={`Delete entry for ${formatDate(entry.asOf)}`}
+                  aria-label={t.accounts.history.deleteEntry(
+                    formatDate(entry.asOf, locale),
+                  )}
                 >
                   <Trash2 className="size-4" />
                 </Button>
@@ -163,7 +186,7 @@ export function EntryHistory({
             loading={history.isFetchingNextPage}
             onClick={() => void history.fetchNextPage()}
           >
-            Load older entries
+            {t.accounts.history.loadOlderEntries}
           </Button>
         ) : null}
       </Section>
@@ -185,10 +208,12 @@ export function EntryHistory({
         onClose={() => {
           if (!remove.isPending) setDeleting(null);
         }}
-        title="Delete entry"
+        title={t.accounts.history.deleteEntryTitle}
         description={
           deleting
-            ? `Remove the holdings and cash recorded for ${formatDate(deleting.asOf)}?`
+            ? t.accounts.history.removeConfirm(
+                formatDate(deleting.asOf, locale),
+              )
             : undefined
         }
         footer={
@@ -198,7 +223,7 @@ export function EntryHistory({
               disabled={remove.isPending}
               onClick={() => setDeleting(null)}
             >
-              Cancel
+              {t.common.actions.cancel}
             </Button>
             <Button
               variant="danger"
@@ -212,7 +237,7 @@ export function EntryHistory({
                   });
               }}
             >
-              Delete entry
+              {t.accounts.history.deleteEntryTitle}
             </Button>
           </>
         }
@@ -220,15 +245,13 @@ export function EntryHistory({
         {deleting ? (
           <div className="space-y-4">
             <p className="text-sm">
-              This removes {deleting.positionCount} holding
-              {deleting.positionCount === 1 ? "" : "s"} and {deleting.cashCount}{" "}
-              cash balance{deleting.cashCount === 1 ? "" : "s"} from this dated
-              entry.
+              {t.accounts.history.removeCount(
+                deleting.positionCount,
+                deleting.cashCount,
+              )}
             </p>
             <Notice tone={deleting.id === currentId ? "warn" : "info"}>
-              If this is the current entry, the most recent remaining dated
-              entry becomes the account value. The original upload, spending
-              transactions and imported trades stay saved.
+              {t.accounts.history.ifThisIsTheCurrentEntryTheMostRecentRemaining}
             </Notice>
             {remove.error ? (
               <Notice tone="error">{errorMessage(remove.error)}</Notice>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { categoryLabel, useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { Drawer } from "~/components/ui/dialog";
 import { Field, Input, Select } from "~/components/ui/field";
@@ -13,6 +14,7 @@ import { api, type RouterOutputs } from "~/trpc/react";
 type Rule = RouterOutputs["merchantRules"]["list"][number];
 
 export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const utils = api.useUtils();
   const rules = api.merchantRules.list.useQuery();
   const [categories] = api.catalog.categories.useSuspenseQuery();
@@ -37,7 +39,10 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
     else await create.mutateAsync(values);
     formElement.reset();
     setEditing(null);
-    setFlash("Rule saved. New uncategorised transactions will use your rules.");
+    setFlash(
+      t.spending.merchantRulesDrawer
+        .ruleSavedNewUncategorisedTransactionsWillUse,
+    );
     await utils.merchantRules.list.invalidate();
     await utils.merchantRules.preview.invalidate();
   }
@@ -46,11 +51,13 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
     <Drawer
       open
       onClose={onClose}
-      title="Merchant rules"
-      description="Match text in the merchant or description, ignoring case. Longer patterns win; ties use the oldest rule."
+      title={t.spending.merchantRulesDrawer.merchantRules}
+      description={
+        t.spending.merchantRulesDrawer.matchTextInTheMerchantOrDescription
+      }
       footer={
         <Button variant="ghost" onClick={onClose}>
-          Done
+          {t.common.actions.done}
         </Button>
       }
     >
@@ -63,9 +70,11 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
           onSubmit={(e) => void save(e).catch(() => undefined)}
         >
           <Field
-            label="Text contains"
+            label={t.spending.merchantRulesDrawer.textContains}
             htmlFor="rule-pattern"
-            hint="For example: fairprice, grab, or netflix."
+            hint={
+              t.spending.merchantRulesDrawer.forExampleFairpriceGrabOrNetflix
+            }
           >
             <Input
               id="rule-pattern"
@@ -75,7 +84,10 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
               defaultValue={editing?.pattern ?? ""}
             />
           </Field>
-          <Field label="Assign category" htmlFor="rule-category">
+          <Field
+            label={t.spending.merchantRulesDrawer.assignCategory}
+            htmlFor="rule-category"
+          >
             <Select
               id="rule-category"
               name="categoryId"
@@ -83,19 +95,21 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
               defaultValue={editing?.categoryId ?? ""}
             >
               <option value="" disabled>
-                Choose a category
+                {t.spending.merchantRulesDrawer.chooseACategory}
               </option>
               {orderCategories(categories).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.parentId ? "— " : ""}
-                  {c.name}
+                  {categoryLabel(t, c.name)}
                 </option>
               ))}
             </Select>
           </Field>
           <div className="flex gap-2">
             <Button type="submit" loading={busy}>
-              {editing ? "Save rule" : "Add rule"}
+              {editing
+                ? t.spending.merchantRulesDrawer.saveRule
+                : t.spending.merchantRulesDrawer.addRule}
             </Button>
             {editing ? (
               <Button
@@ -103,15 +117,16 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
                 variant="ghost"
                 onClick={() => setEditing(null)}
               >
-                Cancel edit
+                {t.spending.merchantRulesDrawer.cancelEdit}
               </Button>
             ) : null}
           </div>
         </form>
         <p className="text-ink-2 text-sm">
-          Manual categories and transfers are preserved. To apply rules to
-          existing entries, select transactions in Spending and choose Apply
-          rules.
+          {
+            t.spending.merchantRulesDrawer
+              .manualCategoriesAndTransfersArePreservedTo
+          }
         </p>
         <ul className="divide-line divide-y">
           {rules.data?.map((rule) => (
@@ -119,7 +134,7 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
               <p className="font-semibold">
                 {rule.pattern}{" "}
                 <span className="text-ink-2 font-normal">
-                  → {rule.categoryName}
+                  → {categoryLabel(t, rule.categoryName)}
                 </span>
               </p>
               <div className="flex gap-2">
@@ -135,7 +150,7 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
                     remove.reset();
                   }}
                 >
-                  Edit
+                  {t.common.actions.edit}
                 </Button>
                 <Button
                   size="sm"
@@ -158,7 +173,9 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
                       .catch(() => undefined);
                   }}
                 >
-                  {deleting === rule.id ? "Confirm delete" : "Delete"}
+                  {deleting === rule.id
+                    ? t.spending.merchantRulesDrawer.confirmDelete
+                    : t.common.actions.delete}
                 </Button>
                 {deleting === rule.id ? (
                   <Button
@@ -166,7 +183,7 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
                     variant="ghost"
                     onClick={() => setDeleting(null)}
                   >
-                    Cancel
+                    {t.common.actions.cancel}
                   </Button>
                 ) : null}
               </div>
@@ -174,7 +191,9 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
           ))}
         </ul>
         {rules.data?.length === 0 ? (
-          <p className="text-ink-2 text-sm">No rules yet.</p>
+          <p className="text-ink-2 text-sm">
+            {t.spending.merchantRulesDrawer.noRulesYet}
+          </p>
         ) : null}
       </div>
     </Drawer>

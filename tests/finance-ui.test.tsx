@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { getQueryKey } from "@trpc/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
+import { LocaleProvider } from "../src/i18n/client";
 
 import { ConsolidatedPortfolio } from "../src/components/portfolio/consolidated-portfolio";
 import { consolidateHoldings } from "../src/server/modules/portfolio/consolidated";
@@ -13,11 +14,19 @@ import { TransactionDrawer } from "../src/components/spending/transaction-drawer
 import { TransferReview } from "../src/components/spending/transfer-review";
 import { MobileTransactionRow } from "../src/components/spending/mobile-transaction-row";
 import { SpendingView } from "../src/components/spending/spending-view";
+import { CardBills } from "../src/components/planning/card-bills";
+import {
+  CashFlowView,
+  ForecastChart,
+} from "../src/components/planning/cash-flow-view";
 import { AccountRow } from "../src/components/overview/account-row";
 import { AccountsView } from "../src/components/accounts/accounts-view";
 import { BalanceDate } from "../src/components/finance/balance-date";
 import { TransferFreshnessNotices } from "../src/components/overview/transfer-freshness-notices";
-import { AmountsProvider, AmountsScope } from "../src/components/finance/privacy";
+import {
+  AmountsProvider,
+  AmountsScope,
+} from "../src/components/finance/privacy";
 import { transferFreshnessWarnings } from "../src/server/modules/transfers/freshness";
 import { NetWorthChart } from "../src/components/overview/net-worth-chart";
 import { netWorthSeries } from "../src/lib/net-worth-series";
@@ -569,6 +578,24 @@ test("workspace viewer markup omits sharing, invitation and membership managemen
   expect(owner).toContain("Create invitation link");
   expect(owner).toContain("Stop sharing");
   expect(owner).toContain("Transfer ownership");
+
+  // Saving another setting must preserve the stored purpose in either language.
+  for (const locale of ["en", "zh"] as const) {
+    for (const kind of ["family", "fund", "custom"] as const) {
+      const localized = render(
+        <LocaleProvider locale={locale}>
+          <WorkspaceManagement
+            workspace={{ ...w, userId: "owner", role: "owner", kind }}
+            accounts={[account]}
+          />
+        </LocaleProvider>,
+      );
+      const purpose = /<select[^>]*name="kind"[^>]*>([\s\S]*?)<\/select>/.exec(
+        localized,
+      )?.[1];
+      expect(purpose).toContain(`value="${kind}" selected=""`);
+    }
+  }
 });
 
 test("personal and distinct workspace queries have separate cache identities", () => {
@@ -1354,6 +1381,37 @@ test("import amount warnings show printed evidence and corrections without block
         [],
       );
     });
+  const original = job.rows[0]!;
+  if (original.kind !== "transaction")
+    throw new Error("Expected transaction fixture");
+  const mixed = review({
+    ...job,
+    rows: [
+      {
+        ...original,
+        data: { ...original.data, currency: "SGD", amount: "-100" },
+      },
+      {
+        ...original,
+        id: "usd",
+        data: { ...original.data, currency: "USD", amount: "-100" },
+      },
+      {
+        ...original,
+        id: "skipped",
+        decision: "skip",
+        data: { ...original.data, amount: "-500" },
+      },
+      {
+        ...original,
+        id: "transfer",
+        data: { ...original.data, amount: "-500", isTransfer: true },
+      },
+    ],
+  });
+  expect(mixed).toContain("S$100.00 · US$100.00 out");
+  expect(mixed).not.toContain("S$200.00 out");
+  expect(mixed).not.toContain("S$600.00 out");
   const html = review(job);
   expect(html).toContain("Statement shows CR 45.00");
   expect(html).toContain("Check amount/direction");
@@ -1736,4 +1794,177 @@ test("transfer review explains unmatched sides and an empty queue", () => {
   expect(html).toContain("Linked transfers (0)");
   expect(html).toContain("No suggested matches.");
   expect(html).toContain("No transfers without a match.");
+});
+
+function planningFixture(): RouterOutputs["planning"]["overview"] {
+  return {
+    today: "2026-10-28",
+    from: "2026-07-30",
+    through: "2026-11-27",
+    accounts: [
+      {
+        id: accountId,
+        name: "Everyday bank",
+        type: "checking",
+        currency: "SGD",
+        archived: false,
+      },
+      {
+        id: "card",
+        name: "Everyday card",
+        type: "credit_card",
+        currency: "SGD",
+        archived: false,
+      },
+      {
+        id: "usd-bank",
+        name: "USD bank",
+        type: "savings",
+        currency: "USD",
+        archived: false,
+      },
+    ],
+    schedules: [],
+    occurrences: [],
+    profiles: [],
+    bills: [],
+    forecasts: [
+      {
+        accountId,
+        name: "Everyday bank",
+        currency: "SGD",
+        asOf: "2026-10-27",
+        balance: "1000",
+        projected: "900",
+        lowest: "900",
+        points: [
+          { date: "2026-10-28", balance: "1000", change: "0" },
+          { date: "2026-11-27", balance: "900", change: "-100" },
+        ],
+        events: [{ name: "Rent", date: "2026-11-01", amount: "-100" }],
+      },
+    ],
+  };
+}
+
+test("card billing shows unknown until entered, and offers only same-currency payment banks", () => {
+  const html = render(<CardBills data={planningFixture()} />);
+  expect(html).toContain("Payment bank: Not linked");
+  expect(html).toContain("Payment status is unknown");
+  expect(html).toContain('value="11111111-1111-4111-8111-111111111111"');
+  expect(html).not.toContain('value="usd-bank"');
+  expect(html).toContain('href="/spending/transfers"');
+  expect(html).toContain("it does not set up a direct debit");
+});
+
+test("card billing renders partial and paid statement evidence with privacy masking scopes", () => {
+  const data = planningFixture();
+  data.profiles = [
+    {
+      cardAccountId: "card",
+      bankAccountId: accountId,
+      ownerId: "alice",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ];
+  const statement: RouterOutputs["planning"]["overview"]["bills"][number] = {
+    id: "bill",
+    ownerId: "alice",
+    cardAccountId: "card",
+    bankAccountId: accountId,
+    statementDate: "2026-10-01",
+    dueDate: "2026-10-31",
+    amountDue: "300",
+    currency: "SGD",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    paid: "100",
+    remaining: "200",
+    status: "partial",
+    paidOn: null,
+    paidLate: false,
+    payments: [
+      {
+        id: "transfer",
+        bankAccountId: accountId,
+        cardAccountId: "card",
+        amount: "100",
+        currency: "SGD",
+        date: "2026-10-20",
+      },
+    ],
+  };
+  data.bills = [statement];
+  const html = render(
+    <AmountsProvider initial={{ hidden: true, scopes: {} }}>
+      <CardBills data={data} />
+    </AmountsProvider>,
+  );
+  expect(html).toContain("Partially paid");
+  expect(html).toContain("Confirmed payments after this statement");
+  expect(html).toContain('data-amounts-scope="hidden"');
+  expect(html).toContain('class="sensitive font-mono"');
+  expect(html).not.toContain("Mark as paid");
+  data.bills = [
+    {
+      ...statement,
+      paid: "300",
+      remaining: "0",
+      status: "paid",
+      paidOn: "2026-10-20",
+    },
+  ];
+  const paid = render(<CardBills data={data} />);
+  expect(paid).toContain("Paid off");
+  expect(paid).toContain("Paid off on");
+  expect(paid).toContain("no remaining amount to reserve");
+});
+
+test("cash-flow page renders forecast choices, daily balances and missing-balance guidance", () => {
+  const data = planningFixture();
+  const setup = (client: ReturnType<typeof createQueryClient>) =>
+    client.setQueryData(
+      getQueryKey(api.planning.overview, { days: 30 }, "query"),
+      data,
+    );
+  const html = render(<CashFlowView />, setup);
+  expect(html).toContain("Cash flow");
+  expect(html).toContain('value="30"');
+  expect(html).toContain('value="60"');
+  expect(html).toContain('value="90"');
+  expect(html).toContain("Lowest projected balance");
+  expect(html).toContain("Daily projected balances");
+  expect(html).toContain("Rent");
+  expect(html).not.toMatch(/NaN|Infinity/);
+  data.forecasts[0] = {
+    ...data.forecasts[0]!,
+    balance: null,
+    projected: null,
+    lowest: null,
+    points: [],
+  };
+  const missing = render(<CashFlowView />, setup);
+  expect(missing).toContain("Record a balance in SGD");
+  expect(missing).not.toContain("Lowest projected balance");
+});
+
+test("forecast chart handles constant and large precise balances without invalid coordinates", () => {
+  for (const balances of [
+    ["0", "0"],
+    ["9999999999999999.9998", "9999999999999999.9999"],
+    ["-100", "100"],
+  ]) {
+    const html = renderToStaticMarkup(
+      <ForecastChart
+        points={balances.map((balance, i) => ({
+          date: i ? "2026-11-27" : "2026-10-28",
+          balance,
+          change: "0",
+        }))}
+      />,
+    );
+    expect(html).toContain("<path");
+    expect(html).not.toMatch(/NaN|Infinity/);
+  }
 });

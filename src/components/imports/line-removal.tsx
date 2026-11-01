@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import Link from "next/link";
 
 import { Button } from "~/components/ui/button";
@@ -47,6 +48,7 @@ function Review({
   onClose: () => void;
   onRemoved: () => Promise<void>;
 }) {
+  const t = useT();
   const preview = api.imports.lineRemovalPreview.useQuery(
     { jobId, rowId },
     { staleTime: 0, refetchOnWindowFocus: false, retry: false },
@@ -59,12 +61,12 @@ function Review({
       onClose={() => {
         if (!remove.isPending) onClose();
       }}
-      title="Remove imported row"
-      description="Review the saved record before removing it."
+      title={t.imports.lineRemoval.removeImportedRow}
+      description={t.imports.lineRemoval.reviewTheSavedRecordBefore}
       footer={
         <>
           <Button variant="ghost" disabled={remove.isPending} onClick={onClose}>
-            Cancel
+            {t.imports.lineRemoval.cancel}
           </Button>
           <Button
             variant="danger"
@@ -76,14 +78,16 @@ function Review({
               if (line) remove.mutate({ jobId, rowId, version: line.version });
             }}
           >
-            Remove row
+            {t.imports.lineRemoval.removeRow}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
         {preview.isLoading ? (
-          <p className="text-ink-2 text-sm">Checking the saved row…</p>
+          <p className="text-ink-2 text-sm">
+            {t.imports.lineRemoval.checkingTheSavedRow}
+          </p>
         ) : null}
         {line ? (
           <>
@@ -101,9 +105,7 @@ function Review({
             </dl>
             <Notice tone="warn">{line.effect}</Notice>
             <p className="text-ink-2 text-sm">
-              The original upload and extraction stay available, with this row
-              marked Removed. Other imported rows stay saved. This removal
-              cannot be undone here; you can add a corrected entry manually.
+              {t.imports.lineRemoval.theOriginalUploadAndExtraction}
             </p>
           </>
         ) : null}
@@ -117,7 +119,7 @@ function Review({
             href={`/accounts/${accountId}`}
             className="text-sm font-semibold underline underline-offset-4"
           >
-            Open account and Entry history
+            {t.imports.lineRemoval.openAccountAndEntryHistory}
           </Link>
         ) : null}
       </div>

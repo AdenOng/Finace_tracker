@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "~/i18n/client";
+
 import { ArrowLeft, FileUp, Pencil, RefreshCw } from "lucide-react";
 import Decimal from "decimal.js";
 import Link from "next/link";
@@ -7,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AccountDrawer } from "~/components/accounts/account-drawer";
+import { CardBillTracking } from "~/components/planning/card-bills";
 import { EntryHistory } from "~/components/accounts/entry-history";
 import { AccountReconciliation } from "~/components/accounts/account-reconciliation";
 import { AccountTransactions } from "~/components/accounts/account-transactions";
@@ -23,14 +26,7 @@ import {
   Tag,
 } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
-import {
-  accountGroupOf,
-  accountGroups,
-  accountTypeLabels,
-  assetClassLabels,
-  cpfBucketLabels,
-  holdsSecurities,
-} from "~/lib/accounts";
+import { accountGroupOf, holdsSecurities } from "~/lib/accounts";
 import { formatMoney, formatQuantity } from "~/lib/format";
 import { api, type RouterOutputs } from "~/trpc/react";
 
@@ -46,6 +42,8 @@ export function AccountDetail({
   /** Open the holdings or balance form straight away, as after adding the account. */
   startRecording?: boolean;
 }) {
+  const t = useT();
+
   const router = useRouter();
   const utils = api.useUtils();
   const [account, accountQuery] = api.accounts.get.useSuspenseQuery(
@@ -96,7 +94,7 @@ export function AccountDetail({
         className="text-ink-2 hover:text-ink mb-4 inline-flex items-center gap-1.5 text-sm font-semibold"
       >
         <ArrowLeft className="size-4" />
-        Accounts
+        {t.accounts.detail.accounts}
       </Link>
       <div className="mb-4 flex items-center gap-3">
         <InstitutionMark
@@ -105,13 +103,13 @@ export function AccountDetail({
           className="size-12"
         />
         <Tag tone="outline">
-          {accountGroups[accountGroupOf(account.type)].label}
+          {t.common.accountGroups[accountGroupOf(account.type)]}
         </Tag>
       </div>
       <PageHeader
         title={account.name}
         description={[
-          accountTypeLabels[account.type],
+          t.common.accountTypes[account.type],
           account.institutionName,
           account.last4 ? `··${account.last4}` : null,
         ]
@@ -119,27 +117,27 @@ export function AccountDetail({
           .join(" · ")}
         actions={
           readOnly ? (
-            <Tag tone="outline">Read-only</Tag>
+            <Tag tone="outline">{t.accounts.detail.readOnly}</Tag>
           ) : account.archivedAt ? (
             <Button
               variant="secondary"
               onClick={() => restore.mutate({ id })}
               loading={restore.isPending}
             >
-              Restore
+              {t.accounts.detail.restore}
             </Button>
           ) : (
             <>
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 <Pencil className="size-4" />
-                Edit
+                {t.common.actions.edit}
               </Button>
               <Link
                 href={`/imports?account=${account.id}`}
                 className="rounded-ctl border-line-2 bg-surface-2 hover:bg-wash inline-flex h-10 items-center gap-2 border px-4 text-sm font-semibold transition-colors"
               >
                 <FileUp className="size-4" />
-                Import statement
+                {t.accounts.detail.importStatement}
               </Link>
               <Button
                 onClick={() =>
@@ -149,7 +147,9 @@ export function AccountDetail({
                 }
               >
                 <RefreshCw className="size-4" />
-                {investments ? "Update holdings" : "Update balance"}
+                {investments
+                  ? t.accounts.detail.updateHoldings
+                  : t.accounts.detail.updateBalance}
               </Button>
             </>
           )
@@ -158,14 +158,12 @@ export function AccountDetail({
 
       {readOnly ? (
         <Notice className="mb-8">
-          Shared by {account.ownerName}. Financial edits are available to the
-          owner in Personal view.
+          {t.accounts.detail.sharedBy(account.ownerName ?? "")}
         </Notice>
       ) : null}
       {account.archivedAt ? (
         <Notice tone="warn" className="mb-8">
-          This account is archived. It is left out of your net worth and cannot
-          take new entries until restored.
+          {t.accounts.detail.thisAccountIsArchivedItIsLeftOutOfYour}
         </Notice>
       ) : null}
       {flash ? (
@@ -175,20 +173,25 @@ export function AccountDetail({
       ) : null}
 
       <div className="space-y-4">
+        {!readOnly && account.type === "credit_card" ? (
+          <CardBillTracking accountId={account.id} />
+        ) : null}
         <Section
           amounts="account-value"
           amountsFor={account.id}
-          title={investments ? "Value" : "Balance"}
+          title={
+            investments ? t.accounts.detail.value : t.accounts.detail.balance
+          }
           description={
             holdings ? (
               <>
                 <BalanceDate asOf={holdings.asOf} />
                 {holdings.source === "manual"
                   ? readOnly
-                    ? ", entered by the owner"
-                    : ", entered by you"
+                    ? t.accounts.detail.enteredByTheOwner
+                    : t.accounts.detail.enteredByYou
                   : ""}
-                .
+                {t.accounts.detail.period}
               </>
             ) : undefined
           }
@@ -197,31 +200,32 @@ export function AccountDetail({
             <div className="space-y-2">
               <Amounts
                 totals={holdings.totals}
-                empty="Nothing held"
+                empty={t.accounts.detail.nothingHeld}
                 className="font-poster text-[44px] leading-none font-extrabold"
               />
               {holdings.unpriced > 0 ? (
                 <p className="text-warn text-sm">
-                  {holdings.unpriced} holding
-                  {holdings.unpriced === 1 ? " has" : "s have"} no price and{" "}
-                  {holdings.unpriced === 1 ? "is" : "are"} not counted.
+                  {t.accounts.detail.unpriced(holdings.unpriced)}
                 </p>
               ) : null}
             </div>
           ) : (
             <EmptyState
-              title="Nothing recorded yet"
+              title={t.accounts.detail.nothingRecordedYet}
               action={
                 readOnly || account.archivedAt ? undefined : (
                   <Button onClick={() => setUpdating(true)}>
-                    {investments ? "Record holdings" : "Record balance"}
+                    {investments
+                      ? t.accounts.detail.recordHoldings
+                      : t.accounts.detail.recordBalance}
                   </Button>
                 )
               }
             >
               {investments
-                ? "Enter what this account holds and its cash to include it in your net worth."
-                : "Enter the current balance to include this account in your net worth."}
+                ? t.accounts.detail.enterWhatThisAccountHoldsAndItsCashToInclude
+                : t.accounts.detail
+                    .enterTheCurrentBalanceToIncludeThisAccountInYour}
             </EmptyState>
           )}
         </Section>
@@ -230,7 +234,7 @@ export function AccountDetail({
           <Section
             amounts="account-split"
             amountsFor={account.id}
-            title="By account"
+            title={t.accounts.detail.byAccount}
           >
             <ul className="max-w-md">
               {cpfSplit.map((c) => (
@@ -239,7 +243,9 @@ export function AccountDetail({
                   className="border-line flex items-baseline justify-between border-b py-2.5 text-sm"
                 >
                   <span>
-                    {c.bucket ? cpfBucketLabels[c.bucket] : "Not split"}
+                    {c.bucket
+                      ? t.common.cpfBuckets[c.bucket]
+                      : t.accounts.detail.notSplit}
                   </span>
                   <span className="figures sensitive font-mono">
                     {formatMoney(c.amount, c.currency)}
@@ -254,22 +260,28 @@ export function AccountDetail({
           <Section
             amounts="account-holdings"
             amountsFor={account.id}
-            title="Holdings"
+            title={t.accounts.detail.holdings}
           >
             {holdings.positions.length === 0 ? (
-              <p className="text-ink-2 text-sm">Only cash is held.</p>
+              <p className="text-ink-2 text-sm">
+                {t.accounts.detail.onlyCashIsHeld}
+              </p>
             ) : (
               <Table>
                 <thead>
                   <tr>
-                    <Th>Holding</Th>
-                    <Th>Type</Th>
-                    <Th className="text-right">Quantity</Th>
-                    <Th className="text-right">Price</Th>
-                    <Th className="text-right">Average cost</Th>
-                    <Th className="text-right">Value</Th>
+                    <Th>{t.accounts.detail.holding}</Th>
+                    <Th>{t.common.fields.type}</Th>
+                    <Th className="text-right">{t.accounts.detail.quantity}</Th>
+                    <Th className="text-right">{t.accounts.detail.price}</Th>
+                    <Th className="text-right">
+                      {t.accounts.detail.averageCost}
+                    </Th>
+                    <Th className="text-right">{t.accounts.detail.value}</Th>
                     {positionsTotal ? (
-                      <Th className="w-32 text-right">Weight</Th>
+                      <Th className="w-32 text-right">
+                        {t.accounts.detail.weight}
+                      </Th>
                     ) : null}
                   </tr>
                 </thead>
@@ -290,7 +302,7 @@ export function AccountDetail({
                         ) : null}
                       </Td>
                       <Td className="text-ink-2">
-                        {assetClassLabels[p.assetClass]}
+                        {t.common.assetClasses[p.assetClass]}
                       </Td>
                       <Td className="figures text-right">
                         <span className="sensitive">
@@ -313,7 +325,7 @@ export function AccountDetail({
                             {formatMoney(p.value.amount, p.value.currency)}
                           </span>
                         ) : (
-                          <Tag tone="warn">No price</Tag>
+                          <Tag tone="warn">{t.accounts.detail.noPrice}</Tag>
                         )}
                       </Td>
                       {positionsTotal ? (
@@ -337,7 +349,11 @@ export function AccountDetail({
         ) : null}
 
         {investments && holdings && holdings.cash.length > 0 ? (
-          <Section amounts="account-cash" amountsFor={account.id} title="Cash">
+          <Section
+            amounts="account-cash"
+            amountsFor={account.id}
+            title={t.accounts.detail.cash}
+          >
             <Amounts totals={holdings.cash} className="text-lg" />
           </Section>
         ) : null}

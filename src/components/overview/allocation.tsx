@@ -1,4 +1,7 @@
-import { assetClassLabels } from "~/lib/accounts";
+"use client";
+
+import { useT } from "~/i18n/client";
+import type { assetClassLabels } from "~/lib/accounts";
 
 type AssetClassKey = keyof typeof assetClassLabels;
 
@@ -36,6 +39,7 @@ export type AllocationSlice = {
 
 /** Stacked bar of the portfolio by asset class, with a legend that carries the values. */
 export function Allocation({ slices }: { slices: AllocationSlice[] }) {
+  const t = useT();
   const inBarOrder = ORDER.flatMap((k) =>
     slices.filter((s) => s.assetClass === k),
   );
@@ -48,7 +52,8 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
         role="img"
         aria-label={bySize
           .map(
-            (s) => `${assetClassLabels[s.assetClass]} ${s.share.toFixed(1)}%`,
+            (s) =>
+              `${t.common.assetClasses[s.assetClass]} ${s.share.toFixed(1)}%`,
           )
           .join(", ")}
         className="flex h-4 gap-[2px]"
@@ -56,7 +61,7 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
         {inBarOrder.map((s) => (
           <span
             key={s.assetClass}
-            title={`${assetClassLabels[s.assetClass]} · ${s.share.toFixed(1)}%`}
+            title={`${t.common.assetClasses[s.assetClass]} · ${s.share.toFixed(1)}%`}
             className="border-ink/25 min-w-[3px] border first:rounded-l-[4px] last:rounded-r-[4px]"
             style={{ width: `${s.share}%`, background: FILLS[s.assetClass] }}
           />
@@ -73,7 +78,7 @@ export function Allocation({ slices }: { slices: AllocationSlice[] }) {
               style={{ background: FILLS[s.assetClass] }}
             />
             <span className="min-w-0 flex-1 truncate">
-              {assetClassLabels[s.assetClass]}
+              {t.common.assetClasses[s.assetClass]}
             </span>
             <span className="figures sensitive font-mono text-[12px]">
               {s.display}

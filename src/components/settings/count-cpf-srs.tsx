@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import { useRouter } from "next/navigation";
 
 import { Checkbox } from "~/components/ui/field";
@@ -7,6 +8,7 @@ import { api } from "~/trpc/react";
 
 /** Whether CPF and SRS balances count toward the net worth headline. */
 export function CountCpfSrs() {
+  const t = useT();
   const router = useRouter();
   const utils = api.useUtils();
   const [settings] = api.settings.get.useSuspenseQuery();
@@ -25,8 +27,8 @@ export function CountCpfSrs() {
   return (
     <div className="border-line mt-6 border-t pt-6">
       <Checkbox
-        label="Count CPF and SRS in net worth"
-        description="They still show on the overview either way. Most of it can't be withdrawn until 55 or later."
+        label={t.settings.countCpfSrs.countCpfAndSrsIn}
+        description={t.settings.countCpfSrs.theyStillShowOnThe}
         checked={
           mutation.isPending ? mutation.variables.count : settings.countCpfSrs
         }

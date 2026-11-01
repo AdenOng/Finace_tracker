@@ -9,11 +9,12 @@ import {
   useState,
 } from "react";
 
+import { useLocale, useT } from "~/i18n/client";
 import { cn } from "~/lib/cn";
 
 import { CompanyLogo } from "./company-logo";
 import { ChartPage, money } from "./poster";
-import { ACCOUNTS, CLASSES, MONTHS, SAMPLE_YEAR } from "./sample-year";
+import { ACCOUNTS, CLASSES, sampleMonths, SAMPLE_YEAR } from "./sample-year";
 import { useReducedMotion } from "./use-motion";
 
 const OPENING_WORTH = SAMPLE_YEAR[0]!.worth - SAMPLE_YEAR[0]!.change;
@@ -65,6 +66,9 @@ function Paper({
 
 /** Left-hand page: the month's account balances, adding up to the net worth on the right. */
 function LedgerPage({ month }: { month: number }) {
+  const t = useT();
+  const locale = useLocale();
+  const months = sampleMonths(locale);
   const data = SAMPLE_YEAR[month]!;
   const previous = month === 0 ? OPENING_WORTH : SAMPLE_YEAR[month - 1]!.worth;
 
@@ -72,17 +76,19 @@ function LedgerPage({ month }: { month: number }) {
     <div className="text-paper-ink @container aspect-[400/520]">
       <div className="flex h-full flex-col px-[7%] pt-[5.5%] pb-[6%]">
         <div className="flex items-baseline justify-between border-b border-current/25 pb-[3%]">
-          <span className="font-poster text-[3.5cqw] font-bold">Accounts</span>
+          <span className="font-poster text-[3.5cqw] font-bold">
+            {t.landing.book.accounts}
+          </span>
           <span className="font-mono text-[2cqw] tracking-[0.14em]">
-            SAMPLE PORTFOLIO
+            {t.landing.book.samplePortfolio}
           </span>
         </div>
 
         <p className="font-poster mt-[6%] text-[10cqw] leading-none font-extrabold">
-          {MONTHS[month]}
+          {months[month]}
         </p>
         <p className="mt-[1.5%] font-mono text-[2.1cqw] tracking-[0.12em] opacity-60">
-          BALANCES AT MONTH END, S$
+          {t.landing.book.monthEnd}
         </p>
 
         <ul className="mt-[5%] divide-y divide-current/10 text-[3.25cqw]">
@@ -96,7 +102,7 @@ function LedgerPage({ month }: { month: number }) {
                     {a.name}
                   </span>
                   <span className="block font-mono text-[2.1cqw] leading-tight opacity-55">
-                    {c.label}
+                    {t.landing.sample.classes[c.key]}
                   </span>
                 </span>
                 <span className="figures font-mono">
@@ -109,11 +115,15 @@ function LedgerPage({ month }: { month: number }) {
 
         <dl className="mt-auto space-y-[2.5%] border-t border-current pt-[4%] text-[3.25cqw]">
           <div className="flex justify-between opacity-70">
-            <dt>From {month === 0 ? "last December" : MONTHS[month - 1]}</dt>
+            <dt>
+              {t.landing.book.from(
+                month === 0 ? t.landing.book.lastDecember : months[month - 1]!,
+              )}
+            </dt>
             <dd className="figures font-mono">{amount(previous)}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="opacity-70">Change</dt>
+            <dt className="opacity-70">{t.landing.book.change}</dt>
             <dd
               className={cn(
                 "figures font-mono font-semibold",
@@ -125,7 +135,9 @@ function LedgerPage({ month }: { month: number }) {
             </dd>
           </div>
           <div className="flex items-baseline justify-between border-t border-current/25 pt-[2.5%]">
-            <dt className="font-poster text-[1.15em] font-bold">Net worth</dt>
+            <dt className="font-poster text-[1.15em] font-bold">
+              {t.landing.book.netWorth}
+            </dt>
             <dd className="figures font-poster text-[1.5em] font-extrabold">
               {money(data.worth)}
             </dd>
@@ -138,11 +150,14 @@ function LedgerPage({ month }: { month: number }) {
 
 /** Phones show one page, so the accounts that add up to it sit underneath. */
 function LedgerStrip({ month }: { month: number }) {
+  const t = useT();
+  const locale = useLocale();
+  const months = sampleMonths(locale);
   const data = SAMPLE_YEAR[month]!;
   return (
     <div className="bg-paper text-paper-ink mt-4 rounded-[6px] p-4 sm:hidden">
       <p className="font-mono text-[10px] tracking-[0.12em] uppercase opacity-60">
-        {MONTHS[month]} · accounts
+        {t.landing.book.monthAccounts(months[month]!)}
       </p>
       <ul className="mt-3 grid gap-x-5 gap-y-3 text-[13px] sm:grid-cols-2">
         {ACCOUNTS.map((a, i) => (
@@ -156,7 +171,9 @@ function LedgerStrip({ month }: { month: number }) {
         ))}
       </ul>
       <p className="mt-3 flex items-baseline justify-between border-t border-current/25 pt-3">
-        <span className="text-[13px] opacity-70">Net worth</span>
+        <span className="text-[13px] opacity-70">
+          {t.landing.book.netWorth}
+        </span>
         <span className="font-poster figures text-[22px] font-bold">
           {money(data.worth)}
         </span>
@@ -255,6 +272,9 @@ export function Book({
   onPageChange?: (month: number) => void;
 }) {
   const reduced = useReducedMotion();
+  const t = useT();
+  const locale = useLocale();
+  const months = sampleMonths(locale);
   const [page, setPage] = useState(0);
   const [turn, setTurn] = useState<Turn | null>(null);
   const [write, setWrite] = useState(1);
@@ -568,8 +588,8 @@ export function Book({
       <div
         ref={bookRef}
         role="group"
-        aria-roledescription="book"
-        aria-label={`Sample ledger, ${MONTHS[page]}. Use the arrow keys to turn pages.`}
+        aria-roledescription={t.landing.book.role}
+        aria-label={t.landing.book.aria(months[page]!)}
         tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -629,13 +649,13 @@ export function Book({
             turnTo(Math.max(0, page - 1));
           }}
           disabled={page === 0}
-          aria-label="Previous month"
+          aria-label={t.landing.book.previous}
           className="text-ink-2 hover:bg-wash hover:text-ink rounded-ctl grid size-9 place-items-center transition-colors disabled:opacity-30"
         >
           <ChevronLeft className="size-4" />
         </button>
         <ol className="flex flex-1 justify-between gap-0.5">
-          {MONTHS.map((m, i) => (
+          {months.map((m, i) => (
             <li key={m} className="flex-1">
               <button
                 type="button"
@@ -649,7 +669,7 @@ export function Book({
                   i === page ? "text-ink" : "text-ink-3 hover:text-ink-2",
                 )}
               >
-                {m[0]}
+                {locale === "zh" ? i + 1 : m[0]}
                 <span
                   className={cn(
                     "h-[3px] w-full max-w-6 rounded-full transition-colors",
@@ -670,7 +690,7 @@ export function Book({
             turnTo(Math.min(11, page + 1));
           }}
           disabled={page === 11}
-          aria-label="Next month"
+          aria-label={t.landing.book.next}
           className="text-ink-2 hover:bg-wash hover:text-ink rounded-ctl grid size-9 place-items-center transition-colors disabled:opacity-30"
         >
           <ChevronRight className="size-4" />
@@ -680,7 +700,7 @@ export function Book({
           onClick={() => {
             setPlaying((p) => !p);
           }}
-          aria-label={playing ? "Pause" : "Play"}
+          aria-label={playing ? t.landing.book.pause : t.landing.book.play}
           className="text-ink-2 hover:bg-wash hover:text-ink rounded-ctl border-line ml-1 grid size-9 place-items-center border transition-colors"
         >
           {playing ? (
@@ -696,17 +716,12 @@ export function Book({
       <figcaption className="mt-5 grid grid-cols-[auto_1fr] gap-x-4 text-[12px] leading-relaxed">
         <span className="bg-ink-3 mt-2 h-px w-6" />
         <div>
-          <p className="text-ink font-medium">
-            Nº 01 — A year of one portfolio
-          </p>
+          <p className="text-ink font-medium">{t.landing.book.caption}</p>
           <p className="text-ink-3 max-w-xl">
             <span className="hidden sm:inline">
-              The accounts on the left add up to the net worth on the
-              right.{" "}
+              {t.landing.book.captionLeft}{" "}
             </span>
-            The line shows net worth so far, and the allocation below shows what
-            it&apos;s made of. Drag a page corner, click a page or pick a month
-            to turn. Sample figures.
+            {t.landing.book.captionBody}
           </p>
         </div>
       </figcaption>

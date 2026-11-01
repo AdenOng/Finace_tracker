@@ -1,3 +1,5 @@
+"use client";
+import { useT, useLocale } from "~/i18n/client";
 import Link from "next/link";
 
 import { Notice } from "~/components/ui/panel";
@@ -11,6 +13,8 @@ export function TransferFreshnessNotices({
   warnings: TransferFreshnessWarning[];
   workspaceId?: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
   return warnings.map((warning) => {
     const { outgoing, incoming } = warning;
     const stale =
@@ -18,22 +22,26 @@ export function TransferFreshnessNotices({
     const fresh = stale === outgoing ? incoming : outgoing;
     return (
       <Notice key={warning.id} tone="warn" className="mt-4">
-        Transfer from {outgoing.accountName} (
+        {t.overview.transferFreshnessNotices.from(outgoing.accountName)}
         <span className="sensitive">
           {formatMoney(outgoing.amount, outgoing.currency)}
         </span>{" "}
-        on {formatDate(outgoing.date)}) to {incoming.accountName} (
+        {t.overview.transferFreshnessNotices.to(
+          formatDate(outgoing.date, locale),
+          incoming.accountName,
+        )}
         <span className="sensitive">
           {formatMoney(incoming.amount, incoming.currency)}
         </span>{" "}
-        on {formatDate(incoming.date)}) is temporarily{" "}
-        {warning.kind === "missing"
-          ? "missing from net worth"
-          : "counted twice in net worth"}
-        : {fresh.accountName}&apos;s balance from {formatDate(fresh.asOf)}{" "}
-        includes it, but {stale.accountName}&apos;s is from{" "}
-        {formatDate(stale.asOf)}, before the transfer{" "}
-        {stale === outgoing ? "left" : "reached"} it.{" "}
+        {t.overview.transferFreshnessNotices.explanation(
+          formatDate(incoming.date, locale),
+          warning.kind === "missing",
+          fresh.accountName,
+          formatDate(fresh.asOf, locale),
+          stale.accountName,
+          formatDate(stale.asOf, locale),
+          stale === outgoing,
+        )}{" "}
         <Link
           className="font-semibold underline underline-offset-4"
           href={
@@ -42,12 +50,12 @@ export function TransferFreshnessNotices({
               : `/accounts/${stale.accountId}`
           }
         >
-          {workspaceId
-            ? `Ask the owner to update ${stale.accountName}`
-            : `Update ${stale.accountName}`}{" "}
-          to fix
+          {t.overview.transferFreshnessNotices.update(
+            stale.accountName,
+            !!workspaceId,
+          )}
         </Link>
-        .
+        {t.overview.sentenceEnd}
       </Notice>
     );
   });

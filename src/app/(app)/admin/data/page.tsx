@@ -1,3 +1,4 @@
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 import { requireAdminSession } from "~/server/auth";
 
@@ -6,16 +7,20 @@ import { BackupsAdmin } from "~/components/admin/data-admin";
 import { PageHeader } from "~/components/ui/panel";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Backups" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.adminManage.pages.data.meta };
+}
 
 export default async function AdminBackupsPage() {
+  const t = await getT();
   await requireAdminSession();
   void api.admin.data.backups.prefetch();
   return (
     <HydrateClient>
       <PageHeader
-        title="Data"
-        description="Backups, the market data behind valuations, stored statement files and default data packs."
+        title={t.adminManage.pages.data.title}
+        description={t.adminManage.pages.data.description}
       />
       <DataTabs />
       <BackupsAdmin />

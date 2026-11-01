@@ -1,3 +1,4 @@
+import { getT } from "~/i18n/server";
 import type { Metadata } from "next";
 import { requireEnrolledSession } from "~/server/auth";
 import { z } from "zod";
@@ -6,7 +7,10 @@ import { SpendingView } from "~/components/spending/spending-view";
 import { currentMonth } from "~/lib/dates";
 import { api, HydrateClient } from "~/trpc/server";
 
-export const metadata: Metadata = { title: "Spending" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t.spending.meta.spending };
+}
 
 export default async function SpendingPage({
   searchParams,

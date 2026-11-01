@@ -1,3 +1,5 @@
+import { intlLocale, type Locale } from "~/i18n/config";
+
 /**
  * One made-up year of one portfolio, built bottom-up so every figure on the front page agrees:
  * account balances come from asset-class values, and net worth, monthly change and allocation
@@ -103,7 +105,7 @@ export type SampleMonth = {
   change: number;
   /** Asset-class shares of net worth, 0–1. */
   shares: number[];
-  income: { label: string; amount: number }[];
+  income: { label: "Salary" | "Bonus" | "Dividends"; amount: number }[];
   incomeTotal: number;
   /** Spending by category, in the order of SPENDING. */
   spending: number[];
@@ -149,10 +151,15 @@ function build(): SampleMonth[] {
     previous = worth;
 
     const extra = INCOME_EXTRA[m]!;
-    const income = [
+    const income: SampleMonth["income"] = [
       { label: "Salary", amount: SALARY },
       ...(extra > 0
-        ? [{ label: m === 11 ? "Bonus" : "Dividends", amount: extra }]
+        ? [
+            {
+              label: m === 11 ? ("Bonus" as const) : ("Dividends" as const),
+              amount: extra,
+            },
+          ]
         : []),
     ];
     const incomeTotal = SALARY + extra;
@@ -182,3 +189,13 @@ function build(): SampleMonth[] {
 }
 
 export const SAMPLE_YEAR = build();
+
+export function sampleMonths(locale: Locale) {
+  const formatter = new Intl.DateTimeFormat(intlLocale[locale], {
+    month: "long",
+    timeZone: "UTC",
+  });
+  return MONTHS.map((_, month) =>
+    formatter.format(new Date(Date.UTC(2025, month, 1))),
+  );
+}

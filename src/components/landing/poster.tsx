@@ -1,6 +1,7 @@
 "use client";
 
-import { CLASSES, MONTHS, SAMPLE_YEAR } from "./sample-year";
+import { useLocale, useT } from "~/i18n/client";
+import { CLASSES, sampleMonths, SAMPLE_YEAR } from "./sample-year";
 
 const INK = "var(--color-paper-ink)";
 const PAPER = "var(--color-paper)";
@@ -14,6 +15,7 @@ export const money = (v: number) =>
   `S$${Math.round(v).toLocaleString("en-SG", { maximumFractionDigits: 0 })}`;
 
 // Chart geometry (page units, viewBox 400 × 520).
+// 18-unit labels stay readable when the page scales down to a narrow phone.
 const X0 = 44;
 const STEP = 312 / 11;
 const LINE_TOP = 205;
@@ -31,6 +33,9 @@ const y = (v: number) =>
  * `write` (0–1) draws the new line segment and interpolates the allocation.
  */
 export function ChartPage({ month, write }: { month: number; write: number }) {
+  const t = useT();
+  const locale = useLocale();
+  const months = sampleMonths(locale);
   const data = SAMPLE_YEAR[month]!;
   const previous = SAMPLE_YEAR[month - 1];
 
@@ -64,7 +69,13 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
       <svg
         viewBox="0 0 400 520"
         role="img"
-        aria-label={`Sample portfolio, January to ${MONTHS[month]}: net worth ${money(data.worth)}, ${data.change >= 0 ? "up" : "down"} ${money(Math.abs(data.change))} on the month.`}
+        aria-label={t.landing.chart.aria(
+          months[0]!,
+          months[month]!,
+          money(data.worth),
+          data.change >= 0 ? t.landing.chart.up : t.landing.chart.down,
+          money(Math.abs(data.change)),
+        )}
         className="isolate block h-auto w-full"
       >
         {/* Masthead with the year's progress */}
@@ -73,7 +84,7 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
           y="36"
           fill={INK}
           className="font-poster"
-          fontSize="14"
+          fontSize="18"
           fontWeight="700"
         >
           Nº 01
@@ -84,10 +95,10 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
           fill={INK}
           textAnchor="end"
           className="figures font-mono"
-          fontSize="8"
+          fontSize="18"
           letterSpacing="1.4"
         >
-          PAGE {String(month + 1).padStart(2, "0")} OF 12
+          {t.landing.chart.page(String(month + 1).padStart(2, "0"))}
         </text>
         <line
           x1="28"
@@ -114,10 +125,10 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
             y="74"
             fill={INK}
             className="font-mono"
-            fontSize="8.5"
+            fontSize="18"
             letterSpacing="1.4"
           >
-            NET WORTH · {MONTHS[month]!.toUpperCase()}
+            {t.landing.chart.worthMonth(months[month]!.toUpperCase())}
           </text>
           <text
             x="26"
@@ -131,16 +142,18 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
           </text>
           <text
             x="28"
-            y="136"
+            y="150"
             fill={data.change >= 0 ? GAIN : LOSS}
             className="figures font-mono"
-            fontSize="10"
+            fontSize="18"
             fontWeight="600"
           >
             {data.change >= 0 ? "▲" : "▼"} {money(Math.abs(data.change))}
             <tspan fill={INK} fillOpacity="0.6" fontWeight="400">
               {" "}
-              on {month === 0 ? "last December" : MONTHS[month - 1]}
+              {t.landing.chart.onMonth(
+                month === 0 ? t.landing.chart.lastDecember : months[month - 1]!,
+              )}
             </tspan>
           </text>
         </g>
@@ -149,12 +162,12 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
           x="28"
           y="176"
           fill={INK}
-          fillOpacity="0.55"
+          fillOpacity="0.7"
           className="font-mono"
-          fontSize="8"
+          fontSize="18"
           letterSpacing="1.2"
         >
-          NET WORTH OVER TIME
+          {t.landing.chart.overTime}
         </text>
         {[LINE_TOP, (LINE_TOP + LINE_BOTTOM) / 2, LINE_BOTTOM].map((gridY) => (
           <line
@@ -197,7 +210,7 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
           strokeWidth="2.5"
         />
 
-        {MONTHS.map((m, i) => (
+        {months.map((m, i) => (
           <text
             key={m}
             x={x(i)}
@@ -206,10 +219,10 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
             fill={INK}
             fillOpacity={i === month ? 1 : i < month ? 0.6 : 0.25}
             className="font-mono"
-            fontSize="9"
+            fontSize="18"
             fontWeight={i === month ? 700 : 400}
           >
-            {m[0]}
+            {locale === "zh" ? i + 1 : m[0]}
           </text>
         ))}
 
@@ -226,12 +239,12 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
           x="28"
           y="433"
           fill={INK}
-          fillOpacity="0.55"
+          fillOpacity="0.7"
           className="font-mono"
-          fontSize="8"
+          fontSize="18"
           letterSpacing="1.2"
         >
-          WHAT YOU OWN
+          {t.landing.chart.allocation}
         </text>
         {pie.map((c) => (
           <rect
@@ -246,15 +259,15 @@ export function ChartPage({ month, write }: { month: number; write: number }) {
         {CLASSES.map((c, i) => (
           <g key={c.key} transform={`translate(${28 + i * 89} 479)`}>
             <circle cx="3" cy="4" r="3" fill={c.color} />
-            <text x="11" y="7" fill={INK} className="font-mono" fontSize="7.5">
-              {c.label}
+            <text x="11" y="7" fill={INK} className="font-mono" fontSize="18">
+              {t.landing.sample.classes[c.key]}
             </text>
             <text
               x="11"
-              y="23"
+              y="27"
               fill={INK}
               className="figures font-mono"
-              fontSize="10"
+              fontSize="18"
               fontWeight="600"
             >
               {Math.round(data.shares[i]! * 100)}%

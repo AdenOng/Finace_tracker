@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import { Search } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -17,22 +20,23 @@ import { api } from "~/trpc/react";
 
 type Outcome = "all" | "failed" | "new_device";
 
-const methodLabels: Record<string, string> = {
-  password: "Password",
-  two_factor: "Two-step code",
-  backup_code: "Backup code",
-  passkey: "Passkey",
-};
+const getMethodLabels = (t: Messages): Record<string, string> => ({
+  password: t.adminManage.security.password,
+  two_factor: t.adminManage.security.twoStepCode,
+  backup_code: t.adminManage.security.backupCode,
+  passkey: t.adminManage.security.passkey,
+});
 
-const policyHelp = {
-  everyone:
-    "Everyone sets up an authenticator app before they can use Finfolio.",
-  admins:
-    "Admins must use two-step; members can choose. Recommended at minimum.",
-  off: "Nobody is required to. People can still turn it on in Settings.",
-} as const;
+const getPolicyHelp = (t: Messages) =>
+  ({
+    everyone: t.adminManage.security.everyonePolicyHelp,
+    admins: t.adminManage.security.adminsPolicyHelp,
+    off: t.adminManage.security.optionalPolicyHelp,
+  }) as const;
 
 function PolicyForm() {
+  const t = useT();
+  const policyHelp = getPolicyHelp(t);
   const utils = api.useUtils();
   const [settings] = api.admin.security.settings.useSuspenseQuery();
   const { flash, success, error } = useFlash();
@@ -42,7 +46,7 @@ function PolicyForm() {
   );
   const update = api.admin.security.updateSettings.useMutation({
     onSuccess: async () => {
-      success("Security settings saved.");
+      success(t.adminManage.security.securitySettingsSaved);
       await utils.admin.security.settings.invalidate();
     },
     onError: error,
@@ -57,8 +61,8 @@ function PolicyForm() {
 
   return (
     <Section
-      title="Policy"
-      description="Applies to everyone on this Finfolio, including you."
+      title={t.adminManage.security.policy}
+      description={t.adminManage.security.policyScopeHelp}
     >
       <form
         className="space-y-6"
@@ -77,11 +81,11 @@ function PolicyForm() {
         <FlashNotice flash={flash} />
         <div className="grid gap-6 md:grid-cols-2">
           <Field
-            label="Who must use two-step verification"
+            label={t.adminManage.security.twoStepPolicyLabel}
             htmlFor="sec-policy"
             hint={
               settings.twoFactorForcedByEnv
-                ? "Set to everyone by REQUIRE_TWO_FACTOR=true in .env. Change it there to choose here."
+                ? t.adminManage.security.environmentPolicyHelp
                 : policyHelp[policy]
             }
           >
@@ -91,15 +95,19 @@ function PolicyForm() {
               disabled={settings.twoFactorForcedByEnv}
               onChange={(e) => setPolicy(e.target.value as typeof policy)}
             >
-              <option value="everyone">Everyone</option>
-              <option value="admins">Admins only</option>
-              <option value="off">Not required</option>
+              <option value="everyone">
+                {t.adminManage.security.everyone}
+              </option>
+              <option value="admins">
+                {t.adminManage.security.adminsOnly}
+              </option>
+              <option value="off">{t.adminManage.security.notRequired}</option>
             </Select>
           </Field>
           <div className="space-y-2">
             <Checkbox
-              label="Sign people out after a fixed time"
-              description="Even if they keep using the app. Idle sessions already end after 7 days."
+              label={t.adminManage.security.sessionExpiryLabel}
+              description={t.adminManage.security.sessionExpiryHelp}
               checked={limitSessions}
               onChange={(e) => setLimitSessions(e.target.checked)}
             />
@@ -112,52 +120,51 @@ function PolicyForm() {
                   max={365}
                   required
                   defaultValue={settings.maxSessionDays ?? 7}
-                  aria-label="Days before signing out"
+                  aria-label={t.adminManage.security.daysBeforeSigningOut}
                   className="h-9 w-20"
                 />
-                days after signing in
+                {t.adminManage.security.daysAfterSigningIn}
               </div>
             ) : null}
           </div>
         </div>
         {missing > 0 && !settings.twoFactorForcedByEnv ? (
           <Notice tone="warn">
-            {missing} {missing === 1 ? "person" : "people"} covered by this
-            policy {missing === 1 ? "has" : "have"} not set up two-step. They
-            will be held on Settings until they do.{" "}
+            {t.adminManage.security.missingTwoFactor(missing)}{" "}
             <Link
               href="/admin/users?filter=no2fa"
               className="font-semibold underline underline-offset-4"
             >
-              See who
+              {t.adminManage.security.seeWho}
             </Link>
           </Notice>
         ) : null}
         <div className="space-y-3">
-          <p className="text-[13px] font-semibold">Sign-up</p>
+          <p className="text-[13px] font-semibold">
+            {t.adminManage.security.signup}
+          </p>
           <p className="text-ink-2 text-sm">
-            Accounts can only be created with an invitation. The first account
-            on a new install becomes the admin.
+            {t.adminManage.security.invitationOnlyHelp}
           </p>
           <Checkbox
             name="workspaceInviteSignups"
-            label="Workspace invitations can create new accounts"
-            description="Off: a workspace invite only works for someone who already has an account; new people need an admin invite."
+            label={t.adminManage.security.workspaceSignupLabel}
+            description={t.adminManage.security.workspaceSignupHelp}
             defaultChecked={settings.workspaceInviteSignups}
           />
           <Checkbox
             name="newDeviceAlerts"
-            label="Email people when they sign in from a new device"
+            label={t.adminManage.security.newDeviceEmailLabel}
             description={
               settings.emailConfigured
-                ? "Sent to the account's own address."
-                : "Needs email to be set up on Admin → System."
+                ? t.adminManage.security.newDeviceEmailHelp
+                : t.adminManage.security.emailSetupHelp
             }
             defaultChecked={settings.newDeviceAlerts}
           />
         </div>
         <Button type="submit" loading={update.isPending}>
-          Save security settings
+          {t.adminManage.security.saveSecuritySettings}
         </Button>
       </form>
     </Section>
@@ -165,19 +172,20 @@ function PolicyForm() {
 }
 
 function Summary() {
+  const t = useT();
   const [summary] = api.admin.security.summary.useSuspenseQuery();
   return (
-    <Section title="Last 7 days">
+    <Section title={t.adminManage.security.last7Days}>
       <dl className="grid grid-cols-3 gap-6">
         {[
-          ["Sign-ins", summary.succeeded, null],
+          [t.adminManage.security.signins, summary.succeeded, null],
           [
-            "Failed attempts",
+            t.adminManage.security.failedAttempts,
             summary.failed,
             summary.failed > 0 ? "text-loss" : null,
           ],
           [
-            "From a new device",
+            t.adminManage.security.fromANewDevice,
             summary.newDevices,
             summary.newDevices > 0 ? "text-warn" : null,
           ],
@@ -194,11 +202,11 @@ function Summary() {
       </dl>
       {summary.noisyAddresses.length ? (
         <Notice tone="warn" className="mt-5">
-          Repeated failures from{" "}
-          {summary.noisyAddresses
-            .map((a) => `${a.ipAddress} (${a.failures})`)
-            .join(", ")}
-          . Sign-in is rate-limited to 5 tries a minute per address.
+          {t.adminManage.security.noisyAddresses(
+            summary.noisyAddresses
+              .map((a) => `${a.ipAddress} (${a.failures})`)
+              .join(", "),
+          )}
         </Notice>
       ) : null}
     </Section>
@@ -206,6 +214,9 @@ function Summary() {
 }
 
 function SignInHistory() {
+  const locale = useLocale();
+  const t = useT();
+  const methodLabels = getMethodLabels(t);
   const params = useSearchParams();
   const [outcome, setOutcome] = useState<Outcome>(() => {
     const value = params.get("outcome");
@@ -222,18 +233,18 @@ function SignInHistory() {
 
   return (
     <Section
-      title="Sign-in history"
-      description="Every attempt, including failures. Passwords and codes are never recorded."
+      title={t.adminManage.security.signinHistory}
+      description={t.adminManage.security.signinHistoryHelp}
     >
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <FilterTabs
-          label="Filter sign-ins"
+          label={t.adminManage.security.filterSignins}
           value={outcome}
           onChange={setOutcome}
           options={[
-            { value: "all", label: "All" },
-            { value: "failed", label: "Failed" },
-            { value: "new_device", label: "New device" },
+            { value: "all", label: t.adminManage.security.all },
+            { value: "failed", label: t.adminManage.security.failed },
+            { value: "new_device", label: t.adminManage.security.newDevice },
           ]}
         />
         <form
@@ -245,8 +256,8 @@ function SignInHistory() {
         >
           <Search className="text-ink-3 pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
-            aria-label="Search sign-ins"
-            placeholder="Name, email or IP, then Enter"
+            aria-label={t.adminManage.security.searchSignins}
+            placeholder={t.adminManage.security.nameEmailOrIPThenEnter}
             className="pl-9"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -255,32 +266,32 @@ function SignInHistory() {
       </div>
       {userId ? (
         <p className="text-ink-2 mb-4 text-sm">
-          Showing one person.{" "}
+          {t.adminManage.security.showingOnePerson}{" "}
           <Link
             href="/admin/security"
             className="font-semibold underline underline-offset-4"
           >
-            Show everyone
+            {t.adminManage.security.showEveryone}
           </Link>
         </p>
       ) : null}
 
       {log.isLoading ? (
-        <p className="text-ink-3 text-sm">Loading…</p>
+        <p className="text-ink-3 text-sm">{t.common.status.loading}</p>
       ) : items.length === 0 ? (
-        <EmptyState title="No sign-ins yet">
-          Attempts are recorded from now on.
+        <EmptyState title={t.adminManage.security.noSigninsYet}>
+          {t.adminManage.security.attemptsAreRecordedFromNowOn}
         </EmptyState>
       ) : (
         <>
           <Table>
             <thead>
               <tr>
-                <Th>When</Th>
-                <Th>Who</Th>
-                <Th>Result</Th>
-                <Th>Device</Th>
-                <Th>IP address</Th>
+                <Th>{t.adminManage.security.when}</Th>
+                <Th>{t.adminManage.security.who}</Th>
+                <Th>{t.adminManage.security.result}</Th>
+                <Th>{t.adminManage.security.device}</Th>
+                <Th>{t.adminManage.security.ipAddress}</Th>
               </tr>
             </thead>
             <tbody>
@@ -288,13 +299,13 @@ function SignInHistory() {
                 <Tr key={e.id}>
                   <Td
                     className="text-ink-2 whitespace-nowrap"
-                    title={formatDateTime(e.createdAt)}
+                    title={formatDateTime(e.createdAt, locale)}
                   >
-                    {formatRelative(e.createdAt)}
+                    {formatRelative(e.createdAt, undefined, locale)}
                   </Td>
                   <Td>
                     <p className="font-medium">
-                      {e.userName ?? e.email ?? "Unknown"}
+                      {e.userName ?? e.email ?? t.adminManage.security.unknown}
                     </p>
                     {e.userName && e.email ? (
                       <p className="text-ink-3 text-[12px]">{e.email}</p>
@@ -303,7 +314,7 @@ function SignInHistory() {
                   <Td>
                     {e.success ? (
                       <span>
-                        Signed in
+                        {t.adminManage.security.signedIn}
                         <span className="text-ink-3">
                           {" "}
                           · {methodLabels[e.method] ?? e.method}
@@ -311,7 +322,7 @@ function SignInHistory() {
                       </span>
                     ) : (
                       <span className="text-loss">
-                        Failed
+                        {t.adminManage.security.failed}
                         <span className="text-ink-3">
                           {" "}
                           · {e.reason ?? methodLabels[e.method]}
@@ -320,10 +331,10 @@ function SignInHistory() {
                     )}
                   </Td>
                   <Td title={e.userAgent ?? undefined}>
-                    {e.device ?? "Unknown"}
+                    {e.device ?? t.adminManage.security.unknown}
                     {e.newDevice ? (
                       <Tag tone="warn" className="ml-2">
-                        New
+                        {t.adminManage.security.new}
                       </Tag>
                     ) : null}
                   </Td>
@@ -340,7 +351,7 @@ function SignInHistory() {
               loading={log.isFetchingNextPage}
               onClick={() => void log.fetchNextPage()}
             >
-              Load older
+              {t.adminManage.security.loadOlder}
             </Button>
           ) : null}
         </>

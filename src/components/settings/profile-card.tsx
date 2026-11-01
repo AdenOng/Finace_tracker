@@ -1,5 +1,6 @@
 "use client";
 
+import { useT } from "~/i18n/client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -10,6 +11,7 @@ import { formText } from "~/lib/form";
 import { authClient } from "~/server/auth/client";
 
 export function ProfileCard({ name, email }: { name: string; email: string }) {
+  const t = useT();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -20,11 +22,14 @@ export function ProfileCard({ name, email }: { name: string; email: string }) {
     const next = formText(new FormData(event.currentTarget), "name");
     setError(null);
     setSaved(false);
-    if (!next) return setError("Enter your name.");
+    if (!next) return setError(t.settings.profileCard.enterYourName);
     setPending(true);
     const { error } = await authClient.updateUser({ name: next });
     setPending(false);
-    if (error) return setError(error.message ?? "Your name was not saved.");
+    if (error)
+      return setError(
+        error.message ?? t.settings.profileCard.yourNameWasNotSaved,
+      );
     setSaved(true);
     router.refresh();
   }
@@ -32,8 +37,12 @@ export function ProfileCard({ name, email }: { name: string; email: string }) {
   return (
     <form onSubmit={save} className="max-w-md space-y-4">
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {saved ? <Notice tone="success">Your name was saved.</Notice> : null}
-      <Field label="Name" htmlFor="profile-name">
+      {saved ? (
+        <Notice tone="success">
+          {t.settings.profileCard.yourNameWasSaved}
+        </Notice>
+      ) : null}
+      <Field label={t.settings.profileCard.name} htmlFor="profile-name">
         <Input
           id="profile-name"
           name="name"
@@ -44,14 +53,14 @@ export function ProfileCard({ name, email }: { name: string; email: string }) {
         />
       </Field>
       <Field
-        label="Email"
+        label={t.settings.profileCard.email}
         htmlFor="profile-email"
-        hint="You sign in with this address. An admin can change it for you."
+        hint={t.settings.profileCard.youSignInWithThis}
       >
         <Input id="profile-email" value={email} readOnly disabled />
       </Field>
       <Button type="submit" variant="secondary" loading={pending}>
-        Save name
+        {t.settings.profileCard.saveName}
       </Button>
     </form>
   );

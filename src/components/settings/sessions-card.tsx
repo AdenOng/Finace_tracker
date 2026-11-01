@@ -1,15 +1,27 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
 import { MonitorSmartphone } from "lucide-react";
 
 import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Notice, Tag } from "~/components/ui/panel";
 import { errorMessage } from "~/lib/errors";
 import { formatDate, formatRelative } from "~/lib/format";
-import { describeUserAgent, sessionMethodLabels } from "~/lib/user-agent";
+import { describeUserAgent } from "~/lib/user-agent";
 import { api } from "~/trpc/react";
 
 export function SessionsCard() {
+  const t = useT();
+  const locale = useLocale();
+  function deviceLabel(agent: string | null) {
+    const label = describeUserAgent(agent);
+    if (label === "Unknown device")
+      return t.settings.sessionsCard.unknownDevice;
+    const [browser, os] = label.split(" on ");
+    const name =
+      browser === "Browser" ? t.settings.sessionsCard.browser : browser!;
+    return os ? t.settings.sessionsCard.deviceOn(name, os) : name;
+  }
   const utils = api.useUtils();
   const sessions = api.settings.sessions.useQuery();
   const refresh = () => utils.settings.sessions.invalidate();
@@ -27,9 +39,7 @@ export function SessionsCard() {
       {failure ? <Notice tone="error">{errorMessage(failure)}</Notice> : null}
       {revokeOthers.data ? (
         <Notice tone="success">
-          {revokeOthers.data.revoked === 1
-            ? "Signed out of 1 other device."
-            : `Signed out of ${revokeOthers.data.revoked} other devices.`}
+          {t.settings.sessionsCard.revoked(revokeOthers.data.revoked)}
         </Notice>
       ) : null}
       {!sessions.data ? (
@@ -47,34 +57,42 @@ export function SessionsCard() {
                   className="truncate text-sm font-semibold"
                   title={s.userAgent ?? undefined}
                 >
-                  {describeUserAgent(s.userAgent)}
+                  {deviceLabel(s.userAgent)}
                   {s.current ? (
-                    <Tag className="ml-2">This device</Tag>
+                    <Tag className="ml-2">
+                      {t.settings.sessionsCard.thisDevice}
+                    </Tag>
                   ) : s.method ? (
                     <Tag tone="outline" className="ml-2">
-                      {sessionMethodLabels[s.method] ?? s.method}
+                      {(
+                        t.settings.sessionsCard.methods as Record<
+                          string,
+                          string
+                        >
+                      )[s.method] ?? s.method}
                     </Tag>
                   ) : null}
                 </p>
                 <p className="text-ink-3 text-[13px]">
-                  {s.ipAddress ?? "Unknown IP"} ·{" "}
-                  {s.current
-                    ? "active now"
-                    : `active ${formatRelative(s.lastActiveAt)}`}{" "}
-                  · signed in {formatDate(s.createdAt)}
+                  {t.settings.sessionsCard.activity(
+                    s.ipAddress ?? t.settings.sessionsCard.unknownIp,
+                    s.current,
+                    formatRelative(s.lastActiveAt, Date.now(), locale),
+                    formatDate(s.createdAt, locale),
+                  )}
                 </p>
               </div>
               {s.current ? null : (
                 <ConfirmButton
                   variant="ghost"
                   size="sm"
-                  confirmLabel="Sign out?"
+                  confirmLabel={t.settings.sessionsCard.signOut}
                   loading={
                     revoke.isPending && revoke.variables?.sessionId === s.id
                   }
                   onConfirm={() => revoke.mutate({ sessionId: s.id })}
                 >
-                  Sign out
+                  {t.settings.sessionsCard.signOutText}
                 </ConfirmButton>
               )}
             </li>
@@ -84,11 +102,11 @@ export function SessionsCard() {
       {others > 0 ? (
         <ConfirmButton
           variant="secondary"
-          confirmLabel={`Sign out ${others === 1 ? "1 device" : `${others} devices`}?`}
+          confirmLabel={t.settings.sessionsCard.confirmDevices(others)}
           loading={revokeOthers.isPending}
           onConfirm={() => revokeOthers.mutate()}
         >
-          Sign out of all other devices
+          {t.settings.sessionsCard.signOutOfAllOther}
         </ConfirmButton>
       ) : null}
     </div>

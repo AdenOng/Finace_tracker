@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import { CircleCheck, CircleHelp, CircleX, Plus } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -25,33 +28,35 @@ const compact = new Intl.NumberFormat("en", { notation: "compact" });
 const kindMeta: Record<
   Kind,
   {
-    label: string;
-    urlHint: string;
+    label: (t: Messages) => string;
+    urlHint: (t: Messages) => string;
     urlPlaceholder: string;
     modelPlaceholder: string;
     needsKey: boolean;
   }
 > = {
   opencode: {
-    label: "opencode server",
-    urlHint:
-      "The `opencode serve` instance. Its own login (e.g. your opencode Go subscription) is used, so no key here.",
+    label: (t: Messages) => t.admin.providers.opencodeServer,
+    urlHint: (t: Messages) =>
+      t.admin.providers
+        .theOpencodeServeInstanceItsOwnLoginEGYourOpencodeGoSubscriptionIsUsedSoNoKeyHere,
     urlPlaceholder: "http://opencode:4096",
     modelPlaceholder: "opencode-go/glm-5.3-flash",
     needsKey: false,
   },
   openai_compatible: {
-    label: "OpenAI-compatible",
-    urlHint:
-      "Base URL ending in /v1 — OpenAI, DeepSeek, OpenRouter, Ollama, LM Studio, opencode Zen…",
+    label: (t: Messages) => t.admin.providers.openaiCompatible,
+    urlHint: (t: Messages) =>
+      t.admin.providers
+        .baseUrlEndingInV1OpenaiDeepseekOpenrouterOllamaLmStudioOpencodeZen,
     urlPlaceholder: "https://api.openai.com/v1",
     modelPlaceholder: "gpt-4.1-mini",
     needsKey: true,
   },
   anthropic: {
-    label: "Anthropic-compatible",
-    urlHint:
-      "Leave empty for api.anthropic.com, or point at a compatible gateway.",
+    label: (t: Messages) => t.admin.providers.anthropicCompatible,
+    urlHint: (t: Messages) =>
+      t.admin.providers.leaveEmptyForApiAnthropicComOrPointAtACompatibleGateway,
     urlPlaceholder: "https://api.anthropic.com/v1",
     modelPlaceholder: "claude-sonnet-5-5",
     needsKey: true,
@@ -59,11 +64,13 @@ const kindMeta: Record<
 };
 
 function Health({ provider }: { provider: Provider }) {
+  const t = useT();
+  const locale = useLocale();
   if (!provider.lastTestedAt) {
     return (
       <p className="text-ink-3 mt-3 flex items-center gap-2 text-[13px]">
         <CircleHelp className="size-4 shrink-0" />
-        Not checked yet
+        {t.admin.providers.notCheckedYet}
       </p>
     );
   }
@@ -74,7 +81,7 @@ function Health({ provider }: { provider: Provider }) {
         "mt-3 flex items-start gap-2 text-[13px]",
         ok ? "text-gain" : "text-loss",
       )}
-      title={formatDateTime(provider.lastTestedAt)}
+      title={formatDateTime(provider.lastTestedAt, locale)}
     >
       {ok ? (
         <CircleCheck className="mt-px size-4 shrink-0" />
@@ -83,11 +90,17 @@ function Health({ provider }: { provider: Provider }) {
       )}
       <span className="break-words">
         {ok
-          ? `Working — answered in ${((provider.lastTestLatencyMs ?? 0) / 1000).toFixed(1)}s`
-          : `Failed: ${provider.lastTestError ?? "unexpected answer"}`}
+          ? t.admin.providers.working(
+              ((provider.lastTestLatencyMs ?? 0) / 1000).toFixed(1),
+            )
+          : t.admin.providers.failed(
+              provider.lastTestError ?? t.admin.providers.unexpectedAnswer,
+            )}
         <span className="text-ink-3">
           {" "}
-          · checked {formatRelative(provider.lastTestedAt)}
+          {t.admin.providers.checked(
+            formatRelative(provider.lastTestedAt, new Date(), locale),
+          )}
         </span>
       </span>
     </p>
@@ -95,10 +108,11 @@ function Health({ provider }: { provider: Provider }) {
 }
 
 function LimitBar({ provider }: { provider: Provider }) {
+  const t = useT();
   if (!provider.monthlyTokenLimit) {
     return provider.tokensThisMonth ? (
       <p className="text-ink-3 mt-2 text-[13px]">
-        {compact.format(provider.tokensThisMonth)} tokens this month · no limit
+        {t.admin.providers.noLimit(compact.format(provider.tokensThisMonth))}
       </p>
     ) : null;
   }
@@ -118,19 +132,19 @@ function LimitBar({ provider }: { provider: Provider }) {
         />
       </div>
       <p className="text-ink-3 mt-1 text-[12px]">
-        {compact.format(provider.tokensThisMonth)} of{" "}
-        {compact.format(provider.monthlyTokenLimit)} tokens this month
-        {provider.limitReached
-          ? provider.pauseAtLimit
-            ? " · paused until next month"
-            : " · over the limit"
-          : ""}
+        {t.admin.providers.limitUsage(
+          compact.format(provider.tokensThisMonth),
+          compact.format(provider.monthlyTokenLimit),
+          provider.limitReached,
+          provider.pauseAtLimit,
+        )}
       </p>
     </div>
   );
 }
 
 export function AiProvidersAdmin() {
+  const t = useT();
   const utils = api.useUtils();
   const [providers] = api.admin.ai.list.useSuspenseQuery();
   const [healthChecks] = api.admin.ai.healthChecks.useSuspenseQuery();
@@ -145,7 +159,7 @@ export function AiProvidersAdmin() {
   const setDefault = api.admin.ai.setDefault.useMutation({
     onMutate: clear,
     onSuccess: async () => {
-      success("Default provider changed. New imports use it from now on.");
+      success(t.admin.providers.defaultProviderChangedNewImportsUseItFromNowOn);
       await invalidate();
     },
     onError: error,
@@ -153,7 +167,11 @@ export function AiProvidersAdmin() {
   const setFallback = api.admin.ai.setFallback.useMutation({
     onMutate: clear,
     onSuccess: async (_, input) => {
-      success(input.id ? "Fallback provider set." : "Fallback removed.");
+      success(
+        input.id
+          ? t.admin.providers.fallbackProviderSet
+          : t.admin.providers.fallbackRemoved,
+      );
       await invalidate();
     },
     onError: error,
@@ -172,8 +190,11 @@ export function AiProvidersAdmin() {
     <>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <Checkbox
-          label="Check every enabled provider every 6 hours"
-          description="Failures show up on the Status page before an import hits them."
+          label={t.admin.providers.checkEveryEnabledProviderEvery6Hours}
+          description={
+            t.admin.providers
+              .failuresShowUpOnTheStatusPageBeforeAnImportHitsThem
+          }
           checked={healthChecks}
           disabled={setHealthChecks.isPending}
           onChange={(e) =>
@@ -182,14 +203,14 @@ export function AiProvidersAdmin() {
         />
         <Button onClick={() => setEditing("new")}>
           <Plus className="size-4" />
-          Add provider
+          {t.admin.providers.addProvider}
         </Button>
       </div>
       <FlashNotice flash={flash} className="mb-6" />
 
       {providers.length === 0 ? (
-        <EmptyState title="No AI providers">
-          Add one so statements can be read.
+        <EmptyState title={t.admin.providers.noAiProviders}>
+          {t.admin.providers.addOneSoStatementsCanBeRead}
         </EmptyState>
       ) : (
         <ul className="border-ink border-t-2">
@@ -203,35 +224,49 @@ export function AiProvidersAdmin() {
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-bold">{p.name}</span>
-                    <Tag tone="outline">{kindMeta[p.kind].label}</Tag>
-                    {p.isDefault ? <Tag tone="brand">Default</Tag> : null}
-                    {p.isFallback ? <Tag tone="soft">Fallback</Tag> : null}
-                    {!p.isEnabled ? <Tag tone="warn">Disabled</Tag> : null}
-                    {p.supportsVision ? <Tag>Reads images</Tag> : null}
+                    <Tag tone="outline">{kindMeta[p.kind].label(t)}</Tag>
+                    {p.isDefault ? (
+                      <Tag tone="brand">{t.admin.providers.default}</Tag>
+                    ) : null}
+                    {p.isFallback ? (
+                      <Tag tone="soft">{t.admin.providers.fallback}</Tag>
+                    ) : null}
+                    {!p.isEnabled ? (
+                      <Tag tone="warn">{t.admin.providers.disabled}</Tag>
+                    ) : null}
+                    {p.supportsVision ? (
+                      <Tag>{t.admin.providers.readsImages}</Tag>
+                    ) : null}
                   </p>
                   <dl className="mt-2 grid gap-x-6 gap-y-1 text-[13px] sm:grid-cols-[auto_1fr]">
-                    <dt className="text-ink-3">Model</dt>
+                    <dt className="text-ink-3">{t.admin.providers.model}</dt>
                     <dd className="font-semibold break-all">
                       {p.defaultModel}
                     </dd>
-                    <dt className="text-ink-3">Endpoint</dt>
+                    <dt className="text-ink-3">{t.admin.providers.endpoint}</dt>
                     <dd className="text-ink-2 break-all">
-                      {p.baseUrl ?? "Provider default"}
+                      {p.baseUrl ?? t.admin.providers.providerDefault}
                     </dd>
                     {p.kind !== "opencode" ? (
                       <>
-                        <dt className="text-ink-3">API key</dt>
+                        <dt className="text-ink-3">
+                          {t.admin.providers.apiKey}
+                        </dt>
                         <dd className="text-ink-2">
-                          {p.apiKeyPreview ?? "Not set"}
+                          {p.apiKeyPreview ?? t.admin.providers.notSet}
                         </dd>
                       </>
                     ) : null}
                     {p.inputCostPerMTok || p.outputCostPerMTok ? (
                       <>
-                        <dt className="text-ink-3">Price</dt>
+                        <dt className="text-ink-3">
+                          {t.admin.providers.price}
+                        </dt>
                         <dd className="text-ink-2">
-                          US${p.inputCostPerMTok ?? "0"} in / US$
-                          {p.outputCostPerMTok ?? "0"} out per million tokens
+                          {t.admin.providers.prices(
+                            p.inputCostPerMTok ?? "0",
+                            p.outputCostPerMTok ?? "0",
+                          )}
                         </dd>
                       </>
                     ) : null}
@@ -246,7 +281,9 @@ export function AiProvidersAdmin() {
                     loading={testing}
                     onClick={() => test.mutate({ id: p.id })}
                   >
-                    {testing ? "Testing…" : "Test now"}
+                    {testing
+                      ? t.admin.providers.testing
+                      : t.admin.providers.testNow}
                   </Button>
                   {!p.isDefault ? (
                     <Button
@@ -258,7 +295,7 @@ export function AiProvidersAdmin() {
                       }
                       onClick={() => setDefault.mutate({ id: p.id })}
                     >
-                      Make default
+                      {t.admin.providers.makeDefault}
                     </Button>
                   ) : null}
                   {!p.isDefault && p.isEnabled ? (
@@ -269,7 +306,9 @@ export function AiProvidersAdmin() {
                         setFallback.mutate({ id: p.isFallback ? null : p.id })
                       }
                     >
-                      {p.isFallback ? "Remove fallback" : "Use as fallback"}
+                      {p.isFallback
+                        ? t.admin.providers.removeFallback
+                        : t.admin.providers.useAsFallback}
                     </Button>
                   ) : null}
                   <Button
@@ -277,7 +316,7 @@ export function AiProvidersAdmin() {
                     size="sm"
                     onClick={() => setEditing(p)}
                   >
-                    Edit
+                    {t.common.actions.edit}
                   </Button>
                 </div>
               </li>
@@ -287,8 +326,10 @@ export function AiProvidersAdmin() {
       )}
       {providers.length > 1 && !providers.some((p) => p.isFallback) ? (
         <p className="text-ink-3 mt-4 text-[13px]">
-          Tip: pick a fallback, and imports retry with it when the default fails
-          or has used its monthly limit.
+          {
+            t.admin.providers
+              .tipPickAFallbackAndImportsRetryWithItWhenTheDefaultFailsOrHasUsedItsMonthlyLimit
+          }
         </p>
       ) : null}
 
@@ -321,13 +362,14 @@ function ModelPicker({
   /** Current endpoint and key from the form, so models can be listed before saving. */
   readConnection: () => { baseUrl: string; apiKey: string };
 }) {
+  const t = useT();
   const [result, setResult] = useState<ModelList | null>(null);
   const models = api.admin.ai.models.useMutation({ onSuccess: setResult });
   const listId = `models-${providerId ?? "new"}`;
 
   return (
     <Field
-      label="Model"
+      label={t.admin.providers.model}
       htmlFor="prov-model"
       error={
         result && !result.ok
@@ -351,10 +393,10 @@ function ModelPicker({
           }}
         >
           {models.isPending
-            ? "Loading models…"
+            ? t.admin.providers.loadingModels
             : result?.ok
-              ? `${result.models.length} models available — start typing`
-              : "Load available models"}
+              ? t.admin.providers.modelsAvailable(result.models.length)
+              : t.admin.providers.loadAvailableModels}
         </button>
       }
     >
@@ -369,8 +411,10 @@ function ModelPicker({
       <datalist id={listId}>
         {result?.models.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.name}
-            {m.supportsAttachments === false ? " (text only)" : ""}
+            {t.admin.providers.modelOption(
+              m.name,
+              m.supportsAttachments === false,
+            )}
           </option>
         ))}
       </datalist>
@@ -389,6 +433,7 @@ function ProviderDrawer({
   onClose: () => void;
   onSaved: (message: string) => Promise<void>;
 }) {
+  const t = useT();
   const existing = provider && provider !== "new" ? provider : null;
   const [kind, setKind] = useState<Kind>(existing?.kind ?? "opencode");
   const [limit, setLimit] = useState(
@@ -424,10 +469,10 @@ function ProviderDrawer({
     };
     if (existing) {
       await update.mutateAsync({ id: existing.id, ...values });
-      await onSaved(`Saved ${values.name}.`);
+      await onSaved(t.admin.providers.saved(values.name));
     } else {
       await create.mutateAsync(values);
-      await onSaved(`Added ${values.name}. Test it before relying on it.`);
+      await onSaved(t.admin.providers.added(values.name));
     }
   }
 
@@ -435,8 +480,10 @@ function ProviderDrawer({
     <Drawer
       open={provider !== null}
       onClose={onClose}
-      title={existing ? existing.name : "Add AI provider"}
-      description="Used to read statements and screenshots into structured data."
+      title={existing ? existing.name : t.admin.providers.addAiProvider}
+      description={
+        t.admin.providers.usedToReadStatementsAndScreenshotsIntoStructuredData
+      }
       footer={
         <>
           {existing ? (
@@ -447,9 +494,9 @@ function ProviderDrawer({
               confirmLabel={
                 existing.isDefault
                   ? successor
-                    ? `Delete? ${successor.name} becomes default`
-                    : "Delete? Imports will stop"
-                  : "Click again to delete"
+                    ? t.admin.providers.deletePromote(successor.name)
+                    : t.admin.providers.deleteImportsWillStop
+                  : t.admin.providers.clickAgainToDelete
               }
               onConfirm={() =>
                 void remove
@@ -457,25 +504,28 @@ function ProviderDrawer({
                   .then((r) =>
                     onSaved(
                       r.promoted
-                        ? `Deleted ${existing.name}. ${r.promoted.name} is now the default.`
-                        : `Deleted ${existing.name}.`,
+                        ? t.admin.providers.deletedPromoted(
+                            existing.name,
+                            r.promoted.name,
+                          )
+                        : t.admin.providers.deleted(existing.name),
                     ),
                   )
                   .catch(() => undefined)
               }
             >
-              Delete
+              {t.common.actions.delete}
             </ConfirmButton>
           ) : null}
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t.common.actions.cancel}
           </Button>
           <Button
             type="submit"
             form="provider-form"
             loading={create.isPending || update.isPending}
           >
-            {existing ? "Save" : "Add"}
+            {existing ? t.common.actions.save : t.common.actions.add}
           </Button>
         </>
       }
@@ -490,7 +540,7 @@ function ProviderDrawer({
         }}
       >
         {error ? <Notice tone="error">{error.message}</Notice> : null}
-        <Field label="Name" htmlFor="prov-name">
+        <Field label={t.common.fields.name} htmlFor="prov-name">
           <Input
             id="prov-name"
             name="name"
@@ -500,11 +550,12 @@ function ProviderDrawer({
           />
         </Field>
         <Field
-          label="Type"
+          label={t.common.fields.type}
           htmlFor="prov-kind"
           hint={
             existing
-              ? "Fixed once saved, because the stored key and endpoint belong to this type. Add a new provider to switch."
+              ? t.admin.providers
+                  .fixedOnceSavedBecauseTheStoredKeyAndEndpointBelongToThisTypeAddANewProviderToSwitch
               : undefined
           }
         >
@@ -516,12 +567,16 @@ function ProviderDrawer({
           >
             {Object.entries(kindMeta).map(([value, m]) => (
               <option key={value} value={value}>
-                {m.label}
+                {m.label(t)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="Endpoint URL" htmlFor="prov-url" hint={meta.urlHint}>
+        <Field
+          label={t.admin.providers.endpointUrl}
+          htmlFor="prov-url"
+          hint={meta.urlHint(t)}
+        >
           <Input
             id="prov-url"
             name="baseUrl"
@@ -533,12 +588,13 @@ function ProviderDrawer({
         </Field>
         {meta.needsKey ? (
           <Field
-            label="API key"
+            label={t.admin.providers.apiKey}
             htmlFor="prov-key"
             hint={
               existing?.apiKeyPreview
-                ? `Stored: ${existing.apiKeyPreview}. Leave blank to keep it.`
-                : "Encrypted before it is stored. Never sent back to the browser."
+                ? t.admin.providers.storedKey(existing.apiKeyPreview)
+                : t.admin.providers
+                    .encryptedBeforeItIsStoredNeverSentBackToTheBrowser
             }
           >
             <Input
@@ -564,16 +620,20 @@ function ProviderDrawer({
         <div className="space-y-3 pt-1">
           <Checkbox
             name="supportsVision"
-            label="Model can read images"
-            description="Scanned PDFs and screenshots are only sent to models with this on."
+            label={t.admin.providers.modelCanReadImages}
+            description={
+              t.admin.providers
+                .scannedPdfsAndScreenshotsAreOnlySentToModelsWithThisOn
+            }
             defaultChecked={existing?.supportsVision ?? true}
           />
           <Checkbox
             name="isEnabled"
-            label="Enabled"
+            label={t.admin.providers.enabled}
             description={
               existing?.isDefault
-                ? "The default provider is always enabled. Make another provider the default to disable this one."
+                ? t.admin.providers
+                    .theDefaultProviderIsAlwaysEnabledMakeAnotherProviderTheDefaultToDisableThisOne
                 : undefined
             }
             disabled={existing?.isDefault}
@@ -585,14 +645,19 @@ function ProviderDrawer({
 
         <fieldset className="border-line space-y-4 border-t pt-5">
           <legend className="text-[13px] font-semibold">
-            Cost &amp; limits
+            {t.admin.providers.costLimits}
           </legend>
           <p className="text-ink-3 -mt-2 text-[13px]">
-            List prices are only used to estimate cost on the Usage page. Leave
-            blank for a subscription like opencode Go.
+            {
+              t.admin.providers
+                .listPricesAreOnlyUsedToEstimateCostOnTheUsagePageLeaveBlankForASubscriptionLikeOpencodeGo
+            }
           </p>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Input, US$ per 1M tokens" htmlFor="prov-in">
+            <Field
+              label={t.admin.providers.inputUsPer1MTokens}
+              htmlFor="prov-in"
+            >
               <Input
                 id="prov-in"
                 name="inputCostPerMTok"
@@ -601,7 +666,10 @@ function ProviderDrawer({
                 placeholder="0.15"
               />
             </Field>
-            <Field label="Output, US$ per 1M tokens" htmlFor="prov-out">
+            <Field
+              label={t.admin.providers.outputUsPer1MTokens}
+              htmlFor="prov-out"
+            >
               <Input
                 id="prov-out"
                 name="outputCostPerMTok"
@@ -612,15 +680,15 @@ function ProviderDrawer({
             </Field>
           </div>
           <Checkbox
-            label="Set a monthly token limit"
-            description="Warns on the Status page at 80% and 100%."
+            label={t.admin.providers.setAMonthlyTokenLimit}
+            description={t.admin.providers.warnsOnTheStatusPageAt80And100}
             checked={limit}
             onChange={(e) => setLimit(e.target.checked)}
           />
           {limit ? (
             <div className="space-y-3 pl-6.5">
               <Field
-                label="Tokens per month (input + output)"
+                label={t.admin.providers.tokensPerMonthInputOutput}
                 htmlFor="prov-limit"
               >
                 <Input
@@ -635,16 +703,20 @@ function ProviderDrawer({
               </Field>
               <Checkbox
                 name="pauseAtLimit"
-                label="Stop sending imports here once reached"
-                description="Imports use the fallback provider instead, or fail with a clear message."
+                label={t.admin.providers.stopSendingImportsHereOnceReached}
+                description={
+                  t.admin.providers
+                    .importsUseTheFallbackProviderInsteadOrFailWithAClearMessage
+                }
                 defaultChecked={existing?.pauseAtLimit ?? false}
               />
             </div>
           ) : null}
           {existing?.monthlyTokenLimit ? (
             <p className="text-ink-3 text-[13px]">
-              Used this month: {integer.format(existing.tokensThisMonth)}{" "}
-              tokens.
+              {t.admin.providers.usedThisMonth(
+                integer.format(existing.tokensThisMonth),
+              )}
             </p>
           ) : null}
         </fieldset>

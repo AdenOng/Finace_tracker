@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, useLocale, categoryLabel } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import { Download, Search } from "lucide-react";
 import { useState } from "react";
 
@@ -13,85 +16,21 @@ import { api, type RouterInputs } from "~/trpc/react";
 type Filters = Omit<RouterInputs["admin"]["audit"]["list"], "cursor">;
 type TargetType = NonNullable<Filters["targetType"]>;
 
-const filters: { value: TargetType | ""; label: string }[] = [
-  { value: "", label: "Everything" },
-  { value: "user", label: "Users" },
-  { value: "invitation", label: "Invitations" },
-  { value: "settings", label: "Settings" },
-  { value: "job", label: "Import jobs" },
-  { value: "provider", label: "AI providers" },
-  { value: "category", label: "Categories" },
-  { value: "institution", label: "Brokers & banks" },
-  { value: "backup", label: "Backups" },
-  { value: "preset", label: "Data packs" },
-  { value: "workspace", label: "Workspaces" },
+const makeFilters = (
+  t: Messages,
+): { value: TargetType | ""; label: string }[] => [
+  { value: "", label: t.admin.audit.everything },
+  { value: "user", label: t.admin.audit.users },
+  { value: "invitation", label: t.admin.audit.invitations },
+  { value: "settings", label: t.admin.audit.settings },
+  { value: "job", label: t.admin.audit.importJobs },
+  { value: "provider", label: t.admin.audit.aiProviders },
+  { value: "category", label: t.admin.audit.categories },
+  { value: "institution", label: t.admin.audit.brokersBanks },
+  { value: "backup", label: t.admin.audit.backups },
+  { value: "preset", label: t.admin.audit.dataPacks },
+  { value: "workspace", label: t.admin.audit.workspaces },
 ];
-
-const actionLabels: Record<string, string> = {
-  "user.role_changed": "Changed role",
-  "user.disabled": "Disabled account",
-  "user.enabled": "Re-enabled account",
-  "user.sessions_revoked": "Signed out everywhere",
-  "user.session_revoked": "Signed out a device",
-  "user.two_factor_reset": "Reset two-step",
-  "user.password_reset_created": "Created password reset link",
-  "user.password_reset_used": "Reset password with link",
-  "user.password_reset_requested": "Asked for a password reset email",
-  "invitation.created": "Invited",
-  "invitation.revoked": "Revoked invitation",
-  "provider.created": "Added AI provider",
-  "provider.updated": "Edited AI provider",
-  "provider.removed": "Deleted AI provider",
-  "provider.set_default": "Made default AI provider",
-  "provider.set_fallback": "Made fallback AI provider",
-  "provider.fallback_cleared": "Removed fallback AI provider",
-  "category.created": "Added category",
-  "category.updated": "Edited category",
-  "category.archived": "Archived category",
-  "category.restored": "Restored category",
-  "category.reordered": "Reordered categories",
-  "category.imported": "Imported categories",
-  "category.defaults_restored": "Restored default categories",
-  "institution.created": "Added institution",
-  "institution.updated": "Edited institution",
-  "institution.archived": "Archived institution",
-  "institution.deleted": "Deleted institution",
-  "institution.restored": "Restored institution",
-  "institution.merged": "Merged institutions",
-  "institution.defaults_restored": "Restored default institutions",
-  "job.retried": "Retried an import",
-  "job.cancelled": "Stopped an import",
-  "job.reminder_sent": "Sent a review reminder",
-  "backup.requested": "Asked for a backup",
-  "backup.downloaded": "Downloaded a backup",
-  "preset.applied": "Applied a data pack",
-  "settings.security_updated": "Changed security settings",
-  "settings.retention_updated": "Changed file retention",
-  "settings.files_purged": "Cleaned up statement files",
-  "settings.rates_refreshed": "Refreshed exchange rates",
-  "settings.prices_refreshed": "Refreshed security prices",
-  "settings.price_quotes_updated": "Changed security prices",
-  "settings.cpf_srs_updated": "Changed CPF & SRS",
-  "settings.health_checks_updated": "Changed provider checks",
-  "settings.test_email_sent": "Sent a test email",
-  "workspace.create": "Created workspace",
-  "workspace.update": "Edited workspace",
-  "workspace.remove": "Deleted workspace",
-  "workspace.account.share": "Shared an account",
-  "workspace.account.unshare": "Stopped sharing an account",
-  "workspace.invitation.create": "Invited to a workspace",
-  "workspace.invitation.accept": "Joined a workspace",
-  "workspace.invitation.revoke": "Revoked a workspace invite",
-  "workspace.member.remove": "Removed a workspace member",
-  "workspace.member.role": "Changed a workspace role",
-  "workspace.owner.transfer": "Handed over a workspace",
-};
-
-const policyLabels: Record<string, string> = {
-  everyone: "everyone",
-  admins: "admins only",
-  off: "not required",
-};
 
 /** Detail values are plain JSON; anything structured is shown as JSON rather than [object]. */
 function text(value: unknown): string {
@@ -102,17 +41,15 @@ function text(value: unknown): string {
     : JSON.stringify(value);
 }
 
-const plural = (n: unknown, one: string, many = `${one}s`) =>
-  `${text(n)} ${Number(n) === 1 ? one : many}`;
-
 /** "reassignToId" → "reassign to"; ids themselves are never shown. */
 function humanize(key: string) {
   return key.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
 }
 
-function formatValue(value: unknown) {
-  if (typeof value === "boolean") return value ? "on" : "off";
-  if (value === null) return "none";
+function formatValue(value: unknown, t: Messages) {
+  if (typeof value === "boolean")
+    return value ? t.admin.auditDetails.on : t.admin.auditDetails.off;
+  if (value === null) return t.admin.auditDetails.none;
   return text(value);
 }
 
@@ -120,69 +57,98 @@ function formatValue(value: unknown) {
 function describeDetails(
   action: string,
   details: Record<string, unknown> | null,
+  t: Messages,
+  locale: "en" | "zh",
 ): string | null {
   if (!details) return null;
   const d = details;
   switch (action) {
     case "user.role_changed":
-      return d.role === "admin" ? "Now an admin" : "Now a member";
+      return d.role === "admin"
+        ? t.admin.auditDetails.nowAnAdmin
+        : t.admin.auditDetails.nowAMember;
     case "invitation.created":
-      return `As ${d.role === "admin" ? "an admin" : "a member"}${Number(d.replaced) > 0 ? ", replacing an earlier link" : ""}`;
+      return t.admin.auditDetails.invitation(
+        d.role === "admin",
+        Number(d.replaced) > 0,
+      );
     case "user.sessions_revoked":
     case "user.session_revoked":
-      return plural(d.sessions, "session");
+      return t.admin.auditDetails.sessions(text(d.sessions));
     case "provider.created":
-      return d.model ? `Model ${text(d.model)}` : null;
+      return d.model ? t.admin.auditDetails.model(text(d.model)) : null;
     case "provider.updated":
       return [
-        d.model ? `Model ${text(d.model)}` : null,
-        d.enabled === false ? "disabled" : null,
+        d.model ? t.admin.auditDetails.model(text(d.model)) : null,
+        d.enabled === false ? t.admin.auditDetails.disabled : null,
         d.apiKey && d.apiKey !== "unchanged"
-          ? `API key ${text(d.apiKey)}`
+          ? t.admin.auditDetails.apiKey(text(d.apiKey))
           : null,
       ]
         .filter(Boolean)
-        .join(", ");
+        .join(locale === "zh" ? "，" : ", ");
     case "provider.removed":
-      return d.newDefault ? `${text(d.newDefault)} became the default` : null;
+      return d.newDefault
+        ? t.admin.auditDetails.newDefault(text(d.newDefault))
+        : null;
     case "category.archived":
-      return `${plural(d.archived, "category", "categories")}; ${plural(d.transactionsMoved, "transaction")} ${d.movedTo ? `moved to ${text(d.movedTo)}` : "left uncategorised"}`;
+      return t.admin.auditDetails.archived(
+        text(d.archived),
+        text(d.transactionsMoved),
+        d.movedTo ? categoryLabel(t, text(d.movedTo)) : null,
+      );
     case "category.restored":
-      return Number(d.restored) > 1 ? "With its parent" : null;
+      return Number(d.restored) > 1 ? t.admin.auditDetails.withItsParent : null;
     case "category.reordered":
-      return plural(d.categories, "category", "categories");
+      return t.admin.auditDetails.categories(text(d.categories));
     case "category.imported":
-      return `${text(d.created)} added, ${text(d.updated)} updated, ${text(d.unchanged)} unchanged${Number(d.archivedWithParent) > 0 ? `; ${text(d.archivedWithParent)} archived with their parent` : ""}`;
+      return t.admin.auditDetails.imported(
+        text(d.created),
+        text(d.updated),
+        text(d.unchanged),
+        text(d.archivedWithParent),
+      );
     case "category.defaults_restored":
     case "institution.defaults_restored":
-      return `${text(d.inserted)} added back, ${text(d.unarchived)} restored`;
+      return t.admin.auditDetails.restored(
+        text(d.inserted),
+        text(d.unarchived),
+      );
     case "institution.merged":
-      return `${text(d.from)} merged in; ${plural(d.accountsMoved, "account")} moved`;
+      return t.admin.auditDetails.merged(text(d.from), text(d.accountsMoved));
     case "preset.applied":
-      return `${text(d.categories)} categories, ${text(d.institutions)} institutions, ${text(d.currencies)} currencies added`;
+      return t.admin.auditDetails.preset(
+        text(d.categories),
+        text(d.institutions),
+        text(d.currencies),
+      );
     case "settings.security_updated":
       return Object.entries(d)
         .map(([key, value]) =>
           key === "twoFactorPolicy"
-            ? `two-step for ${policyLabels[text(value)] ?? text(value)}`
+            ? t.admin.auditDetails.twoStep(
+                (t.admin.auditPolicies as Record<string, string>)[
+                  text(value)
+                ] ?? text(value),
+              )
             : key === "maxSessionDays"
               ? value
-                ? `sign out after ${text(value)} days`
-                : "no fixed session length"
+                ? t.admin.auditDetails.sessionDays(text(value))
+                : t.admin.auditDetails.noFixedSessionLength
               : key === "workspaceInviteSignups"
-                ? `workspace invites ${value ? "can" : "cannot"} create accounts`
+                ? t.admin.auditDetails.inviteSignups(!!value)
                 : key === "newDeviceAlerts"
-                  ? `new-device emails ${value ? "on" : "off"}`
-                  : `${humanize(key)}: ${formatValue(value)}`,
+                  ? t.admin.auditDetails.newDevice(!!value)
+                  : `${humanize(key)}: ${formatValue(value, t)}`,
         )
-        .join(", ")
+        .join(locale === "zh" ? "，" : ", ")
         .replace(/^./, (c) => c.toUpperCase());
     case "settings.retention_updated":
       return typeof d.days === "number"
-        ? `Delete files after ${d.days} days`
-        : "Keep files forever";
+        ? t.admin.auditDetails.retention(d.days)
+        : t.admin.auditDetails.keepFilesForever;
     case "settings.files_purged":
-      return plural(d.files, "file");
+      return t.admin.auditDetails.files(text(d.files));
     default:
       return (
         Object.entries(d)
@@ -190,13 +156,15 @@ function describeDetails(
             ([key, value]) =>
               value !== null && value !== undefined && !key.endsWith("Id"),
           )
-          .map(([key, value]) => `${humanize(key)}: ${formatValue(value)}`)
+          .map(([key, value]) => `${humanize(key)}: ${formatValue(value, t)}`)
           .join(" · ") || null
       );
   }
 }
 
 export function AuditLog() {
+  const t = useT();
+  const locale = useLocale();
   const [draft, setDraft] = useState("");
   const [values, setValues] = useState<Filters>({});
   const actors = api.admin.audit.actors.useQuery();
@@ -215,7 +183,7 @@ export function AuditLog() {
   return (
     <div className="space-y-5">
       <div className="card flex flex-wrap items-end gap-3 p-4">
-        <Field label="What" htmlFor="audit-type" className="w-44">
+        <Field label={t.admin.audit.what} htmlFor="audit-type" className="w-44">
           <Select
             id="audit-type"
             className="h-9 text-[13px]"
@@ -224,21 +192,21 @@ export function AuditLog() {
               set({ targetType: (e.target.value || undefined) as TargetType })
             }
           >
-            {filters.map((f) => (
+            {makeFilters(t).map((f) => (
               <option key={f.value} value={f.value}>
                 {f.label}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="Who" htmlFor="audit-actor" className="w-44">
+        <Field label={t.admin.audit.who} htmlFor="audit-actor" className="w-44">
           <Select
             id="audit-actor"
             className="h-9 text-[13px]"
             value={values.actorId ?? ""}
             onChange={(e) => set({ actorId: e.target.value || undefined })}
           >
-            <option value="">Anyone</option>
+            <option value="">{t.admin.audit.anyone}</option>
             {actors.data?.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -246,7 +214,7 @@ export function AuditLog() {
             ))}
           </Select>
         </Field>
-        <Field label="From" htmlFor="audit-from" className="w-40">
+        <Field label={t.admin.audit.from} htmlFor="audit-from" className="w-40">
           <Input
             id="audit-from"
             type="date"
@@ -256,7 +224,7 @@ export function AuditLog() {
             onChange={(e) => set({ from: e.target.value || undefined })}
           />
         </Field>
-        <Field label="To" htmlFor="audit-to" className="w-40">
+        <Field label={t.admin.audit.to} htmlFor="audit-to" className="w-40">
           <Input
             id="audit-to"
             type="date"
@@ -275,8 +243,8 @@ export function AuditLog() {
         >
           <Search className="text-ink-3 pointer-events-none absolute bottom-2.5 left-3 size-4" />
           <Input
-            aria-label="Search the activity log"
-            placeholder="Search, then Enter"
+            aria-label={t.admin.audit.searchTheActivityLog}
+            placeholder={t.admin.audit.searchThenEnter}
             className="h-9 pl-9 text-[13px]"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -287,34 +255,34 @@ export function AuditLog() {
           className="text-brand inline-flex h-9 items-center gap-1.5 text-[13px] font-semibold underline-offset-4 hover:underline"
         >
           <Download className="size-3.5" />
-          Export CSV
+          {t.admin.audit.exportCsv}
         </a>
       </div>
 
       {log.isLoading ? (
-        <p className="text-ink-3 text-sm">Loading…</p>
+        <p className="text-ink-3 text-sm">{t.common.status.loading}</p>
       ) : items.length === 0 ? (
         <EmptyState
           title={
             Object.values(values).some(Boolean)
-              ? "No matches"
-              : "No activity yet"
+              ? t.admin.audit.noMatches
+              : t.admin.audit.noActivityYet
           }
         >
           {Object.values(values).some(Boolean)
-            ? "Try wider dates or another filter."
-            : "Admin changes and password resets will be listed here."}
+            ? t.admin.audit.tryWiderDatesOrAnotherFilter
+            : t.admin.audit.adminChangesAndPasswordResetsWillBeListedHere}
         </EmptyState>
       ) : (
         <>
           <Table>
             <thead>
               <tr>
-                <Th>When</Th>
-                <Th>Who</Th>
-                <Th>What</Th>
-                <Th>Target</Th>
-                <Th>Details</Th>
+                <Th>{t.admin.audit.when}</Th>
+                <Th>{t.admin.audit.who}</Th>
+                <Th>{t.admin.audit.what}</Th>
+                <Th>{t.admin.audit.target}</Th>
+                <Th>{t.admin.audit.details}</Th>
               </tr>
             </thead>
             <tbody>
@@ -322,19 +290,21 @@ export function AuditLog() {
                 <Tr key={entry.id}>
                   <Td
                     className="text-ink-2 whitespace-nowrap"
-                    title={formatDateTime(entry.createdAt)}
+                    title={formatDateTime(entry.createdAt, locale)}
                   >
-                    {formatRelative(entry.createdAt)}
+                    {formatRelative(entry.createdAt, new Date(), locale)}
                   </Td>
                   <Td title={entry.actorEmail ?? undefined}>
-                    {entry.actorName ?? "Deleted user"}
+                    {entry.actorName ?? t.admin.audit.deletedUser}
                   </Td>
                   <Td className="font-medium">
-                    {actionLabels[entry.action] ?? entry.action}
+                    {(t.admin.auditActions as Record<string, string>)[
+                      entry.action
+                    ] ?? entry.action}
                   </Td>
                   <Td>{entry.targetLabel ?? "—"}</Td>
                   <Td className="text-ink-2 text-[13px]">
-                    {describeDetails(entry.action, entry.details)}
+                    {describeDetails(entry.action, entry.details, t, locale)}
                   </Td>
                 </Tr>
               ))}
@@ -347,7 +317,7 @@ export function AuditLog() {
               loading={log.isFetchingNextPage}
               onClick={() => void log.fetchNextPage()}
             >
-              Load older
+              {t.admin.audit.loadOlder}
             </Button>
           ) : null}
         </>

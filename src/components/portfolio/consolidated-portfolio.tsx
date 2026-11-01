@@ -1,5 +1,8 @@
 "use client";
 
+import { useT, useLocale } from "~/i18n/client";
+import type { Messages } from "~/i18n/messages";
+
 import Decimal from "decimal.js";
 import { ArrowUpRight, ChevronDown, Search } from "lucide-react";
 import Link from "next/link";
@@ -15,7 +18,7 @@ import { PortfolioSettings } from "~/components/overview/portfolio-settings";
 import { Input } from "~/components/ui/field";
 import { EmptyState, Notice, PageHeader, Tag } from "~/components/ui/panel";
 import { FilterTabs } from "~/components/ui/tabs";
-import { assetClassLabels } from "~/lib/accounts";
+
 import { cn } from "~/lib/cn";
 import { exchangeName } from "~/lib/exchanges";
 import { formatDate, formatMoney, formatQuantity } from "~/lib/format";
@@ -23,9 +26,9 @@ import { api, type RouterOutputs } from "~/trpc/react";
 
 type Portfolio = RouterOutputs["portfolio"]["consolidated"];
 type Stock = Portfolio["positions"][number];
-const amount = (value: string | null, currency: string) =>
+const amount = (value: string | null, currency: string, t: Messages) =>
   value === null ? (
-    "Not valued"
+    t.portfolio.consolidated.notValued
   ) : (
     <span className="sensitive">{formatMoney(value, currency)}</span>
   );
@@ -48,11 +51,12 @@ function Gain({
   currency: string;
   className?: string;
 }) {
+  const t = useT();
   if (!gain)
     return (
       <span
         className={cn("text-ink-3", className)}
-        title="No average cost recorded"
+        title={t.portfolio.consolidated.noAverageCostRecorded}
       >
         —
       </span>
@@ -80,6 +84,8 @@ function Gain({
 }
 
 export function ConsolidatedPortfolio() {
+  const t = useT();
+  const locale = useLocale();
   const [brokerId, setBrokerId] = useState("");
   const [search, setSearch] = useState("");
   const query = api.portfolio.consolidated.useQuery(
@@ -109,7 +115,7 @@ export function ConsolidatedPortfolio() {
     const sum = positive.reduce((s, [, v]) => s.plus(v), new Decimal(0));
     if (sum.isZero()) return [];
     return positive.map(([assetClass, v]) => ({
-      assetClass: assetClass as keyof typeof assetClassLabels,
+      assetClass: assetClass as keyof Messages["common"]["assetClasses"],
       share: v.div(sum).times(100).toNumber(),
       display: formatMoney(v.toFixed(2), data.currency),
     }));
@@ -121,21 +127,24 @@ export function ConsolidatedPortfolio() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Portfolio"
-        description="Every holding across your brokers, added up."
+        title={t.portfolio.consolidated.portfolio}
+        description={
+          t.portfolio.consolidated.everyHoldingAcrossYourBrokersAddedUp
+        }
         actions={
           <Link
             href="/accounts"
             className="text-ink-2 hover:text-ink inline-flex min-h-10 items-center gap-1 text-sm font-semibold"
           >
-            Manage accounts <ArrowUpRight className="size-4" />
+            {t.portfolio.consolidated.manageAccounts}
+            <ArrowUpRight className="size-4" />
           </Link>
         }
       />
       {query.error ? <Notice tone="error">{query.error.message}</Notice> : null}
       {!data && !query.error ? (
         <div className="card p-6 text-sm" aria-live="polite">
-          Loading portfolio…
+          {t.portfolio.consolidated.loadingPortfolio}
         </div>
       ) : null}
       {data ? (
@@ -150,7 +159,7 @@ export function ConsolidatedPortfolio() {
                 <p className="eyebrow">
                   {brokerId
                     ? data.brokers.find((b) => b.id === brokerId)?.name
-                    : "All brokers"}
+                    : t.portfolio.consolidated.allBrokers}
                 </p>
                 <div className={cardTools}>
                   <AmountsToggle />
@@ -161,12 +170,16 @@ export function ConsolidatedPortfolio() {
                 </div>
               </div>
               {data.incomplete ? (
-                <p className="text-warn mt-3 text-sm font-semibold">Partial</p>
+                <p className="text-warn mt-3 text-sm font-semibold">
+                  {t.portfolio.consolidated.partial}
+                </p>
               ) : null}
               <p className="font-poster figures mt-3 text-[clamp(44px,12vw,84px)] leading-[0.9] font-extrabold">
                 {data.total === null ? (
                   <span className="text-ink-3">
-                    {data.oldestEntry ? "Not valued" : "Not recorded"}
+                    {data.oldestEntry
+                      ? t.portfolio.consolidated.notValued
+                      : t.portfolio.consolidated.notRecorded}
                   </span>
                 ) : (
                   <HeroFigure
@@ -177,28 +190,27 @@ export function ConsolidatedPortfolio() {
               </p>
               <div className="text-ink-2 mt-4 space-y-1 text-sm">
                 <p>
-                  {data.positions.length} holding
-                  {data.positions.length === 1 ? "" : "s"} across{" "}
-                  {data.selectedBrokerCount} account
-                  {data.selectedBrokerCount === 1 ? "" : "s"}
-                  {data.oldestEntry
-                    ? `, up to ${formatDate(data.newestEntry!)}`
-                    : ""}
-                  .
+                  {t.portfolio.consolidated.summary(
+                    data.positions.length,
+                    data.selectedBrokerCount,
+                    data.oldestEntry
+                      ? formatDate(data.newestEntry!, locale)
+                      : null,
+                  )}
                   {data.srs?.total && !new Decimal(data.srs.total).isZero() ? (
                     <>
                       {" "}
-                      Includes{" "}
+                      {t.portfolio.consolidated.includesBefore}{" "}
                       <span className="sensitive">
                         {formatMoney(data.srs.total, data.currency)}
                       </span>{" "}
-                      in SRS.
+                      {t.portfolio.consolidated.includesAfter}
                     </>
                   ) : null}
                 </p>
                 {unrecorded?.length ? (
                   <p className="text-ink-3 text-[12px]">
-                    Nothing recorded yet for{" "}
+                    {t.portfolio.consolidated.nothingRecordedYetFor}{" "}
                     {unrecorded.map((b, i) => (
                       <span key={b.id}>
                         {i > 0 ? ", " : ""}
@@ -220,15 +232,15 @@ export function ConsolidatedPortfolio() {
             <div className="border-line grid grid-cols-2 border-t sm:grid-cols-3">
               {[
                 {
-                  label: "Holdings",
-                  value: <>{amount(data.securities.total, data.currency)}</>,
+                  label: t.portfolio.consolidated.holdings,
+                  value: <>{amount(data.securities.total, data.currency, t)}</>,
                 },
                 {
-                  label: "Broker cash",
-                  value: <>{amount(data.cash.total, data.currency)}</>,
+                  label: t.portfolio.consolidated.brokerCash,
+                  value: <>{amount(data.cash.total, data.currency, t)}</>,
                 },
                 {
-                  label: "Unrealised gain",
+                  label: t.portfolio.consolidated.unrealisedGain,
                   value: data.gain ? (
                     <span
                       className={cn(
@@ -247,8 +259,14 @@ export function ConsolidatedPortfolio() {
                     <span className="text-ink-3">—</span>
                   ),
                   note: data.gain
-                    ? `${data.gain.percent !== null ? `${signedPercent(data.gain.percent)} · ` : ""}${data.gain.holdings} of ${data.positions.length} holdings have a cost`
-                    : "Add average costs to see this",
+                    ? t.portfolio.consolidated.costCount(
+                        data.gain.percent !== null
+                          ? signedPercent(data.gain.percent)
+                          : null,
+                        data.gain.holdings,
+                        data.positions.length,
+                      )
+                    : t.portfolio.consolidated.addAverageCostsToSeeThis,
                 },
               ].map((part, i) => (
                 <div
@@ -275,15 +293,11 @@ export function ConsolidatedPortfolio() {
           {data.incomplete ? (
             <Notice tone="warn">
               {data.unpriced ? (
-                <p>
-                  {data.unpriced} position
-                  {data.unpriced === 1 ? " has" : "s have"} no price and{" "}
-                  {data.unpriced === 1 ? "is" : "are"} excluded from the value.
-                </p>
+                <p>{t.portfolio.consolidated.unpriced(data.unpriced)}</p>
               ) : null}
               {data.unconverted.length ? (
                 <p>
-                  Waiting for exchange rates:{" "}
+                  {t.portfolio.consolidated.waitingForExchangeRates}{" "}
                   <span className="sensitive">
                     {data.unconverted
                       .map((a) => formatMoney(a.amount, a.currency))
@@ -298,20 +312,22 @@ export function ConsolidatedPortfolio() {
           <AmountsScope
             scope="portfolio-holdings"
             className="card min-w-0 p-5 sm:p-8"
-            aria-label="Consolidated holdings"
+            aria-label={t.portfolio.consolidated.consolidatedHoldings}
           >
             <div className="border-ink/80 flex flex-wrap items-center justify-between gap-3 border-b-2 pb-3">
               <p className="eyebrow flex items-center gap-1">
-                Holdings · {data.positions.length}
+                {t.portfolio.consolidated.holdingsCount(data.positions.length)}
                 <AmountsToggle />
               </p>
               <label className="relative w-full min-w-0 sm:w-64">
-                <span className="sr-only">Search holdings</span>
+                <span className="sr-only">
+                  {t.portfolio.consolidated.searchHoldings}
+                </span>
                 <Search className="text-ink-3 pointer-events-none absolute top-3 left-3 size-4" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search symbol or name"
+                  placeholder={t.portfolio.consolidated.searchSymbolOrName}
                   className="pl-9"
                 />
               </label>
@@ -319,11 +335,11 @@ export function ConsolidatedPortfolio() {
             {data.brokers.length > 1 ? (
               <div className="mt-4">
                 <FilterTabs
-                  label="Filter by broker"
+                  label={t.portfolio.consolidated.filterByBroker}
                   value={brokerId}
                   onChange={setBrokerId}
                   options={[
-                    { value: "", label: "All" },
+                    { value: "", label: t.common.status.all },
                     ...data.brokers.map((b) => ({
                       value: b.id,
                       label: b.name,
@@ -336,11 +352,16 @@ export function ConsolidatedPortfolio() {
             {!positions.length ? (
               <div className="mt-5">
                 <EmptyState
-                  title={term ? "No matching holdings" : "No holdings recorded"}
+                  title={
+                    term
+                      ? t.portfolio.consolidated.noMatchingHoldings
+                      : t.portfolio.consolidated.noHoldingsRecorded
+                  }
                 >
                   {term
-                    ? "Try another symbol or company name."
-                    : "Record holdings in an investment account or import a statement to see them here."}
+                    ? t.portfolio.consolidated.tryAnotherSymbolOrCompanyName
+                    : t.portfolio.consolidated
+                        .recordHoldingsInAnInvestmentAccountOrImportAStatement}
                 </EmptyState>
               </div>
             ) : (
@@ -349,11 +370,19 @@ export function ConsolidatedPortfolio() {
                   aria-hidden="true"
                   className="text-ink-3 hidden grid-cols-[minmax(0,1fr)_7rem_9rem_8rem_4rem_1.25rem] gap-4 px-2 pb-2 font-mono text-[11px] tracking-[0.12em] uppercase md:grid"
                 >
-                  <span>Holding</span>
-                  <span className="text-right">Units</span>
-                  <span className="text-right">Value</span>
-                  <span className="text-right">Gain</span>
-                  <span className="text-right">Weight</span>
+                  <span>{t.portfolio.consolidated.holding}</span>
+                  <span className="text-right">
+                    {t.portfolio.consolidated.units}
+                  </span>
+                  <span className="text-right">
+                    {t.portfolio.consolidated.value}
+                  </span>
+                  <span className="text-right">
+                    {t.portfolio.consolidated.gain}
+                  </span>
+                  <span className="text-right">
+                    {t.portfolio.consolidated.weight}
+                  </span>
                   <span />
                 </div>
                 <div className="divide-line border-line divide-y border-t">
@@ -375,9 +404,9 @@ export function ConsolidatedPortfolio() {
               className="card min-w-0 p-5 sm:p-8"
             >
               <div className="border-ink/80 flex items-center justify-between border-b-2 pb-2">
-                <p className="eyebrow">Broker cash</p>
+                <p className="eyebrow">{t.portfolio.consolidated.brokerCash}</p>
                 <p className="figures -mr-2.5 flex items-center gap-1 font-mono text-[13px] font-semibold">
-                  {amount(data.cash.total, data.currency)}
+                  {amount(data.cash.total, data.currency, t)}
                   <AmountsToggle />
                 </p>
               </div>
@@ -424,11 +453,11 @@ export function ConsolidatedPortfolio() {
 
           <AmountsScope
             scope="portfolio-brokers"
-            aria-label="Broker accounts"
+            aria-label={t.portfolio.consolidated.brokerAccounts}
             className="pt-2"
           >
             <p className="eyebrow mb-1 flex items-center gap-1">
-              By broker
+              {t.portfolio.consolidated.byBroker}
               <AmountsToggle />
             </p>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -457,7 +486,7 @@ export function ConsolidatedPortfolio() {
                         {b.asOf ? (
                           <BalanceDate asOf={b.asOf} />
                         ) : (
-                          "Nothing recorded"
+                          t.portfolio.consolidated.nothingRecorded
                         )}
                       </p>
                     </div>
@@ -478,7 +507,9 @@ export function ConsolidatedPortfolio() {
                         )}
                       </p>
                       {b.unpriced || b.unconverted.length ? (
-                        <span className="text-warn text-[11px]">Partial</span>
+                        <span className="text-warn text-[11px]">
+                          {t.portfolio.consolidated.partial}
+                        </span>
                       ) : null}
                     </div>
                   </Link>
@@ -487,19 +518,21 @@ export function ConsolidatedPortfolio() {
           </AmountsScope>
 
           <p className="text-ink-3 text-[12px]">
-            The same symbol on the same exchange is combined across brokers.
+            {
+              t.portfolio.consolidated
+                .theSameSymbolOnTheSameExchangeIsCombinedAcross
+            }
             {data.fxAsOf
-              ? ` Exchange rates as of ${formatDate(data.fxAsOf)}.`
+              ? t.portfolio.consolidated.fxDate(formatDate(data.fxAsOf, locale))
               : ""}
             {data.archivedCount ? (
               <>
                 {" "}
-                {data.archivedCount} archived account
-                {data.archivedCount === 1 ? " is" : "s are"} left out (
+                {t.portfolio.consolidated.archivedBefore(data.archivedCount)}
                 <Link href="/accounts" className="underline underline-offset-4">
-                  Accounts → Archived
+                  {t.portfolio.consolidated.accountsArchived}
                 </Link>
-                ).
+                {t.portfolio.consolidated.archivedAfter}
               </>
             ) : null}
           </p>
@@ -510,16 +543,18 @@ export function ConsolidatedPortfolio() {
 }
 
 /** Second line under the symbol: the name, then where it trades or what it is. */
-function describe(p: Stock) {
+function describe(p: Stock, t: Messages) {
   return [
     p.name,
-    p.exchange ? exchangeName(p.exchange) : assetClassLabels[p.assetClass],
+    p.exchange ? exchangeName(p.exchange) : t.common.assetClasses[p.assetClass],
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
 function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
+  const t = useT();
+  const locale = useLocale();
   const brokers = [...new Map(p.brokers.map((b) => [b.accountId, b])).values()];
   const several = brokers.length > 1;
   const partial = p.unpriced > 0 || p.unconverted.length > 0;
@@ -531,7 +566,7 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
           {p.inSrs ? <Tag tone="outline">SRS</Tag> : null}
         </p>
         <p className="text-ink-3 truncate text-[12px]">
-          {describe(p)}
+          {describe(p, t)}
           {!several && brokers[0] ? (
             <>
               {" · "}
@@ -543,12 +578,13 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
               </Link>
             </>
           ) : (
-            ` · ${brokers.length} brokers`
+            t.portfolio.consolidated.brokerCount(brokers.length)
           )}
         </p>
         <p className="text-ink-3 text-[12px] md:hidden">
-          <span className="sensitive">{formatQuantity(p.quantity)}</span> units
-          · {p.weight !== null ? `${p.weight}%` : "—"}
+          <span className="sensitive">{formatQuantity(p.quantity)}</span>
+          {t.portfolio.consolidated.unitsWeight}
+          {p.weight !== null ? `${p.weight}%` : "—"}
         </p>
       </div>
       <p className="figures text-ink-2 hidden text-right font-mono text-[13px] md:block">
@@ -556,10 +592,12 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
       </p>
       <div className="text-right">
         <p className="figures font-mono text-[14px] font-semibold">
-          {amount(p.total, currency)}
+          {amount(p.total, currency, t)}
         </p>
         {partial ? (
-          <span className="text-warn text-[11px]">Partial</span>
+          <span className="text-warn text-[11px]">
+            {t.portfolio.consolidated.partial}
+          </span>
         ) : null}
         <Gain
           gain={p.gain}
@@ -609,21 +647,25 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
                 {b.accountName}
               </Link>
               <p className="figures shrink-0 font-mono text-[13px]">
-                {amount(b.total, currency)}
+                {amount(b.total, currency, t)}
               </p>
             </div>
             <div className="text-ink-3 mt-1 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[12px]">
               <span>
                 <span className="sensitive">{formatQuantity(b.quantity)}</span>{" "}
-                units · {formatDate(b.asOf)}
+                {t.portfolio.consolidated.unitsDate(formatDate(b.asOf, locale))}
               </span>
               <span>
                 {b.source === "statement"
-                  ? "Imported"
+                  ? t.portfolio.consolidated.imported
                   : b.source === "manual"
-                    ? "Manual"
-                    : "Synced"}
-                {b.quotedAt ? ` · Quote ${formatDate(b.quotedAt)}` : ""}
+                    ? t.portfolio.consolidated.manual
+                    : t.portfolio.consolidated.synced}
+                {b.quotedAt
+                  ? t.portfolio.consolidated.quoteDate(
+                      formatDate(b.quotedAt, locale),
+                    )
+                  : ""}
               </span>
             </div>
             {b.nativeValue &&
@@ -634,8 +676,8 @@ function StockRow({ stock: p, currency }: { stock: Stock; currency: string }) {
                   {formatMoney(b.nativeValue.amount, b.nativeValue.currency)}
                 </span>
                 {b.unconverted.length
-                  ? " · Exchange rate unavailable"
-                  : " before conversion"}
+                  ? t.portfolio.consolidated.exchangeRateUnavailable
+                  : t.portfolio.consolidated.beforeConversion}
               </p>
             ) : null}
           </li>

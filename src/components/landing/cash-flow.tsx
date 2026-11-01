@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale, useT } from "~/i18n/client";
 import {
   Banknote,
   Bus,
@@ -19,7 +20,7 @@ import {
 import { cn } from "~/lib/cn";
 
 import { money } from "./poster";
-import { ACCOUNTS, MONTHS, SAMPLE_YEAR, SPENDING } from "./sample-year";
+import { ACCOUNTS, sampleMonths, SAMPLE_YEAR, SPENDING } from "./sample-year";
 
 const CATEGORY_ICONS: Record<(typeof SPENDING)[number]["key"], LucideIcon> = {
   housing: House,
@@ -50,26 +51,35 @@ const CASH_ACCOUNTS = ACCOUNTS.flatMap((a, i) =>
  * what was spent and what was saved, and the saving is exactly what the cash accounts grew by.
  */
 export function CashFlow({ month }: { month: number }) {
+  const t = useT();
+  const locale = useLocale();
+  const months = sampleMonths(locale);
   const data = SAMPLE_YEAR[month]!;
   const previous = SAMPLE_YEAR[month - 1];
   const savedSoFar = SAMPLE_YEAR.slice(0, month + 1).reduce(
     (sum, m) => sum + m.saved,
     0,
   );
-  const cashNames = CASH_ACCOUNTS.map((i) => ACCOUNTS[i]!.name).join(" and ");
+  const cashNames = t.landing.cashFlow.accountList(
+    CASH_ACCOUNTS.map((i) => ACCOUNTS[i]!.name),
+  );
 
   return (
     <section
-      aria-label={`Sample cash flow for ${MONTHS[month]}`}
+      aria-label={t.landing.cashFlow.aria(months[month]!)}
       className="text-paper-ink bg-paper mt-6 overflow-hidden rounded-[6px] shadow-[0_30px_70px_-30px_rgb(0_0_0/0.8),0_0_0_1px_rgb(0_0_0/0.45)]"
       style={{ backgroundImage: grain }}
     >
       <div className="px-5 pt-5 pb-6 sm:px-8 sm:pt-7 sm:pb-8">
         <div className="flex items-baseline justify-between gap-4 border-b border-current/25 pb-3">
-          <span className="font-poster text-[15px] font-bold">Cash flow</span>
+          <span className="font-poster text-[15px] font-bold">
+            {t.landing.cashFlow.title}
+          </span>
           <span className="font-mono text-[10px] tracking-[0.14em]">
-            {MONTHS[month]!.toUpperCase()} · STATEMENT{" "}
-            {String(month + 1).padStart(2, "0")} OF 12
+            {t.landing.cashFlow.statement(
+              months[month]!.toUpperCase(),
+              String(month + 1).padStart(2, "0"),
+            )}
           </span>
         </div>
 
@@ -78,29 +88,49 @@ export function CashFlow({ month }: { month: number }) {
           key={month}
           className="animate-ink-in mt-6 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-end gap-x-3 sm:gap-x-6"
         >
-          <Figure label="Money in" value={data.incomeTotal} tone="in" />
+          <Figure
+            label={t.landing.cashFlow.moneyIn}
+            value={data.incomeTotal}
+            tone="in"
+          />
           <Operator>−</Operator>
-          <Figure label="Money out" value={data.spendingTotal} tone="out" />
+          <Figure
+            label={t.landing.cashFlow.moneyOut}
+            value={data.spendingTotal}
+            tone="out"
+          />
           <Operator>=</Operator>
-          <Figure label="Saved" value={data.saved} tone="saved" />
+          <Figure
+            label={t.landing.cashFlow.saved}
+            value={data.saved}
+            tone="saved"
+          />
         </div>
         <p className="mt-2 text-right font-mono text-[10px] tracking-[0.06em] opacity-60">
-          {pct(data.saved, data.incomeTotal)} of income · added to {cashNames}
+          {t.landing.cashFlow.savedTo(
+            pct(data.saved, data.incomeTotal),
+            cashNames,
+          )}
         </p>
 
         {/* Two clear totals; the category detail lives in the list below. */}
         <div className="mt-7">
           <div className="flex justify-between gap-4 font-mono text-[11px]">
             <span className="text-art-red">
-              Spent · {pct(data.spendingTotal, data.incomeTotal)}
+              {t.landing.cashFlow.spentShare(
+                pct(data.spendingTotal, data.incomeTotal),
+              )}
             </span>
             <span className="text-art-green">
-              Saved · {pct(data.saved, data.incomeTotal)}
+              {t.landing.cashFlow.savedShare(pct(data.saved, data.incomeTotal))}
             </span>
           </div>
           <div
             role="img"
-            aria-label={`Income split: spent ${money(data.spendingTotal)}, saved ${money(data.saved)}`}
+            aria-label={t.landing.cashFlow.split(
+              money(data.spendingTotal),
+              money(data.saved),
+            )}
             className="mt-2 flex h-4 gap-1 overflow-hidden rounded-[3px]"
           >
             <span
@@ -124,11 +154,16 @@ export function CashFlow({ month }: { month: number }) {
           {/* Categories */}
           <div>
             <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-b border-current/25 pb-1.5 font-mono text-[10px] tracking-[0.1em] opacity-60">
-              <span>IN AND OUT</span>
+              <span>{t.landing.cashFlow.inOut}</span>
               <span className="text-right">S$</span>
               <span className="w-14 text-right">
-                VS{" "}
-                {previous ? MONTHS[month - 1]!.slice(0, 3).toUpperCase() : "—"}
+                {t.landing.cashFlow.vs(
+                  previous
+                    ? locale === "zh"
+                      ? months[month - 1]!
+                      : months[month - 1]!.slice(0, 3).toUpperCase()
+                    : "—",
+                )}
               </span>
             </div>
             <ul className="mt-1">
@@ -141,7 +176,7 @@ export function CashFlow({ month }: { month: number }) {
                     >
                       <span className="flex items-center gap-2.5">
                         <IncomeIcon label={row.label} />
-                        {row.label}
+                        {t.landing.sample.income[row.label]}
                       </span>
                       <span className="figures font-mono font-semibold">
                         {amount(row.amount)}
@@ -151,7 +186,7 @@ export function CashFlow({ month }: { month: number }) {
                   ) : (
                     <CategoryRow
                       key={row.c.key}
-                      label={row.c.label}
+                      label={t.landing.sample.spending[row.c.key]}
                       Icon={CATEGORY_ICONS[row.c.key]}
                       value={data.spending[row.i]!}
                       before={previous?.spending[row.i]}
@@ -164,15 +199,15 @@ export function CashFlow({ month }: { month: number }) {
           {/* The year so far */}
           <div>
             <div className="flex justify-between border-b border-current/25 pb-1.5 font-mono text-[10px] tracking-[0.1em] opacity-60">
-              <span>THE YEAR SO FAR</span>
+              <span>{t.landing.cashFlow.year}</span>
               <span className="flex gap-3">
                 <span className="flex items-center gap-1">
                   <span className="bg-art-green size-1.5 rounded-full" />
-                  IN
+                  {t.landing.cashFlow.in}
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="bg-art-red size-1.5 rounded-full" />
-                  OUT
+                  {t.landing.cashFlow.out}
                 </span>
               </span>
             </div>
@@ -212,20 +247,22 @@ export function CashFlow({ month }: { month: number }) {
                       i === month ? "font-bold" : "opacity-50",
                     )}
                   >
-                    {m.name[0]}
+                    {locale === "zh" ? i + 1 : months[i]![0]}
                   </span>
                 </div>
               ))}
             </div>
             <dl className="mt-4 space-y-1 border-t border-current/25 pt-3 text-[13px]">
               <div className="flex justify-between">
-                <dt className="opacity-70">Saved since January</dt>
+                <dt className="opacity-70">
+                  {t.landing.cashFlow.sinceJanuary}
+                </dt>
                 <dd className="figures font-mono font-semibold">
                   {money(savedSoFar)}
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="opacity-70">Average saving rate</dt>
+                <dt className="opacity-70">{t.landing.cashFlow.averageRate}</dt>
                 <dd className="figures font-mono">
                   {pct(
                     savedSoFar,
