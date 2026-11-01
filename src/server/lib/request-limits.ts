@@ -62,11 +62,15 @@ export async function limitTRPCRequest(
 }
 
 export const EXPENSIVE_REQUESTS_PER_MINUTE = 30;
+/** Heavy page reads: generous enough for normal browsing, separate from mutations. */
+export const EXPENSIVE_READS_PER_MINUTE = 120;
 const WINDOW_MS = 60_000;
 const MAX_TRACKED_USERS = 10_000;
 
-/** Per-process, shared across expensive procedures. Expired users are pruned lazily. */
-export function createExpensiveRequestLimiter() {
+/** Per-process sliding window per user. Expired users are pruned lazily. */
+export function createExpensiveRequestLimiter(
+  perMinute = EXPENSIVE_REQUESTS_PER_MINUTE,
+) {
   const users = new Map<string, number[]>();
   let lastSweep = 0;
   return (userId: string, now = Date.now()): boolean => {
@@ -79,7 +83,7 @@ export function createExpensiveRequestLimiter() {
     const recent = (users.get(userId) ?? []).filter(
       (timestamp) => timestamp > now - WINDOW_MS,
     );
-    if (recent.length >= EXPENSIVE_REQUESTS_PER_MINUTE) return false;
+    if (recent.length >= perMinute) return false;
     // Fail closed rather than let authenticated traffic grow the map indefinitely.
     if (!users.has(userId) && users.size >= MAX_TRACKED_USERS) return false;
     recent.push(now);
@@ -93,3 +97,7 @@ export const consumeExpensiveRequest =
   process.env.NODE_ENV === "test"
     ? () => true
     : createExpensiveRequestLimiter();
+export const consumeExpensiveRead =
+  process.env.NODE_ENV === "test"
+    ? () => true
+    : createExpensiveRequestLimiter(EXPENSIVE_READS_PER_MINUTE);

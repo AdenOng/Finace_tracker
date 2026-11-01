@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   createTRPCRouter,
   expensiveProcedure,
+  expensiveReadProcedure,
   protectedProcedure,
 } from "~/server/api/trpc";
 import {
@@ -292,7 +293,7 @@ export const portfolioRouter = createTRPCRouter({
     }),
 
   /** Your personal net worth over time, for the overview chart. */
-  netWorthHistory: expensiveProcedure
+  netWorthHistory: expensiveReadProcedure
     .input(
       z
         .object({ from: z.iso.date().optional(), to: z.iso.date().optional() })

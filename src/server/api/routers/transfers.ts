@@ -6,7 +6,7 @@ import { z } from "zod";
 import { currencyInput, moneyInput } from "~/server/api/inputs";
 import {
   createTRPCRouter,
-  expensiveProcedure,
+  expensiveReadProcedure,
   protectedProcedure,
 } from "~/server/api/trpc";
 import { transferExclusion, transferLink } from "~/server/db/schema";
@@ -45,7 +45,7 @@ const linkInput = z.object({
 });
 
 export const transfersRouter = createTRPCRouter({
-  list: expensiveProcedure.query(async ({ ctx }) => {
+  list: expensiveReadProcedure.query(async ({ ctx }) => {
     const [unmatched, history] = await Promise.all([
       loadTransferSides(ctx.db, ctx.scope, undefined, true),
       loadTransferHistory(ctx.db, ctx.scope, 50),

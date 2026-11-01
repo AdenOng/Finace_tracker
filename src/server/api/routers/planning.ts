@@ -12,7 +12,7 @@ import { todayIso } from "~/lib/dates";
 import { isoDateInput, moneyInput } from "~/server/api/inputs";
 import {
   createTRPCRouter,
-  expensiveProcedure,
+  expensiveReadProcedure,
   protectedProcedure,
 } from "~/server/api/trpc";
 import {
@@ -77,7 +77,7 @@ async function requireCardBank(
 }
 
 export const planningRouter = createTRPCRouter({
-  overview: expensiveProcedure
+  overview: expensiveReadProcedure
     .input(
       z
         .object({
