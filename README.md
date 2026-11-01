@@ -57,9 +57,10 @@ limit. The scheduled recovery task picks up persisted queued jobs after a restar
 These limits are fixed constants; no additional environment variables are required.
 
 Before each import provider request, a database reservation counts estimated input tokens
-(text length plus attachment bytes, with a 4,096-token minimum per attachment) and 16,384
-response tokens against any enforced monthly token limit. Provider-row locks serialize
-admission across processes. Actual reported usage replaces the reservation atomically,
+(about one token per two characters of text, a flat 8,000 per image, and for any other
+attachment one token per two bytes with a 4,096-token minimum) plus 16,384 response tokens
+against any enforced monthly token limit. Provider-row locks serialize admission across
+processes. Actual reported usage replaces the reservation atomically,
 including failures with reported usage; failures without usage release it. Reservations
 expire after ten minutes to recover from crashes. Actual usage can exceed the estimate;
 monthly usage and admin reports show the actual tokens reported by providers.

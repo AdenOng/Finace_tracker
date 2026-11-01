@@ -166,6 +166,11 @@ export async function reconcileTokenBudget(
   });
 }
 
+/** Drops an in-flight estimate when there is no actual usage to record. */
+export async function releaseTokenBudget(db: Database, reservationId: string) {
+  await db.delete(llmReservation).where(eq(llmReservation.id, reservationId));
+}
+
 /** SDK errors may retain usage in a wrapped cause/details (including invalid JSON outputs). */
 export function reportedFailureUsage(
   error: unknown,
@@ -228,10 +233,11 @@ function budgetedAdapter(
         request.signal?.throwIfAborted();
         result = await adapter.generateStructured(request);
       } catch (error) {
-        await reconcileTokenBudget(db, reservation, {
-          ...entry,
-          ...reportedFailureUsage(error),
-        });
+        const usage = reportedFailureUsage(error);
+        // A failure that reports no usage frees its estimate without recording a call.
+        if (usage)
+          await reconcileTokenBudget(db, reservation, { ...entry, ...usage });
+        else await releaseTokenBudget(db, reservation);
         throw error;
       }
       await reconcileTokenBudget(db, reservation, {

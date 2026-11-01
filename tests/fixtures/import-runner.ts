@@ -276,6 +276,15 @@ const brokenKey = await provider("broken-key", {
   const row = await read(failed.id);
   assert.equal(row.status, "failed");
   assert.match(row.error ?? "", /Fallback broken-key also failed/);
+  // A failure that reports no usage releases its estimate and records no call.
+  assert.equal(
+    await db.$count(
+      schema.llmUsage,
+      eq(schema.llmUsage.providerId, healthy.id),
+    ),
+    1,
+  );
+  assert.equal(await db.$count(schema.llmReservation), 0);
 }
 
 // 4. After a restart, an interrupted read fails (to be retried) and a lost queued read is run.
