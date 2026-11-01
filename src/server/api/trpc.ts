@@ -2,7 +2,7 @@
  * tRPC setup: context, error formatting and the procedure types used by routers —
  * `publicProcedure`, `enrollingProcedure` (signed in, 2FA enrolment may still be pending),
  * `protectedProcedure` (signed in and enrolled, carries an access scope) and `adminProcedure`
- * (protected, with the admin role).
+ * (protected, with the admin role). `expensiveProcedure` adds a shared per-user rate limit.
  */
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
@@ -12,6 +12,7 @@ import { needsTwoFactorEnrollment } from "~/server/auth/enrollment";
 import { getSessionFor } from "~/server/auth/session-policy";
 import { db } from "~/server/db";
 import { resolveAccessScope } from "~/server/lib/access";
+import { consumeExpensiveRequest } from "~/server/lib/request-limits";
 
 export const createTRPCContext = async (opts: { headers: Headers }) => {
   const session = await getSessionFor(opts.headers);
@@ -79,6 +80,17 @@ export const protectedProcedure = enrollingProcedure.use(({ ctx, next }) => {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Set up two-factor authentication to continue.",
+    });
+  }
+  return next();
+});
+
+/** Shared allowance of 30 expensive calls per minute per authenticated user. */
+export const expensiveProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (!consumeExpensiveRequest(ctx.session.user.id)) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: "Too many expensive requests. Try again in a minute.",
     });
   }
   return next();

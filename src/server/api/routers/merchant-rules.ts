@@ -3,7 +3,11 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  expensiveProcedure,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import { merchantRule, transaction } from "~/server/db/schema";
 import { writableBy } from "~/server/lib/access";
 import {
@@ -123,7 +127,7 @@ export const merchantRulesRouter = createTRPCRouter({
         await loadMerchantRules(ctx.db, ctx.scope),
       );
     }),
-  applyRules: protectedProcedure
+  applyRules: expensiveProcedure
     .input(
       z.object({ ids: transactionIdsInput, revision: z.string().length(64) }),
     )

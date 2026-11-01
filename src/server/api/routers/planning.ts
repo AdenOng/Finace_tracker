@@ -10,7 +10,11 @@ import {
 } from "~/lib/cash-flow";
 import { todayIso } from "~/lib/dates";
 import { isoDateInput, moneyInput } from "~/server/api/inputs";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  expensiveProcedure,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import {
   cardPaymentAccount,
   cardStatement,
@@ -73,7 +77,7 @@ async function requireCardBank(
 }
 
 export const planningRouter = createTRPCRouter({
-  overview: protectedProcedure
+  overview: expensiveProcedure
     .input(
       z
         .object({

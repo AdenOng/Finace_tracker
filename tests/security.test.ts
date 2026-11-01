@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
+import { initTRPC } from "@trpc/server";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+
+import {
+  createExpensiveRequestLimiter,
+  EXPENSIVE_REQUESTS_PER_MINUTE,
+  limitTRPCRequest,
+  MAX_TRPC_BATCH_SIZE,
+  MAX_TRPC_BODY_BYTES,
+  MAX_TRPC_URL_BYTES,
+} from "../src/server/lib/request-limits";
 
 import { csvCell, toCsv } from "../src/lib/csv";
 import { safeNextPath } from "../src/lib/navigation";
@@ -109,5 +120,94 @@ describe("CSV export", () => {
     expect(csvCell("-45.10")).toBe("-45.10");
     expect(csvCell(null)).toBe("");
     expect(toCsv([["a,b", "line\nbreak"]])).toBe(`"a,b","line\nbreak"`);
+  });
+});
+
+describe("tRPC request limits", () => {
+  test("rejects oversized declared and streamed bodies, preserves valid JSON and bounds URLs", async () => {
+    const url = "http://localhost/api/trpc/example";
+    const declared = await limitTRPCRequest(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-length": String(MAX_TRPC_BODY_BYTES + 1) },
+        body: "{}",
+      }),
+    );
+    expect(declared).toBeInstanceOf(Response);
+    expect((declared as Response).status).toBe(413);
+
+    // Missing or dishonest Content-Length cannot bypass the running byte cap.
+    for (const headers of [
+      new Headers(),
+      new Headers({ "content-length": "2" }),
+    ]) {
+      let cancelled = false;
+      const streamed = await limitTRPCRequest(
+        new Request(url, {
+          method: "POST",
+          headers,
+          body: new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.enqueue(new Uint8Array(1024 * 1024));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+        }),
+      );
+      expect((streamed as Response).status).toBe(413);
+      expect(cancelled).toBe(true);
+    }
+    const valid = await limitTRPCRequest(
+      new Request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-test": "preserved" },
+        body: '{"text":"€"}',
+      }),
+    );
+    expect(valid).toBeInstanceOf(Request);
+    expect((valid as Request).headers.get("x-test")).toBe("preserved");
+    expect(await (valid as Request).json()).toEqual({ text: "€" });
+    const longUrl = await limitTRPCRequest(
+      new Request(url + "?input=" + "x".repeat(MAX_TRPC_URL_BYTES)),
+    );
+    expect((longUrl as Response).status).toBe(414);
+  });
+
+  test("rejects oversized batches before resolving procedures", async () => {
+    const t = initTRPC.create();
+    let calls = 0;
+    const router = t.router({ example: t.procedure.query(() => ++calls) });
+    for (const count of [MAX_TRPC_BATCH_SIZE, MAX_TRPC_BATCH_SIZE + 1]) {
+      const paths = Array<string>(count).fill("example").join(",");
+      const response = await fetchRequestHandler({
+        endpoint: "/api/trpc",
+        req: new Request(`http://localhost/api/trpc/${paths}?batch=1`),
+        router,
+        maxBatchSize: MAX_TRPC_BATCH_SIZE,
+        createContext: () => ({}),
+      });
+      expect(response.status).toBe(count === MAX_TRPC_BATCH_SIZE ? 200 : 400);
+      if (count > MAX_TRPC_BATCH_SIZE) {
+        expect(await response.text()).toContain(
+          "Batch call exceeds maximum size",
+        );
+      }
+    }
+    expect(calls).toBe(MAX_TRPC_BATCH_SIZE);
+  });
+
+  test("shares a sliding-window allowance per user and restores it at expiry", () => {
+    const consume = createExpensiveRequestLimiter();
+    const start = 100_000;
+    for (let i = 0; i < EXPENSIVE_REQUESTS_PER_MINUTE; i++) {
+      expect(consume("user-a", start + i * 100)).toBe(true);
+    }
+    expect(consume("user-a", start + 59_999)).toBe(false);
+    expect(consume("user-b", start + 59_999)).toBe(true);
+    expect(consume("user-a", start + 60_000)).toBe(true);
+    expect(consume("user-a", start + 60_000)).toBe(false);
+    expect(consume("user-a", start + 120_000)).toBe(true);
   });
 });
