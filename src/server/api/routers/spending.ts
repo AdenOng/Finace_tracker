@@ -21,7 +21,11 @@ import {
   monthInput,
   optionalText,
 } from "~/server/api/inputs";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  expensiveProcedure,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import type { Database } from "~/server/db";
 import {
   category,
@@ -58,8 +62,24 @@ import { clearTransactionTransferReview } from "~/server/modules/transfers/store
 import { ratesInto } from "~/server/modules/portfolio/holdings";
 import { convertAmounts } from "~/server/modules/portfolio/valuation";
 
-/** A search covers every month, so its results are capped; a month is listed in full. */
-const SEARCH_LIMIT = 500;
+const listInput = z.object({
+  workspaceId: z.uuid().optional(),
+  month: monthInput,
+  accountId: z.uuid().nullable(),
+  categoryId: z.uuid().nullable(),
+  search: z.string().trim().max(100).default(""),
+});
+const cursorInput = z.object({
+  postedDate: isoDateInput,
+  // Keep PostgreSQL's full timestamp precision rather than rounding through a JS Date.
+  createdAt: z
+    .string()
+    .regex(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:[+-]\d{2}(?::\d{2})?)$/,
+    ),
+  id: z.uuid(),
+});
+const PAGE_SIZE = 100;
 
 /** First day of `month` and of the month after, as ISO dates. */
 function monthRange(month: string) {
@@ -71,6 +91,7 @@ function monthSummary(
   db: Pick<Database, "select">,
   scope: AccessScope,
   month: string,
+  accountId?: string,
 ) {
   const { start, end } = monthRange(month);
   return db
@@ -89,6 +110,7 @@ function monthSummary(
       and(
         readableAccount(scope, transaction.ownerId, transaction.accountId),
         eq(transaction.isTransfer, false),
+        accountId ? eq(transaction.accountId, accountId) : undefined,
         gte(transaction.postedDate, start),
         lt(transaction.postedDate, end),
       ),
@@ -120,17 +142,87 @@ const transactionInput = z.object({
   notes: optionalText(2000),
 });
 
+/** Shared filters and ownership scope for paged browsing and complete CSV exports. */
+async function spendingRows(
+  db: Database,
+  scope: AccessScope,
+  input: z.infer<typeof listInput>,
+  cursor?: z.infer<typeof cursorInput> | null,
+  limit?: number,
+) {
+  const { start, end } = monthRange(input.month);
+  // strpos rather than LIKE, so % and _ in the search are ordinary characters.
+  const contains = (column: Column) =>
+    sql`strpos(lower(coalesce(${column}, '')), lower(${input.search})) > 0`;
+  const rows = db
+    .select({
+      id: transaction.id,
+      createdAt: sql<string>`${transaction.createdAt}::text`,
+      accountId: transaction.accountId,
+      accountName: financialAccount.name,
+      postedDate: transaction.postedDate,
+      description: transaction.description,
+      merchant: transaction.merchant,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      categoryId: transaction.categoryId,
+      categoryName: category.name,
+      categoryColor: category.color,
+      isTransfer: transaction.isTransfer,
+      transferLinkId: sql<
+        string | null
+      >`(select ${transferLink.id} from ${transferLink}
+            where ${readableAccount(scope, transferLink.ownerId, transaction.accountId)}
+            and (${transferLink.outgoingTransactionId} = ${transaction.id}
+              or ${transferLink.incomingTransactionId} = ${transaction.id}) limit 1)`,
+      notes: transaction.notes,
+      source: transaction.source,
+      categorySource: transaction.categorySource,
+      cleared: transaction.cleared,
+      reconciliationId: transaction.reconciliationId,
+    })
+    .from(transaction)
+    .innerJoin(financialAccount, eq(financialAccount.id, transaction.accountId))
+    .leftJoin(category, eq(category.id, transaction.categoryId))
+    .where(
+      and(
+        readableAccount(scope, transaction.ownerId, transaction.accountId),
+        cursor
+          ? sql`(${transaction.postedDate}, ${transaction.createdAt}, ${transaction.id}) < (${cursor.postedDate}::date, ${cursor.createdAt}::timestamptz, ${cursor.id}::uuid)`
+          : undefined,
+        input.search
+          ? or(
+              contains(transaction.description),
+              contains(transaction.merchant),
+              contains(transaction.notes),
+            )
+          : and(
+              gte(transaction.postedDate, start),
+              lt(transaction.postedDate, end),
+            ),
+        input.accountId
+          ? eq(transaction.accountId, input.accountId)
+          : undefined,
+        input.categoryId
+          ? eq(transaction.categoryId, input.categoryId)
+          : undefined,
+      ),
+    )
+    .orderBy(
+      desc(transaction.postedDate),
+      desc(transaction.createdAt),
+      desc(transaction.id),
+    );
+  return limit === undefined ? rows : rows.limit(limit);
+}
+
 /** Day-to-day money in and out of bank, card and cash accounts. */
 export const spendingRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
-      z.object({
-        workspaceId: z.uuid().optional(),
-        month: monthInput,
-        accountId: z.uuid().nullable(),
-        categoryId: z.uuid().nullable(),
-        /** Text in the description, merchant or notes; searches every month, newest first. */
-        search: z.string().trim().max(100).default(""),
+      listInput.extend({
+        cursor: cursorInput.nullish(),
+        limit: z.number().int().min(1).max(PAGE_SIZE).default(PAGE_SIZE),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -139,77 +231,34 @@ export const spendingRouter = createTRPCRouter({
         ctx.scope,
         input.workspaceId,
       );
-      const { start, end } = monthRange(input.month);
-      // strpos rather than LIKE, so % and _ in the search are ordinary characters.
-      const contains = (column: Column) =>
-        sql`strpos(lower(coalesce(${column}, '')), lower(${input.search})) > 0`;
-      const rows = ctx.db
-        .select({
-          id: transaction.id,
-          accountId: transaction.accountId,
-          accountName: financialAccount.name,
-          postedDate: transaction.postedDate,
-          description: transaction.description,
-          merchant: transaction.merchant,
-          amount: transaction.amount,
-          currency: transaction.currency,
-          categoryId: transaction.categoryId,
-          categoryName: category.name,
-          categoryColor: category.color,
-          isTransfer: transaction.isTransfer,
-          transferLinkId: sql<
-            string | null
-          >`(select ${transferLink.id} from ${transferLink}
-            where ${readableAccount(scope, transferLink.ownerId, transaction.accountId)}
-            and (${transferLink.outgoingTransactionId} = ${transaction.id}
-              or ${transferLink.incomingTransactionId} = ${transaction.id}) limit 1)`,
-          notes: transaction.notes,
-          source: transaction.source,
-          categorySource: transaction.categorySource,
-          cleared: transaction.cleared,
-          reconciliationId: transaction.reconciliationId,
-        })
-        .from(transaction)
-        .innerJoin(
-          financialAccount,
-          eq(financialAccount.id, transaction.accountId),
-        )
-        .leftJoin(category, eq(category.id, transaction.categoryId))
-        .where(
-          and(
-            readableAccount(scope, transaction.ownerId, transaction.accountId),
-            input.search
-              ? or(
-                  contains(transaction.description),
-                  contains(transaction.merchant),
-                  contains(transaction.notes),
-                )
-              : and(
-                  gte(transaction.postedDate, start),
-                  lt(transaction.postedDate, end),
-                ),
-            input.accountId
-              ? eq(transaction.accountId, input.accountId)
-              : undefined,
-            input.categoryId
-              ? eq(transaction.categoryId, input.categoryId)
-              : undefined,
-          ),
-        )
-        .orderBy(desc(transaction.postedDate), desc(transaction.createdAt));
-      return input.search ? rows.limit(SEARCH_LIMIT) : rows;
+      return spendingRows(ctx.db, scope, input, input.cursor, input.limit);
     }),
+
+  export: expensiveProcedure.input(listInput).query(async ({ ctx, input }) => {
+    const scope = await resolveWorkspaceScope(
+      ctx.db,
+      ctx.scope,
+      input.workspaceId,
+    );
+    return spendingRows(ctx.db, scope, input);
+  }),
 
   /** Money out and in per category and currency for a month, transfers excluded. */
   summary: protectedProcedure
-    .input(z.object({ month: monthInput, workspaceId: z.uuid().optional() }))
+    .input(
+      z.object({
+        month: monthInput,
+        workspaceId: z.uuid().optional(),
+        accountId: z.uuid().optional(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const scope = await resolveWorkspaceScope(
         ctx.db,
         ctx.scope,
         input.workspaceId,
       );
-      return monthSummary(ctx.db, scope, input.month);
+      return monthSummary(ctx.db, scope, input.month, input.accountId);
     }),
 
   /**
@@ -391,7 +440,7 @@ export const spendingRouter = createTRPCRouter({
       }),
     ),
 
-  bulkUpdate: protectedProcedure
+  bulkUpdate: expensiveProcedure
     .input(
       z.object({
         ids: transactionIdsInput,
@@ -416,27 +465,73 @@ export const spendingRouter = createTRPCRouter({
         if (input.changes.categoryId !== undefined)
           await checkCategory(tx, input.changes.categoryId);
         const categories = await loadClassificationCategories(tx);
-        for (const row of rows) {
+        const updates = rows.map((row) => {
           const classification = classifyTransaction(
             row,
             input.changes,
             categories,
           );
-          if (classification.isTransfer !== row.isTransfer)
+          return {
+            row,
+            values: {
+              ...input.changes,
+              ...classification,
+              categorySource:
+                input.changes.categoryId !== undefined ||
+                classification.categoryId !== row.categoryId
+                  ? ("user" as const)
+                  : row.categorySource,
+            },
+          };
+        });
+        for (const { row, values } of updates) {
+          if (values.isTransfer !== row.isTransfer)
             await clearTransactionTransferReview(tx, ctx.scope, row.id);
+        }
+        // Classification can differ by row. Group identical patches so every write is set-based.
+        const groups = new Map<
+          string,
+          { values: (typeof updates)[number]["values"]; ids: string[] }
+        >();
+        for (const { row, values } of updates) {
+          const key = JSON.stringify(values);
+          const group = groups.get(key);
+          if (group) group.ids.push(row.id);
+          else groups.set(key, { values, ids: [row.id] });
+        }
+        if (groups.size === 1) {
+          const group = [...groups.values()][0]!;
+          await tx
+            .update(transaction)
+            .set(group.values)
+            .where(
+              and(
+                inArray(transaction.id, group.ids),
+                writableBy(ctx.scope, transaction.ownerId),
+              ),
+            );
+        } else {
+          const values = sql.join(
+            updates.map(
+              ({ row, values }) =>
+                sql`(${row.id}::uuid, ${values.categoryId}::uuid, ${values.isTransfer}::boolean, ${values.categorySource}::text)`,
+            ),
+            sql`, `,
+          );
           await tx
             .update(transaction)
             .set({
               ...input.changes,
-              ...classification,
-              ...(input.changes.categoryId !== undefined ||
-              classification.categoryId !== row.categoryId
-                ? { categorySource: "user" as const }
-                : {}),
+              categoryId: sql`patch.category_id`,
+              isTransfer: sql`patch.is_transfer`,
+              categorySource: sql`patch.category_source::category_source`,
             })
+            .from(
+              sql`(values ${values}) as patch(id, category_id, is_transfer, category_source)`,
+            )
             .where(
               and(
-                eq(transaction.id, row.id),
+                eq(transaction.id, sql`patch.id`),
                 writableBy(ctx.scope, transaction.ownerId),
               ),
             );
@@ -445,7 +540,7 @@ export const spendingRouter = createTRPCRouter({
       }),
     ),
 
-  bulkRemove: protectedProcedure
+  bulkRemove: expensiveProcedure
     .input(z.object({ ids: transactionIdsInput }))
     .mutation(async ({ ctx, input }) =>
       ctx.db.transaction(async (tx) => {

@@ -77,18 +77,25 @@ export function SpendingView({
 
   const [accounts] = api.accounts.list.useSuspenseQuery();
   const [categories] = api.catalog.categories.useSuspenseQuery();
-  const list = api.spending.list.useQuery(
+  const list = api.spending.list.useInfiniteQuery(
     { month, accountId, categoryId, search: query },
-    { placeholderData: (previous) => previous },
+    {
+      placeholderData: (previous) => previous,
+      getNextPageParam: (page) =>
+        page.length === 100 ? page.at(-1) : undefined,
+    },
   );
+  // Fetch and render another batch only when requested, including on mobile.
+  const rows = list.data?.pages.flat() ?? [];
+  const [exporting, setExporting] = useState(false);
   const summary = api.spending.summary.useQuery(
     { month },
     { placeholderData: (previous) => previous },
   );
 
-  const selectedRows = (list.data ?? []).filter((r) => selected.has(r.id));
+  const selectedRows = rows.filter((r) => selected.has(r.id));
   const selectionBusy = list.isFetching || list.isPlaceholderData;
-  const selectable = (list.data ?? []).slice(0, 500);
+  const selectable = rows.slice(0, 500);
   function toggleSelection(id: string) {
     setSelected((previous) => {
       const next = new Set(previous);
@@ -133,46 +140,58 @@ export function SpendingView({
     setSearch("");
     setQuery("");
   };
-  function exportCsv() {
-    const rows = list.data ?? [];
-    downloadFile(
-      `finfolio-transactions-${query ? "search" : month}.csv`,
-      toCsv([
-        [
-          t.common.fields.date,
-          t.spending.spendingView.description,
-          t.spending.spendingView.merchant,
-          t.spending.spendingView.account,
-          t.spending.spendingView.category,
-          t.common.fields.amount,
-          t.common.fields.currency,
-          t.spending.spendingView.transfer,
-          t.common.fields.status,
-          t.common.fields.notes,
-        ],
-        ...rows.map((row) => [
-          row.postedDate,
-          row.description,
-          row.merchant,
-          row.accountName,
-          row.categoryName
-            ? categoryLabel(t, row.categoryName)
-            : row.categoryName,
-          row.amount,
-          row.currency,
-          row.isTransfer
-            ? t.spending.spendingView.yes
-            : t.spending.spendingView.no,
-          row.reconciliationId
-            ? t.spending.spendingView.reconciled
-            : row.cleared
-              ? t.spending.spendingView.cleared
-              : t.spending.spendingView.uncleared,
-          row.notes,
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const rows = await utils.spending.export.fetch({
+        month,
+        accountId,
+        categoryId,
+        search: query,
+      });
+      downloadFile(
+        `finfolio-transactions-${query ? "search" : month}.csv`,
+        toCsv([
+          [
+            t.common.fields.date,
+            t.spending.spendingView.description,
+            t.spending.spendingView.merchant,
+            t.spending.spendingView.account,
+            t.spending.spendingView.category,
+            t.common.fields.amount,
+            t.common.fields.currency,
+            t.spending.spendingView.transfer,
+            t.common.fields.status,
+            t.common.fields.notes,
+          ],
+          ...rows.map((row) => [
+            row.postedDate,
+            row.description,
+            row.merchant,
+            row.accountName,
+            row.categoryName
+              ? categoryLabel(t, row.categoryName)
+              : row.categoryName,
+            row.amount,
+            row.currency,
+            row.isTransfer
+              ? t.spending.spendingView.yes
+              : t.spending.spendingView.no,
+            row.reconciliationId
+              ? t.spending.spendingView.reconciled
+              : row.cleared
+                ? t.spending.spendingView.cleared
+                : t.spending.spendingView.uncleared,
+            row.notes,
+          ]),
         ]),
-      ]),
-      "text/csv;charset=utf-8",
-    );
+        "text/csv;charset=utf-8",
+      );
+    } catch (error) {
+      setFlash(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
   }
   const allSelected =
     selectable.length > 0 && selectable.every((r) => selected.has(r.id));
@@ -392,10 +411,10 @@ export function SpendingView({
                 </h2>
                 {list.data ? (
                   <span className="bg-wash text-ink-3 figures rounded-full px-2 py-0.5 text-[11px]">
-                    {list.data.length}
+                    {rows.length}
                   </span>
                 ) : null}
-                {list.data?.length ? (
+                {rows.length ? (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -403,7 +422,7 @@ export function SpendingView({
                     aria-label={
                       t.spending.spendingView.exportTheseTransactionsAsCSV
                     }
-                    disabled={list.isPlaceholderData}
+                    disabled={list.isPlaceholderData || exporting}
                     onClick={exportCsv}
                   >
                     <Download className="size-3.5" aria-hidden="true" />
@@ -581,14 +600,12 @@ export function SpendingView({
                 </Button>
               </div>
             ) : null}
-            {query && list.data?.length ? (
+            {query && rows.length ? (
               <p className="text-ink-3 mb-3 text-[13px]">
-                {list.data.length >= 500
-                  ? t.spending.spendingView.limitedMatches(query)
-                  : t.spending.spendingView.matches(query)}
+                {t.spending.spendingView.matches(query)}
               </p>
             ) : null}
-            {(list.data?.length ?? 0) > 500 ? (
+            {(rows.length ?? 0) > 500 ? (
               <p className="text-ink-2 mb-3 text-sm">
                 {t.spending.spendingView.selectUpTo500EntriesAtA}
               </p>
@@ -597,7 +614,7 @@ export function SpendingView({
               <Notice tone="error">{list.error.message}</Notice>
             ) : !list.data ? (
               <div className="bg-wash h-24" />
-            ) : list.data.length === 0 ? (
+            ) : rows.length === 0 ? (
               <div className="flex flex-col items-center py-7 text-center sm:py-10">
                 <span className="bg-wash text-ink-3 mb-3 grid size-11 place-items-center rounded-full">
                   <ReceiptText className="size-5" strokeWidth={1.5} />
@@ -649,7 +666,7 @@ export function SpendingView({
                     {t.spending.spendingView.selectAll}
                   </label>
                   <ul className="divide-line divide-y">
-                    {list.data.map((row) => (
+                    {rows.map((row) => (
                       <MobileTransactionRow
                         key={row.id}
                         transaction={row}
@@ -702,7 +719,7 @@ export function SpendingView({
                     </tr>
                   </thead>
                   <tbody>
-                    {list.data.map((row) => {
+                    {rows.map((row) => {
                       const incoming = new Decimal(row.amount).isPositive();
                       return (
                         <Tr
@@ -791,6 +808,17 @@ export function SpendingView({
                 </Table>
               </>
             )}
+            {list.hasNextPage ? (
+              <Button
+                variant="ghost"
+                disabled={selectionBusy}
+                onClick={() => void list.fetchNextPage()}
+              >
+                {list.isFetchingNextPage
+                  ? t.common.status.loading
+                  : "Load more"}
+              </Button>
+            ) : null}
           </div>
         </AmountsScope>
       </div>

@@ -35,19 +35,21 @@ export function AccountTransactions({
   useEffect(() => setMonth(currentMonth()), []);
   const [adding, setAdding] = useState(false);
   const list = api.spending.list.useQuery(
-    { month: month ?? "2000-01", accountId, categoryId: null },
+    { month: month ?? "2000-01", accountId, categoryId: null, limit: SHOWN },
     { enabled: !!month, placeholderData: (previous) => previous },
   );
 
   const rows = list.data ?? [];
-  const counted = rows.filter((r) => !r.isTransfer);
-  const total = (sign: 1 | -1) =>
-    counted
-      .map((r) => new Decimal(r.amount))
-      .filter((v) => (sign > 0 ? v.isPositive() : v.isNegative()))
-      .reduce((a, b) => a.plus(b), new Decimal(0))
-      .abs();
-  const currency = rows[0]?.currency;
+  const summary = api.spending.summary.useQuery(
+    { month: month ?? "2000-01", accountId },
+    { enabled: !!month, placeholderData: (previous) => previous },
+  );
+  const total = (field: "spent" | "received") =>
+    (summary.data ?? []).reduce(
+      (sum, row) => sum.plus(row[field]),
+      new Decimal(0),
+    );
+  const currency = summary.data?.[0]?.currency ?? rows[0]?.currency;
 
   return (
     <Section
@@ -95,14 +97,14 @@ export function AccountTransactions({
             <span className="text-gain">
               {t.accounts.transactions.in}{" "}
               <span className="sensitive">
-                {formatMoney(total(1).toFixed(2), currency)}
+                {formatMoney(total("received").toFixed(2), currency)}
               </span>
             </span>
             <span className="text-ink-3 mx-2">·</span>
             <span className="text-loss">
               {t.accounts.transactions.out}{" "}
               <span className="sensitive">
-                {formatMoney(total(-1).toFixed(2), currency)}
+                {formatMoney(total("spent").toFixed(2), currency)}
               </span>
             </span>
           </p>
@@ -162,9 +164,7 @@ export function AccountTransactions({
         href={allHref}
         className="mt-4 inline-block text-[13px] font-semibold underline decoration-current/30 underline-offset-4 hover:decoration-current"
       >
-        {rows.length > SHOWN
-          ? t.accounts.transactions.seeAll(rows.length)
-          : t.accounts.transactions.openInSpending}
+        {t.accounts.transactions.openInSpending}
       </Link>
 
       {adding ? (

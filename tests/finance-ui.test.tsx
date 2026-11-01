@@ -388,6 +388,7 @@ test("portfolio settings expose accessible SVG gear buttons in both card headers
 const categoryId = "22222222-2222-4222-8222-222222222222";
 const transaction: RouterOutputs["spending"]["list"][number] = {
   id: "33333333-3333-4333-8333-333333333333",
+  createdAt: "2026-10-01 00:00:00+00",
   accountId,
   accountName: "Bank",
   postedDate: "2026-10-01",

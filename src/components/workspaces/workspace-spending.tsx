@@ -27,10 +27,17 @@ export function WorkspaceSpending({
     { workspaceId, month },
     { staleTime: 0, refetchInterval: 15_000, retry: false },
   );
-  const list = api.spending.list.useQuery(
+  const list = api.spending.list.useInfiniteQuery(
     { workspaceId, month, accountId, categoryId: null },
-    { staleTime: 0, refetchInterval: 15_000, retry: false },
+    {
+      staleTime: 0,
+      refetchInterval: 15_000,
+      retry: false,
+      getNextPageParam: (page) =>
+        page.length === 100 ? page.at(-1) : undefined,
+    },
   );
+  const rows = list.data?.pages.flat() ?? [];
   const owners = new Map(accounts.map((a) => [a.id, a.ownerName]));
   return (
     <div className="space-y-10">
@@ -137,7 +144,7 @@ export function WorkspaceSpending({
           <Notice tone="error">{list.error.message}</Notice>
         ) : !list.data ? (
           <p>{t.workspaces.workspaceSpending.loadingTransactions}</p>
-        ) : !list.data.length ? (
+        ) : !rows.length ? (
           <p className="text-ink-2 text-sm">
             {t.workspaces.workspaceSpending.noTransactionsMatch}
           </p>
@@ -153,7 +160,7 @@ export function WorkspaceSpending({
               </tr>
             </thead>
             <tbody>
-              {list.data.map((row) => (
+              {rows.map((row) => (
                 <Tr key={row.id}>
                   <Td>{formatDate(row.postedDate, locale)}</Td>
                   <Td>{row.merchant ?? row.description}</Td>
@@ -180,6 +187,15 @@ export function WorkspaceSpending({
             </tbody>
           </Table>
         )}
+        {list.hasNextPage ? (
+          <Button
+            variant="ghost"
+            disabled={list.isFetchingNextPage}
+            onClick={() => void list.fetchNextPage()}
+          >
+            {list.isFetchingNextPage ? t.common.status.loading : "Load more"}
+          </Button>
+        ) : null}
       </Section>
     </div>
   );

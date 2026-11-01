@@ -1500,6 +1500,63 @@ describe("portfolio", () => {
 });
 
 describe("spending", () => {
+  test("pages tied dates with full timestamp precision and exports every matching row", async () => {
+    const account = await alice.accounts.create(bank);
+    await db.insert(schema.transaction).values(
+      Array.from({ length: 205 }, (_, i) => ({
+        ownerId: "alice",
+        accountId: account.id,
+        postedDate: "2026-10-03",
+        description: "Paged purchase",
+        amount: "-1",
+        currency: "SGD",
+        source: "manual" as const,
+        fingerprint: `paged-${i}`,
+      })),
+    );
+    // All rows round to the same JS millisecond; the cursor must preserve microseconds.
+    await engine.query(
+      `update "transaction" set created_at =
+      case when fingerprint::text < 'paged-100' then
+        '2026-10-03 12:00:00.000001+00'::timestamptz
+      else '2026-10-03 12:00:00.000002+00'::timestamptz end
+      where account_id = $1`,
+      [account.id],
+    );
+    const input = { ...october, accountId: account.id };
+    expect(await alice.spending.list(input)).toHaveLength(100);
+    const all = await alice.spending.export(input);
+    expect(all).toHaveLength(205);
+    const collected: typeof all = [];
+    let cursor: (typeof all)[number] | undefined;
+    for (;;) {
+      const page = await alice.spending.list({ ...input, limit: 37, cursor });
+      collected.push(...page);
+      if (page.length < 37) break;
+      cursor = page.at(-1);
+    }
+    expect(collected.map((r) => r.id)).toEqual(all.map((r) => r.id));
+    expect(new Set(collected.map((r) => r.id)).size).toBe(205);
+    expect(await bob.spending.export(input)).toHaveLength(0);
+    expect(
+      await alice.spending.export({ ...input, search: "missing" }),
+    ).toHaveLength(0);
+    expect(
+      await alice.spending.export({
+        ...input,
+        month: "2026-09",
+        search: "paged",
+      }),
+    ).toHaveLength(205);
+    const other = await alice.accounts.create(bank);
+    await spendingEntry(other.id);
+    const summary = await alice.spending.summary({
+      month: "2026-10",
+      accountId: account.id,
+    });
+    expect(summary).toHaveLength(1);
+    expect(summary[0]?.spent).toBe("205.0000");
+  });
   test("keeps an archived category and its provenance on unrelated edits", async () => {
     const account = await alice.accounts.create(bank);
     const [archived] = await db
@@ -1862,7 +1919,7 @@ describe("merchant rules", () => {
           revision: preview.revision,
         }),
       ).toEqual({ count: 500 });
-      const saved = await alice.spending.list(october);
+      const saved = await alice.spending.export(october);
       expect(
         saved.filter(
           (r) => r.categoryId === groceriesId && r.categorySource === "rule",
@@ -1986,6 +2043,56 @@ describe("merchant rules", () => {
 });
 
 describe("bulk transactions", () => {
+  test("bulk notes preserve distinct nullable categories, transfer flags and provenance", async () => {
+    const account = await alice.accounts.create(bank);
+    const originals = await db
+      .insert(schema.transaction)
+      .values(
+        [
+          {
+            categoryId: groceriesId,
+            categorySource: "ai" as const,
+            isTransfer: false,
+          },
+          {
+            categoryId: groceriesId,
+            categorySource: "rule" as const,
+            isTransfer: false,
+          },
+          { categoryId: null, categorySource: null, isTransfer: true },
+        ].map((classification, index) => ({
+          ownerId: "alice",
+          accountId: account.id,
+          postedDate: "2026-10-03",
+          description: "Mixed bulk patch",
+          amount: "-10",
+          currency: "SGD",
+          fingerprint: `mixed-bulk-${index}`,
+          ...classification,
+        })),
+      )
+      .returning();
+    expect(
+      await alice.spending.bulkUpdate({
+        ids: originals.map((row) => row.id),
+        changes: { notes: "Shared note", merchant: "Shared merchant" },
+      }),
+    ).toEqual({ count: 3 });
+    const rows = await alice.spending.list({
+      ...october,
+      accountId: account.id,
+    });
+    for (const original of originals) {
+      expect(rows.find((row) => row.id === original.id)).toMatchObject({
+        categoryId: original.categoryId,
+        categorySource: original.categorySource,
+        isTransfer: original.isTransfer,
+        notes: "Shared note",
+        merchant: "Shared merchant",
+        amount: "-10.0000",
+      });
+    }
+  });
   test("updates only chosen fields and rejects mixed ownership atomically", async () => {
     const account = await alice.accounts.create(bank);
     const first = await spendingEntry(account.id, {
