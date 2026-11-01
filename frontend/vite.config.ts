@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Keep the legacy CSS pipeline independent of the root Finfolio app.
+  css: {
+    postcss: { plugins: [] },
+  },
   build: {
     rollupOptions: {
       output: {
