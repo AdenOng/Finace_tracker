@@ -1,13 +1,13 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-import shutil
 import os
 from pathlib import Path
 from uuid import uuid4
 
 from finance_tracker.src.portfolio.processor import PortfolioProcessor
 from finance_tracker.src.api.dependencies import get_current_user
+from finance_tracker.src.api.uploads import copy_upload
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 processor = PortfolioProcessor()
@@ -28,7 +28,7 @@ class AccountUpdate(BaseModel):
 
 
 @router.post("/upload")
-async def upload_portfolio(
+def upload_portfolio(
     broker_name: str = Form(...),
     file: UploadFile = File(...),
     current_user: int = Depends(get_current_user),
@@ -41,7 +41,7 @@ async def upload_portfolio(
 
         file_path = UPLOAD_DIR / f"{uuid4().hex}_{safe_name}"
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            copy_upload(file.file, buffer)
 
         result = processor.process_portfolio_file(
             current_user, str(file_path), broker_name

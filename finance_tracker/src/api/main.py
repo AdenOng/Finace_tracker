@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from finance_tracker.src.api.uploads import UploadSizeMiddleware
 from finance_tracker.src.api.routers import auth, transactions, portfolio
 
 app = FastAPI(title="Finance Tracker API")
@@ -17,6 +18,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(UploadSizeMiddleware)
 
 app.include_router(auth.router)
 app.include_router(transactions.router)

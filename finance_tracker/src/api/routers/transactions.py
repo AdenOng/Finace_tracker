@@ -2,13 +2,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
 from datetime import datetime
-import shutil
 import os
 from pathlib import Path
 from uuid import uuid4
 
 from finance_tracker.src.transaction_processor import TransactionProcessor
 from finance_tracker.src.api.dependencies import get_current_user
+from finance_tracker.src.api.uploads import copy_upload
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 processor = TransactionProcessor()
@@ -41,7 +41,7 @@ class TransactionEdit(BaseModel):
 
 
 @router.post("/upload")
-async def upload_document(
+def upload_document(
     file: UploadFile = File(...), current_user: int = Depends(get_current_user)
 ):
     file_path = None
@@ -52,7 +52,7 @@ async def upload_document(
 
         file_path = UPLOAD_DIR / f"{uuid4().hex}_{safe_name}"
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            copy_upload(file.file, buffer)
 
         result = processor.process_file(current_user, str(file_path))
 
