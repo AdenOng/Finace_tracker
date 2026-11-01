@@ -2,10 +2,9 @@
 import { useT, useLocale } from "~/i18n/client";
 
 import Decimal from "decimal.js";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { FilterTabs } from "~/components/ui/tabs";
-import { api, type RouterOutputs } from "~/trpc/react";
 import { cn } from "~/lib/cn";
 import { formatDate, formatMoney } from "~/lib/format";
 
@@ -68,27 +67,6 @@ export type NetWorthSeries = {
   headline?: boolean;
 };
 
-type RangeHistory = {
-  from: string;
-  to: string;
-  data: RouterOutputs["portfolio"]["netWorthHistory"];
-};
-
-/** Only mount the query when the user requests a shorter range. */
-function RangeHistoryLoader({
-  input,
-  onData,
-}: {
-  input: { from: string; to: string };
-  onData: (history: RangeHistory) => void;
-}) {
-  const { data } = api.portfolio.netWorthHistory.useQuery(input);
-  useEffect(() => {
-    if (data) onData({ ...input, data });
-  }, [data, input, onData]);
-  return null;
-}
-
 /** `series` usually starts with the whole net worth; account groups can be picked instead. */
 export function NetWorthChart({
   series,
@@ -116,32 +94,14 @@ export function NetWorthChart({
   const range = ranges.some((r) => r.key === chosenRange) ? chosenRange : "all";
   const [active, setActive] = useState<number | null>(null);
 
-  const rangeInput = useMemo(() => {
-    const months = RANGE_VALUES.find((r) => r.key === range)?.months;
-    if (!months) return undefined;
-    const from = monthsBefore(last.date, months);
-    // Include the preceding plotted point so the line enters at its original level.
-    const start = Math.max(0, points.findIndex((p) => p.date >= from) - 1);
-    return { from: points[start]!.date, to: last.date };
-  }, [points, range, last.date]);
-  const [history, setHistory] = useState<RangeHistory | null>(null);
   const shown = useMemo(() => {
-    if (!rangeInput) return points;
-    const fallback = points.filter((p) => p.date >= rangeInput.from);
-    if (
-      history?.from !== rangeInput.from ||
-      history.to !== rangeInput.to ||
-      history.data.currency !== currency
-    )
-      return fallback;
-    const fetched =
-      current.key === "all"
-        ? history.data.points
-        : history.data.groups[current.key as keyof typeof history.data.groups];
-    if (!fetched) return fallback;
-    // The overview's live endpoint takes precedence over today's recorded snapshot.
-    return [...fetched.filter((p) => p.date < last.date), last];
-  }, [points, rangeInput, history, currency, current.key, last]);
+    const months = RANGE_VALUES.find((r) => r.key === range)?.months;
+    if (!months) return points;
+    const from = monthsBefore(last.date, months);
+    // Start from the last figure before the range so the line enters from its true level.
+    const start = Math.max(0, points.findIndex((p) => p.date >= from) - 1);
+    return points.slice(start);
+  }, [points, range, last.date]);
 
   const values = shown.map((p) => Number(p.total));
   const ticks = niceTicks(Math.min(...values), Math.max(...values));
@@ -199,9 +159,6 @@ export function NetWorthChart({
 
   return (
     <figure className="mt-8">
-      {rangeInput ? (
-        <RangeHistoryLoader input={rangeInput} onData={setHistory} />
-      ) : null}
       <figcaption>
         {series.length > 1 ? (
           <div className="mb-4">

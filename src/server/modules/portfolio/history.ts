@@ -26,13 +26,10 @@ import {
   accountSnapshot,
   cashBalance,
   financialAccount,
-  fxRate,
-  investmentTransaction,
   networthSnapshot,
   position,
   priceHistory,
   security,
-  transaction,
   userSettings,
 } from "~/server/db/schema";
 import { readableBy, resolveAccessScope } from "~/server/lib/access";
@@ -258,6 +255,8 @@ export function estimatedTimeline(
   });
 }
 
+export type HistoryRange = { from?: string; to?: string };
+
 /**
  * Personal net worth over time in the display currency. Days the app recorded come from
  * `networth_snapshot`; before the first of those, the curve is estimated from account entries
@@ -265,130 +264,10 @@ export function estimatedTimeline(
  * entry. Everything is converted at the latest exchange rates, so a change of
  * display currency keeps the history.
  */
-export type HistoryRange = { from?: string; to?: string };
-type HistoryResult = Awaited<ReturnType<typeof reconstructHistory>>;
-const HISTORY_CACHE_LIMIT = 64;
-// Bound both the number of ranges and total points retained per database.
-const HISTORY_CACHE_POINTS = 20_000;
-type CachedHistory = {
-  fingerprint: string;
-  result: HistoryResult;
-  size: number;
-};
-const historyCache = new WeakMap<Database, Map<string, CachedHistory>>();
-
-/** Content fingerprints also catch in-place corrections and deletes without updated_at changes.
- * Aggregate in Postgres: no financial rows need to cross the wire on a cache hit.
- */
-async function historyFingerprint(db: Database, userId: string) {
-  const scope = resolveAccessScope(userId);
-  const ownedSnapshots = db
-    .select({ id: accountSnapshot.id })
-    .from(accountSnapshot)
-    .where(readableBy(scope, accountSnapshot.ownerId));
-  const heldSecurities = db
-    .select({ id: position.securityId })
-    .from(position)
-    .where(inArray(position.snapshotId, ownedSnapshots));
-  const digest = (row: ReturnType<typeof sql>) =>
-    sql<string>`count(*)::text || ':' || coalesce(sum(hashtextextended(${row}::text, 0)::numeric), 0)::text`;
-  const versions = [
-    db
-      .select({ value: digest(sql`financial_account`) })
-      .from(financialAccount)
-      .where(readableBy(scope, financialAccount.ownerId)),
-    db
-      .select({ value: digest(sql`account_snapshot`) })
-      .from(accountSnapshot)
-      .where(readableBy(scope, accountSnapshot.ownerId)),
-    db
-      .select({ value: digest(sql`position`) })
-      .from(position)
-      .where(inArray(position.snapshotId, ownedSnapshots)),
-    db
-      .select({ value: digest(sql`cash_balance`) })
-      .from(cashBalance)
-      .where(inArray(cashBalance.snapshotId, ownedSnapshots)),
-    db
-      .select({ value: digest(sql`security`) })
-      .from(security)
-      .where(inArray(security.id, heldSecurities)),
-    db
-      .select({ value: digest(sql`price_history`) })
-      .from(priceHistory)
-      .where(inArray(priceHistory.securityId, heldSecurities)),
-    db
-      .select({ value: digest(sql`networth_snapshot`) })
-      .from(networthSnapshot)
-      .where(readableBy(scope, networthSnapshot.ownerId)),
-    db
-      .select({ value: digest(sql`user_settings`) })
-      .from(userSettings)
-      .where(eq(userSettings.userId, userId)),
-    db.select({ value: digest(sql`fx_rate`) }).from(fxRate),
-    db
-      .select({ value: digest(sql`investment_transaction`) })
-      .from(investmentTransaction)
-      .where(readableBy(scope, investmentTransaction.ownerId)),
-    db
-      .select({ value: digest(sql`"transaction"`) })
-      .from(transaction)
-      .where(readableBy(scope, transaction.ownerId)),
-  ];
-  // One round trip and one database snapshot for all input versions.
-  const [[fingerprint], features] = await Promise.all([
-    db
-      .select({
-        value: sql<string>`json_build_array(${sql.join(
-          versions.map((query) => sql`(${query})`),
-          sql`, `,
-        )})::text`,
-      })
-      .from(sql`(values (1)) as history_version`),
-    preset.features(),
-  ]);
-  return JSON.stringify([fingerprint?.value, features.cpfSrs]);
-}
-
 export async function netWorthHistory(
   db: Database,
   userId: string,
   range: HistoryRange = {},
-) {
-  const key = JSON.stringify([userId, range.from ?? null, range.to ?? null]);
-  const fingerprint = await historyFingerprint(db, userId);
-  let cache = historyCache.get(db);
-  if (!cache) historyCache.set(db, (cache = new Map<string, CachedHistory>()));
-  const cached = cache.get(key);
-  if (cached?.fingerprint === fingerprint) {
-    cache.delete(key);
-    cache.set(key, cached);
-    return structuredClone(cached.result);
-  }
-  cache.delete(key);
-  const result = await reconstructHistory(db, userId, range);
-  const size =
-    result.points.length +
-    Object.values(result.groups).reduce((n, points) => n + points.length, 0);
-  if (size <= HISTORY_CACHE_POINTS) {
-    cache.set(key, { fingerprint, result: structuredClone(result), size });
-    let points = [...cache.values()].reduce(
-      (total, entry) => total + entry.size,
-      0,
-    );
-    while (cache.size > HISTORY_CACHE_LIMIT || points > HISTORY_CACHE_POINTS) {
-      const oldest = cache.keys().next().value!;
-      points -= cache.get(oldest)!.size;
-      cache.delete(oldest);
-    }
-  }
-  return result;
-}
-
-async function reconstructHistory(
-  db: Database,
-  userId: string,
-  range: HistoryRange,
 ) {
   const scope = resolveAccessScope(userId);
   const [settings] = await db

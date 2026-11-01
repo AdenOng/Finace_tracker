@@ -496,7 +496,7 @@ describe("net worth history", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
-  test("history cache reuses reconstruction and detects in-place corrections and deletions", async () => {
+  test("history reflects in-place corrections and deletions", async () => {
     const account = await alice.accounts.create(bank);
     await alice.portfolio.recordSnapshot({
       accountId: account.id,
@@ -504,32 +504,20 @@ describe("net worth history", () => {
       positions: [],
       cash: [{ currency: "SGD", amount: "100" }],
     });
-    const reads = spyOn(db, "select");
-    try {
-      const original = await alice.portfolio.netWorthHistory();
-      const coldReads = reads.mock.calls.length;
-      reads.mockClear();
-      const cached = await alice.portfolio.netWorthHistory();
-      expect(cached).toEqual(original);
-      expect(reads.mock.calls.length).toBeLessThan(coldReads);
-      cached.points[0]!.total = "999";
-      expect(await alice.portfolio.netWorthHistory()).toEqual(original);
-      // No timestamp is changed: count/max(updated_at) alone would miss this edit.
-      const [cash] = await db.select().from(schema.cashBalance);
-      await db
-        .update(schema.cashBalance)
-        .set({ amount: "200" })
-        .where(eq(schema.cashBalance.id, cash!.id));
-      expect((await alice.portfolio.netWorthHistory()).points[0]!.total).toBe(
-        "200",
-      );
-      await db
-        .delete(schema.cashBalance)
-        .where(eq(schema.cashBalance.id, cash!.id));
-      expect((await alice.portfolio.netWorthHistory()).points).toEqual([]);
-    } finally {
-      reads.mockRestore();
-    }
+    const original = await alice.portfolio.netWorthHistory();
+    const [cash] = await db.select().from(schema.cashBalance);
+    await db
+      .update(schema.cashBalance)
+      .set({ amount: "200" })
+      .where(eq(schema.cashBalance.id, cash!.id));
+    expect((await alice.portfolio.netWorthHistory()).points[0]!.total).toBe(
+      "200",
+    );
+    expect(original.points[0]!.total).toBe("100");
+    await db
+      .delete(schema.cashBalance)
+      .where(eq(schema.cashBalance.id, cash!.id));
+    expect((await alice.portfolio.netWorthHistory()).points).toEqual([]);
   });
 
   test("each account group has its own history, CPF and SRS included even when not counted", async () => {
