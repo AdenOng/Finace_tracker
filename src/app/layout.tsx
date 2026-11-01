@@ -8,8 +8,8 @@ import {
   Noto_Sans_SC,
 } from "next/font/google";
 
-import { LocaleProvider } from "~/i18n/client";
 import { htmlLang } from "~/i18n/config";
+import { SelectedLocaleProvider } from "~/i18n/locale-provider";
 import { getLocale, getT } from "~/i18n/server";
 import { TRPCReactProvider } from "~/trpc/react";
 
@@ -49,9 +49,13 @@ export default async function RootLayout({
       className={`${geist.variable} ${geistMono.variable} ${bricolage.variable} ${notoSansSC.variable}`}
     >
       <body className="min-h-dvh font-sans">
-        <LocaleProvider locale={locale}>
-          <TRPCReactProvider>{children}</TRPCReactProvider>
-        </LocaleProvider>
+        {/* Outside the locale boundary: switching language swaps that provider, and the
+            query cache must survive the remount. */}
+        <TRPCReactProvider>
+          <SelectedLocaleProvider locale={locale}>
+            {children}
+          </SelectedLocaleProvider>
+        </TRPCReactProvider>
       </body>
     </html>
   );
