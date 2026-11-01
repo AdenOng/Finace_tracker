@@ -160,7 +160,6 @@ const accounts = {
     notCategorised: "Not categorised",
     openInSpending: "Open in Spending",
     empty: (month: string) => `Nothing recorded for ${month}.`,
-    seeAll: (n: number) => `See all ${n} in Spending`,
   },
   view: {
     investments: "Investments",

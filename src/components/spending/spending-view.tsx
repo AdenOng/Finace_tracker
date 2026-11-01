@@ -26,6 +26,10 @@ import {
 import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
 import { MerchantRulesDrawer } from "~/components/spending/merchant-rules-drawer";
 import { MobileTransactionRow } from "~/components/spending/mobile-transaction-row";
+import {
+  nextSpendingCursor,
+  SPENDING_PAGE_SIZE,
+} from "~/components/spending/pagination";
 import { TransactionDrawer } from "~/components/spending/transaction-drawer";
 import { Button } from "~/components/ui/button";
 import { Input, Select } from "~/components/ui/field";
@@ -78,11 +82,10 @@ export function SpendingView({
   const [accounts] = api.accounts.list.useSuspenseQuery();
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const list = api.spending.list.useInfiniteQuery(
-    { month, accountId, categoryId, search: query },
+    { month, accountId, categoryId, search: query, limit: SPENDING_PAGE_SIZE },
     {
       placeholderData: (previous) => previous,
-      getNextPageParam: (page) =>
-        page.length === 100 ? page.at(-1) : undefined,
+      getNextPageParam: nextSpendingCursor,
     },
   );
   // Fetch and render another batch only when requested, including on mobile.
@@ -412,6 +415,7 @@ export function SpendingView({
                 {list.data ? (
                   <span className="bg-wash text-ink-3 figures rounded-full px-2 py-0.5 text-[11px]">
                     {rows.length}
+                    {list.hasNextPage ? "+" : null}
                   </span>
                 ) : null}
                 {rows.length ? (
@@ -816,7 +820,7 @@ export function SpendingView({
               >
                 {list.isFetchingNextPage
                   ? t.common.status.loading
-                  : "Load more"}
+                  : t.common.actions.showMore}
               </Button>
             ) : null}
           </div>

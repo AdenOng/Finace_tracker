@@ -5,6 +5,10 @@ import { categoryLabel, useT, useLocale } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
 import { Select } from "~/components/ui/field";
 import { Notice, Section } from "~/components/ui/panel";
+import {
+  nextSpendingCursor,
+  SPENDING_PAGE_SIZE,
+} from "~/components/spending/pagination";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
 import { shiftMonth } from "~/lib/dates";
 import { formatDate, formatMoney, formatMonth } from "~/lib/format";
@@ -28,13 +32,20 @@ export function WorkspaceSpending({
     { staleTime: 0, refetchInterval: 15_000, retry: false },
   );
   const list = api.spending.list.useInfiniteQuery(
-    { workspaceId, month, accountId, categoryId: null },
+    {
+      workspaceId,
+      month,
+      accountId,
+      categoryId: null,
+      limit: SPENDING_PAGE_SIZE,
+    },
     {
       staleTime: 0,
-      refetchInterval: 15_000,
+      // Polling refetches every loaded page, so keep it live only on the first one.
+      refetchInterval: (query) =>
+        (query.state.data?.pages.length ?? 0) > 1 ? false : 15_000,
       retry: false,
-      getNextPageParam: (page) =>
-        page.length === 100 ? page.at(-1) : undefined,
+      getNextPageParam: nextSpendingCursor,
     },
   );
   const rows = list.data?.pages.flat() ?? [];
@@ -190,10 +201,12 @@ export function WorkspaceSpending({
         {list.hasNextPage ? (
           <Button
             variant="ghost"
-            disabled={list.isFetchingNextPage}
+            disabled={list.isFetching}
             onClick={() => void list.fetchNextPage()}
           >
-            {list.isFetchingNextPage ? t.common.status.loading : "Load more"}
+            {list.isFetchingNextPage
+              ? t.common.status.loading
+              : t.common.actions.showMore}
           </Button>
         ) : null}
       </Section>

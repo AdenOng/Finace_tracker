@@ -83,8 +83,6 @@ const spending: Translation<typeof en> = {
     freshStart: (month: string) => `${month}，新的开始。`,
     filters: (n: number) => `筛选${n ? ` · ${n}` : ""}`,
     selected: (n: number) => `已选择 ${n} 条`,
-    limitedMatches: (query: string) =>
-      `所有月份中符合“${query}”的最新 500 条记录。可添加筛选条件缩小范围。`,
     matches: (query: string) =>
       `所有月份中符合“${query}”的记录，按时间从新到旧排列。`,
     nothingMatches: (query: string) => `没有符合“${query}”的记录`,

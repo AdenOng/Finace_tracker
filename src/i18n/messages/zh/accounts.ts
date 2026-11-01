@@ -158,7 +158,6 @@ const accounts: Translation<typeof en> = {
     notCategorised: "未分类",
     openInSpending: "在支出中查看",
     empty: (month: string) => `${month} 暂无记录。`,
-    seeAll: (n: number) => `在支出中查看全部 ${n} 笔交易`,
   },
   view: {
     investments: "投资",

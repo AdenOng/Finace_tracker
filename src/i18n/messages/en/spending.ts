@@ -85,8 +85,6 @@ const spending = {
     freshStart: (month: string) => `A fresh start for ${month}.`,
     filters: (n: number) => `Filters${n ? ` · ${n}` : ""}`,
     selected: (n: number) => `${n} selected`,
-    limitedMatches: (query: string) =>
-      `The 500 newest matches for “${query}” from every month. Add a filter to narrow it down.`,
     matches: (query: string) =>
       `Matches for “${query}” from every month, newest first.`,
     nothingMatches: (query: string) => `Nothing matches “${query}”`,
