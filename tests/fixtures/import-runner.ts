@@ -4,6 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { eq } from "drizzle-orm";
 
+import type { Database } from "../../src/server/db";
 import * as schema from "../../src/server/db/schema";
 import type {
   LlmAdapter,
@@ -50,6 +51,10 @@ function fakeAdapter(config: LlmProviderConfig): LlmAdapter {
     listModels: async () => [],
     async generateStructured(request) {
       const model = config.defaultModel;
+      if (model === "fails-with-usage")
+        throw new llm.LlmError("Invalid structured response", {
+          usage: { inputTokens: 73, outputTokens: 9 },
+        });
       if (model === "fails") throw new Error("synthetic provider outage");
       const held = gates.get(model);
       if (held) {
@@ -339,6 +344,55 @@ const brokenKey = await provider("broken-key", {
   assert.equal(balance.balanceDirection, "credit");
   assert.equal(await db.$count(schema.transaction), 0);
   assert.equal(await db.$count(schema.cashBalance), 0);
+}
+
+// An in-flight reservation blocks another request before any actual usage has arrived.
+{
+  const { reserveTokenBudget, reconcileTokenBudget } =
+    await import("../../src/server/modules/llm/routing");
+  // PGlite implements the same PostgreSQL transaction operations as the production driver.
+  const budgetDb = db as unknown as Database;
+  const limited = await provider("limited", {
+    monthlyTokenLimit: 100,
+    pauseAtLimit: true,
+  });
+  const reservations = await Promise.allSettled([
+    reserveTokenBudget(budgetDb, limited.id, 80),
+    reserveTokenBudget(budgetDb, limited.id, 80),
+  ]);
+  const admitted = reservations.filter(
+    (result) => result.status === "fulfilled",
+  );
+  assert.equal(admitted.length, 1);
+  assert.equal(
+    reservations.filter((result) => result.status === "rejected").length,
+    1,
+  );
+  const reservation = admitted[0]!.value;
+  assert.equal((await monthlyTokenUsage(db)).get(limited.id), undefined);
+  await reconcileTokenBudget(budgetDb, reservation, {
+    providerId: limited.id,
+    jobId: null,
+    model: "limited",
+  });
+  const released = await reserveTokenBudget(budgetDb, limited.id, 80);
+  await reconcileTokenBudget(budgetDb, released, {
+    providerId: limited.id,
+    jobId: null,
+    model: "limited",
+    inputTokens: 20,
+  });
+  assert.equal((await monthlyTokenUsage(db)).get(limited.id), 20);
+}
+
+// Errors that retain provider usage are charged even though extraction fails.
+{
+  const failedProvider = await provider("fails-with-usage");
+  await setProviders(failedProvider.id, null);
+  const failed = await job();
+  await runImportJob(failed.id);
+  assert.equal((await read(failed.id)).status, "failed");
+  assert.equal((await monthlyTokenUsage(db)).get(failedProvider.id), 82);
 }
 
 // 5. Spent tokens still count after the import is deleted.

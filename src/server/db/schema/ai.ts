@@ -85,3 +85,20 @@ export const llmUsage = pgTable(
     index("llm_usage_provider_created_idx").on(t.providerId, t.createdAt),
   ],
 );
+
+/** In-flight estimates; actual spend is recorded separately in llm_usage. */
+export const llmReservation = pgTable(
+  "llm_reservation",
+  {
+    id: id(),
+    providerId: uuid("provider_id")
+      .notNull()
+      .references(() => llmProvider.id, { onDelete: "cascade" }),
+    tokens: integer("tokens").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("llm_reservation_provider_idx").on(t.providerId, t.expiresAt)],
+);

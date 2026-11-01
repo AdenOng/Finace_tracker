@@ -24,6 +24,7 @@ function createAiSdkAdapter(
     async generateStructured<T>(
       request: StructuredRequest<T>,
     ): Promise<StructuredResult<T>> {
+      request.signal?.throwIfAborted();
       const modelId = request.model ?? config.defaultModel;
       try {
         const result = await generateText({
@@ -59,6 +60,7 @@ function createAiSdkAdapter(
           },
         };
       } catch (error) {
+        request.signal?.throwIfAborted();
         throw new LlmError(
           "The AI provider could not complete the request. Check its model and credentials.",
           error,

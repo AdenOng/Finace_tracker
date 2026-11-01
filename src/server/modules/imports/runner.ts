@@ -17,10 +17,7 @@ import {
 } from "~/server/modules/extraction";
 import { LlmError } from "~/server/modules/llm";
 import { describeLlmError } from "~/server/modules/llm/errors";
-import {
-  importProviders,
-  recordTokenUsage,
-} from "~/server/modules/llm/routing";
+import { importProviders } from "~/server/modules/llm/routing";
 import { stageExtraction } from "./stage";
 import { readUpload } from "./storage";
 
@@ -132,7 +129,7 @@ export async function runImportJob(jobId: string) {
         "The stored file was deleted by the retention policy. Upload it again.",
       );
     const data = await readUpload(doc.storageKey);
-    const providers = await importProviders(db);
+    const providers = await importProviders(db, job.id);
     let result: Awaited<ReturnType<typeof extractDocument>> | undefined;
     const failures: string[] = [];
     for (const [index, { provider, createAdapter }] of providers.entries()) {
@@ -155,13 +152,6 @@ export async function runImportJob(jobId: string) {
             supportsVision: provider.supportsVision,
           },
           signal: AbortSignal.timeout(timeout),
-        });
-        await recordTokenUsage(db, {
-          providerId: provider.id,
-          jobId: job.id,
-          model: result.model,
-          inputTokens: result.usage.inputTokens,
-          outputTokens: result.usage.outputTokens,
         });
         break;
       } catch (error) {

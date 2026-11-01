@@ -50,6 +50,14 @@ The full database schema for the later phases already exists (`src/server/db/sch
 
 ## Importing statements
 
+Before each import provider request, a database reservation counts estimated input tokens
+(text length plus attachment bytes, with a 4,096-token minimum per attachment) and 16,384
+response tokens against any enforced monthly token limit. Provider-row locks serialize
+admission across processes. Actual reported usage replaces the reservation atomically,
+including failures with reported usage; failures without usage release it. Reservations
+expire after ten minutes to recover from crashes. Actual usage can exceed the estimate;
+monthly usage and admin reports show the actual tokens reported by providers.
+
 Open **Imports** (or **Import statement** on an account), pick the account and drop a PDF
 statement or a screenshot (PNG, JPEG or WebP, up to 20 MB). The file is stored under
 `UPLOAD_DIR` and read in the background by the default AI provider. With opencode this is
