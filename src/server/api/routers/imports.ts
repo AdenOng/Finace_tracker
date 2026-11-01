@@ -991,11 +991,23 @@ export const importsRouter = createTRPCRouter({
           }
         }
 
-        for (const [rowId, recordId] of committed) {
+        if (committed.size > 0) {
+          const values = sql.join(
+            [...committed].map(
+              ([rowId, recordId]) => sql`(${rowId}::uuid, ${recordId}::uuid)`,
+            ),
+            sql`, `,
+          );
           await tx
             .update(stagedRow)
-            .set({ committedRecordId: recordId })
-            .where(eq(stagedRow.id, rowId));
+            .set({ committedRecordId: sql`committed.record_id` })
+            .from(sql`(values ${values}) as committed(id, record_id)`)
+            .where(
+              and(
+                eq(stagedRow.id, sql`committed.id`),
+                eq(stagedRow.jobId, job.id),
+              ),
+            );
         }
         await tx
           .update(extractionJob)

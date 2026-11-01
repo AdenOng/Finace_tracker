@@ -449,7 +449,27 @@ describe("statement imports", () => {
       asOf: "2026-09-30",
       source: "statement",
     });
-    expect((await alice.imports.get({ id: jobId })).status).toBe("completed");
+    const completed = await alice.imports.get({ id: jobId });
+    expect(completed.status).toBe("completed");
+    // Each staging row must receive its own saved record, including the snapshot.
+    for (const row of saved) {
+      const staged = job.rows.find(
+        (staged) =>
+          staged.kind === "transaction" &&
+          staged.data.description === row.description,
+      );
+      expect(
+        completed.rows.find((r) => r.id === staged?.id)?.committedRecordId,
+      ).toBe(row.id);
+    }
+    const [snapshot] = await db
+      .select()
+      .from(schema.accountSnapshot)
+      .where(eq(schema.accountSnapshot.accountId, account.id));
+    expect(
+      completed.rows.find((row) => row.kind === "cash_balance")
+        ?.committedRecordId,
+    ).toBe(snapshot!.id);
     await expect(
       alice.imports.commit({
         jobId,
