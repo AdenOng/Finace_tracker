@@ -79,6 +79,16 @@ export async function POST(request: Request) {
           .from(user)
           .where(eq(user.id, scope.userId))
           .for("update");
+        // A re-upload is reported as a duplicate even when the owner is at a limit.
+        const [seen] = await tx
+          .select({ id: extractionJob.id })
+          .from(document)
+          .innerJoin(extractionJob, eq(extractionJob.documentId, document.id))
+          .where(
+            and(eq(document.ownerId, scope.userId), eq(document.sha256, hash)),
+          )
+          .limit(1);
+        if (seen) return { duplicate: seen.id };
         const outstanding = await tx.$count(
           extractionJob,
           and(
@@ -111,15 +121,6 @@ export async function POST(request: Request) {
             413,
           );
         }
-        const [seen] = await tx
-          .select({ id: extractionJob.id })
-          .from(document)
-          .innerJoin(extractionJob, eq(extractionJob.documentId, document.id))
-          .where(
-            and(eq(document.ownerId, scope.userId), eq(document.sha256, hash)),
-          )
-          .limit(1);
-        if (seen) return { duplicate: seen.id };
         const storageKey = await saveUpload(
           scope.userId,
           hash,

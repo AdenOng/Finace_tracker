@@ -110,10 +110,14 @@ await mock.module("~/server/modules/llm", () => ({
   ...llm,
   createLlmAdapter: fakeAdapter,
 }));
+let saveUploadCalls = 0;
 await mock.module("~/server/modules/imports/storage", () => ({
   readUpload: async () => new Uint8Array([137, 80, 78, 71]),
   removeUpload: async () => undefined,
-  saveUpload: async () => "unused",
+  saveUpload: async () => {
+    saveUploadCalls++;
+    return "unused";
+  },
   sha256: () => "unused",
 }));
 
@@ -444,6 +448,25 @@ const brokenKey = await provider("broken-key", {
   );
   assert.equal(response.status, 429);
   assert.match(await response.text(), /queued or running/);
+  // A re-upload is a duplicate even while the queue limit is reached, and writes nothing.
+  await db
+    .update(schema.document)
+    .set({ sha256: "unused" })
+    .where(eq(schema.document.id, outstanding[0]!.documentId));
+  const callsBefore = saveUploadCalls;
+  const duplicate = await POST(
+    new Request("http://localhost/api/imports", { method: "POST", body: form }),
+  );
+  assert.equal(duplicate.status, 409);
+  assert.equal(
+    ((await duplicate.json()) as { jobId: string }).jobId,
+    outstanding[0]!.id,
+  );
+  assert.equal(saveUploadCalls, callsBefore);
+  await db
+    .update(schema.document)
+    .set({ sha256: crypto.randomUUID() })
+    .where(eq(schema.document.id, outstanding[0]!.documentId));
   // The same admission path also enforces storage before saving any bytes.
   for (const item of outstanding)
     await db
