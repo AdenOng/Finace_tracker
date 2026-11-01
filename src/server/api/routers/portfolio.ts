@@ -2,7 +2,11 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  expensiveProcedure,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import {
   financialAccount,
   institution,
@@ -288,12 +292,21 @@ export const portfolioRouter = createTRPCRouter({
     }),
 
   /** Your personal net worth over time, for the overview chart. */
-  netWorthHistory: protectedProcedure.query(({ ctx }) =>
-    netWorthHistory(ctx.db, ctx.scope.userId),
-  ),
+  netWorthHistory: expensiveProcedure
+    .input(
+      z
+        .object({ from: z.iso.date().optional(), to: z.iso.date().optional() })
+        .refine((range) => !range.from || !range.to || range.from <= range.to, {
+          message: "from must be on or before to",
+        })
+        .optional(),
+    )
+    .query(({ ctx, input }) =>
+      netWorthHistory(ctx.db, ctx.scope.userId, input),
+    ),
 
   /** Fetches market prices for everything the visible accounts currently hold. */
-  refreshPrices: protectedProcedure
+  refreshPrices: expensiveProcedure
     .input(z.object({ workspaceId: z.uuid().optional() }).optional())
     .mutation(async ({ ctx, input }) => {
       const scope = await resolveWorkspaceScope(

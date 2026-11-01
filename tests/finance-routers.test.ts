@@ -413,6 +413,125 @@ describe("net worth history", () => {
     expect((await bob.portfolio.netWorthHistory()).points).toEqual([]);
   });
 
+  test("ranged history equals full-history slices with prior holdings, closes and future first entries", async () => {
+    const savings = await alice.accounts.create(bank);
+    const brokerage = await alice.accounts.create(broker);
+    for (const [asOf, amount] of [
+      ["2026-01-01", "100"],
+      ["2026-02-01", "200"],
+      ["2026-02-16", "210"],
+      ["2026-03-01", "300"],
+    ] as const) {
+      await alice.portfolio.recordSnapshot({
+        accountId: savings.id,
+        asOf,
+        positions: [],
+        cash: [{ currency: "SGD", amount }],
+      });
+    }
+    await alice.portfolio.recordSnapshot({
+      accountId: brokerage.id,
+      asOf: "2026-04-01",
+      cash: [],
+      positions: [
+        {
+          symbol: "VT",
+          exchange: "ARCX",
+          name: "",
+          assetClass: "etf",
+          currency: "SGD",
+          quantity: "10",
+          averageCost: null,
+          price: "100",
+          value: null,
+        },
+      ],
+    });
+    const [instrument] = await db.select().from(schema.security);
+    await db.insert(schema.priceHistory).values(
+      [
+        "2026-01-15",
+        "2026-02-15",
+        "2026-02-17",
+        "2026-03-15",
+        "2026-04-02",
+      ].map((date) => ({
+        securityId: instrument!.id,
+        date,
+        close: "110",
+        currency: "SGD",
+        source: "test",
+      })),
+    );
+    const ranges = [
+      { from: "2026-02-16", to: "2026-03-15" },
+      { from: "2026-02-01", to: "2026-02-17" },
+      { to: "2026-02-17" },
+      { from: "2026-04-01" },
+      { from: "2027-01-01" },
+    ];
+    const checkSlices = async () => {
+      const full = await alice.portfolio.netWorthHistory();
+      for (const range of ranges) {
+        const inside = (point: { date: string }) =>
+          (!range.from || point.date >= range.from) &&
+          (!range.to || point.date <= range.to);
+        expect(await alice.portfolio.netWorthHistory(range)).toEqual({
+          currency: full.currency,
+          points: full.points.filter(inside),
+          groups: {
+            investments: full.groups.investments.filter(inside),
+            banking: full.groups.banking.filter(inside),
+            cpf_srs: full.groups.cpf_srs.filter(inside),
+          },
+        });
+      }
+    };
+    await checkSlices();
+    await recordNetWorth(db as unknown as Database, "alice", "2026-03-15");
+    await recordNetWorth(db as unknown as Database, "alice", "2026-04-01");
+    await checkSlices();
+    await expect(
+      alice.portfolio.netWorthHistory({ from: "2026-04-01", to: "2026-01-01" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  test("history cache reuses reconstruction and detects in-place corrections and deletions", async () => {
+    const account = await alice.accounts.create(bank);
+    await alice.portfolio.recordSnapshot({
+      accountId: account.id,
+      asOf: "2026-01-01",
+      positions: [],
+      cash: [{ currency: "SGD", amount: "100" }],
+    });
+    const reads = spyOn(db, "select");
+    try {
+      const original = await alice.portfolio.netWorthHistory();
+      const coldReads = reads.mock.calls.length;
+      reads.mockClear();
+      const cached = await alice.portfolio.netWorthHistory();
+      expect(cached).toEqual(original);
+      expect(reads.mock.calls.length).toBeLessThan(coldReads);
+      cached.points[0]!.total = "999";
+      expect(await alice.portfolio.netWorthHistory()).toEqual(original);
+      // No timestamp is changed: count/max(updated_at) alone would miss this edit.
+      const [cash] = await db.select().from(schema.cashBalance);
+      await db
+        .update(schema.cashBalance)
+        .set({ amount: "200" })
+        .where(eq(schema.cashBalance.id, cash!.id));
+      expect((await alice.portfolio.netWorthHistory()).points[0]!.total).toBe(
+        "200",
+      );
+      await db
+        .delete(schema.cashBalance)
+        .where(eq(schema.cashBalance.id, cash!.id));
+      expect((await alice.portfolio.netWorthHistory()).points).toEqual([]);
+    } finally {
+      reads.mockRestore();
+    }
+  });
+
   test("each account group has its own history, CPF and SRS included even when not counted", async () => {
     const settings = settingsRouter.createCaller(contextFor("alice"));
     const savings = await alice.accounts.create(bank);

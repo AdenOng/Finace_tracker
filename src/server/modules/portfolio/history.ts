@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import {
   and,
   asc,
+  desc,
   eq,
   gte,
   inArray,
@@ -25,13 +26,16 @@ import {
   accountSnapshot,
   cashBalance,
   financialAccount,
+  fxRate,
+  investmentTransaction,
   networthSnapshot,
   position,
   priceHistory,
   security,
+  transaction,
   userSettings,
 } from "~/server/db/schema";
-import { resolveAccessScope } from "~/server/lib/access";
+import { readableBy, resolveAccessScope } from "~/server/lib/access";
 import { preset } from "~/server/lib/preset";
 import { hasSnapshotEntries, ratesInto } from "./holdings";
 import { computeNetWorth } from "./net-worth";
@@ -177,6 +181,7 @@ type Tally = { amounts: Amount[]; unpriced: number; backfilled: boolean };
 export function estimatedTimeline(
   entries: Entry[],
   closes: ReadonlyMap<string, Close[]> = new Map(),
+  range: HistoryRange = {},
 ) {
   if (entries.length === 0) return [];
   const from = backfillFrom(entries[0]!.asOf);
@@ -193,7 +198,12 @@ export function estimatedTimeline(
         list.flatMap((c) => (c.date >= from ? [c.date] : [])),
       ),
     ]),
-  ].sort();
+  ]
+    .filter(
+      (date) =>
+        (!range.from || date >= range.from) && (!range.to || date <= range.to),
+    )
+    .sort();
 
   const current = new Map<string, Entry>();
   const seen = new Map<string, number>();
@@ -255,7 +265,132 @@ export function estimatedTimeline(
  * entry. Everything is converted at the latest exchange rates, so a change of
  * display currency keeps the history.
  */
-export async function netWorthHistory(db: Database, userId: string) {
+export type HistoryRange = { from?: string; to?: string };
+type HistoryResult = Awaited<ReturnType<typeof reconstructHistory>>;
+const HISTORY_CACHE_LIMIT = 64;
+// Bound both the number of ranges and total points retained per database.
+const HISTORY_CACHE_POINTS = 20_000;
+type CachedHistory = {
+  fingerprint: string;
+  result: HistoryResult;
+  size: number;
+};
+const historyCache = new WeakMap<Database, Map<string, CachedHistory>>();
+
+/** Content fingerprints also catch in-place corrections and deletes without updated_at changes.
+ * Aggregate in Postgres: no financial rows need to cross the wire on a cache hit.
+ */
+async function historyFingerprint(db: Database, userId: string) {
+  const scope = resolveAccessScope(userId);
+  const ownedSnapshots = db
+    .select({ id: accountSnapshot.id })
+    .from(accountSnapshot)
+    .where(readableBy(scope, accountSnapshot.ownerId));
+  const heldSecurities = db
+    .select({ id: position.securityId })
+    .from(position)
+    .where(inArray(position.snapshotId, ownedSnapshots));
+  const digest = (row: ReturnType<typeof sql>) =>
+    sql<string>`count(*)::text || ':' || coalesce(sum(hashtextextended(${row}::text, 0)::numeric), 0)::text`;
+  const versions = [
+    db
+      .select({ value: digest(sql`financial_account`) })
+      .from(financialAccount)
+      .where(readableBy(scope, financialAccount.ownerId)),
+    db
+      .select({ value: digest(sql`account_snapshot`) })
+      .from(accountSnapshot)
+      .where(readableBy(scope, accountSnapshot.ownerId)),
+    db
+      .select({ value: digest(sql`position`) })
+      .from(position)
+      .where(inArray(position.snapshotId, ownedSnapshots)),
+    db
+      .select({ value: digest(sql`cash_balance`) })
+      .from(cashBalance)
+      .where(inArray(cashBalance.snapshotId, ownedSnapshots)),
+    db
+      .select({ value: digest(sql`security`) })
+      .from(security)
+      .where(inArray(security.id, heldSecurities)),
+    db
+      .select({ value: digest(sql`price_history`) })
+      .from(priceHistory)
+      .where(inArray(priceHistory.securityId, heldSecurities)),
+    db
+      .select({ value: digest(sql`networth_snapshot`) })
+      .from(networthSnapshot)
+      .where(readableBy(scope, networthSnapshot.ownerId)),
+    db
+      .select({ value: digest(sql`user_settings`) })
+      .from(userSettings)
+      .where(eq(userSettings.userId, userId)),
+    db.select({ value: digest(sql`fx_rate`) }).from(fxRate),
+    db
+      .select({ value: digest(sql`investment_transaction`) })
+      .from(investmentTransaction)
+      .where(readableBy(scope, investmentTransaction.ownerId)),
+    db
+      .select({ value: digest(sql`"transaction"`) })
+      .from(transaction)
+      .where(readableBy(scope, transaction.ownerId)),
+  ];
+  // One round trip and one database snapshot for all input versions.
+  const [[fingerprint], features] = await Promise.all([
+    db
+      .select({
+        value: sql<string>`json_build_array(${sql.join(
+          versions.map((query) => sql`(${query})`),
+          sql`, `,
+        )})::text`,
+      })
+      .from(sql`(values (1)) as history_version`),
+    preset.features(),
+  ]);
+  return JSON.stringify([fingerprint?.value, features.cpfSrs]);
+}
+
+export async function netWorthHistory(
+  db: Database,
+  userId: string,
+  range: HistoryRange = {},
+) {
+  const key = JSON.stringify([userId, range.from ?? null, range.to ?? null]);
+  const fingerprint = await historyFingerprint(db, userId);
+  let cache = historyCache.get(db);
+  if (!cache) historyCache.set(db, (cache = new Map<string, CachedHistory>()));
+  const cached = cache.get(key);
+  if (cached?.fingerprint === fingerprint) {
+    cache.delete(key);
+    cache.set(key, cached);
+    return structuredClone(cached.result);
+  }
+  cache.delete(key);
+  const result = await reconstructHistory(db, userId, range);
+  const size =
+    result.points.length +
+    Object.values(result.groups).reduce((n, points) => n + points.length, 0);
+  if (size <= HISTORY_CACHE_POINTS) {
+    cache.set(key, { fingerprint, result: structuredClone(result), size });
+    let points = [...cache.values()].reduce(
+      (total, entry) => total + entry.size,
+      0,
+    );
+    while (cache.size > HISTORY_CACHE_LIMIT || points > HISTORY_CACHE_POINTS) {
+      const oldest = cache.keys().next().value!;
+      points -= cache.get(oldest)!.size;
+      cache.delete(oldest);
+    }
+  }
+  return result;
+}
+
+async function reconstructHistory(
+  db: Database,
+  userId: string,
+  range: HistoryRange,
+) {
+  const scope = resolveAccessScope(userId);
   const [settings] = await db
     .select({
       currency: userSettings.displayCurrency,
@@ -268,6 +403,13 @@ export async function netWorthHistory(db: Database, userId: string) {
   const { cpfSrs: cpfSrsEnabled } = await preset.features();
   const countCpfSrs = !cpfSrsEnabled || (settings?.countCpfSrs ?? true);
 
+  const [first] = await db
+    .select({ date: networthSnapshot.date })
+    .from(networthSnapshot)
+    .where(readableBy(scope, networthSnapshot.ownerId))
+    .orderBy(asc(networthSnapshot.date))
+    .limit(1);
+  const firstRecorded = first?.date;
   const recorded = await db
     .select({
       date: networthSnapshot.date,
@@ -276,9 +418,14 @@ export async function netWorthHistory(db: Database, userId: string) {
       breakdown: networthSnapshot.breakdown,
     })
     .from(networthSnapshot)
-    .where(eq(networthSnapshot.ownerId, userId))
+    .where(
+      and(
+        readableBy(scope, networthSnapshot.ownerId),
+        range.from ? gte(networthSnapshot.date, range.from) : undefined,
+        range.to ? lte(networthSnapshot.date, range.to) : undefined,
+      ),
+    )
     .orderBy(asc(networthSnapshot.date));
-  const firstRecorded = recorded[0]?.date;
 
   // CPF and SRS are always drawn on their own, even when not counted in the total.
   const accounts = await db
@@ -286,39 +433,70 @@ export async function netWorthHistory(db: Database, userId: string) {
     .from(financialAccount)
     .where(
       and(
-        eq(financialAccount.ownerId, userId),
+        readableBy(scope, financialAccount.ownerId),
         isNull(financialAccount.archivedAt),
       ),
     );
   const groupOf = new Map(accounts.map((a) => [a.id, accountGroupOf(a.type)]));
-  const snapshots = accounts.length
-    ? await db
-        .select({
-          id: accountSnapshot.id,
-          accountId: accountSnapshot.accountId,
-          asOf: accountSnapshot.asOf,
-        })
-        .from(accountSnapshot)
-        .where(
-          and(
-            eq(accountSnapshot.ownerId, userId),
-            inArray(
-              accountSnapshot.accountId,
-              accounts.map((a) => a.id),
-            ),
-            hasSnapshotEntries(db),
-            // Entries on the first recorded day still backfill the days before it.
-            firstRecorded
-              ? lte(accountSnapshot.asOf, firstRecorded)
+  const eligibleSnapshots = db
+    .select({
+      id: accountSnapshot.id,
+      accountId: accountSnapshot.accountId,
+      asOf: accountSnapshot.asOf,
+      createdAt: accountSnapshot.createdAt,
+      firstDate:
+        sql<string>`min(${accountSnapshot.asOf}) over (partition by ${accountSnapshot.accountId})`.as(
+          "first_date",
+        ),
+      priorDate:
+        sql<string>`max(case when ${accountSnapshot.asOf} <= ${range.from ?? "0001-01-01"} then ${accountSnapshot.asOf} end) over (partition by ${accountSnapshot.accountId})`.as(
+          "prior_date",
+        ),
+    })
+    .from(accountSnapshot)
+    .where(
+      and(
+        readableBy(scope, accountSnapshot.ownerId),
+        inArray(
+          accountSnapshot.accountId,
+          accounts.map((a) => a.id),
+        ),
+        hasSnapshotEntries(db),
+        // Entries on the first recorded day still backfill the days before it.
+        firstRecorded ? lte(accountSnapshot.asOf, firstRecorded) : undefined,
+      ),
+    )
+    .as("eligible_snapshots");
+  // First entries remain necessary even when later than `to`: they backfill their account.
+  const needsEstimate =
+    !firstRecorded || !range.from || range.from < firstRecorded;
+  const snapshots =
+    accounts.length && needsEstimate
+      ? await db
+          .select()
+          .from(eligibleSnapshots)
+          .where(
+            range.from || range.to
+              ? or(
+                  eq(eligibleSnapshots.asOf, eligibleSnapshots.firstDate),
+                  eq(eligibleSnapshots.asOf, eligibleSnapshots.priorDate),
+                  and(
+                    range.from
+                      ? gte(eligibleSnapshots.asOf, range.from)
+                      : undefined,
+                    range.to
+                      ? lte(eligibleSnapshots.asOf, range.to)
+                      : undefined,
+                  ),
+                )
               : undefined,
-          ),
-        )
-        .orderBy(
-          asc(accountSnapshot.asOf),
-          asc(accountSnapshot.createdAt),
-          asc(accountSnapshot.id),
-        )
-    : [];
+          )
+          .orderBy(
+            asc(eligibleSnapshots.asOf),
+            asc(eligibleSnapshots.createdAt),
+            asc(eligibleSnapshots.id),
+          )
+      : [];
   const ids = snapshots.map((s) => s.id);
   const [positions, cash] = ids.length
     ? await Promise.all([
@@ -345,7 +523,19 @@ export async function netWorthHistory(db: Database, userId: string) {
       ])
     : [[], []];
 
-  const securityIds = [...new Set(positions.map((p) => p.securityId))];
+  // Even an instrument no longer held contributes market dates to the original timeline.
+  const allSecurities = snapshots.length
+    ? await db
+        .selectDistinct({ id: position.securityId })
+        .from(position)
+        .where(
+          inArray(
+            position.snapshotId,
+            db.select({ id: eligibleSnapshots.id }).from(eligibleSnapshots),
+          ),
+        )
+    : [];
+  const securityIds = allSecurities.map((p) => p.id);
   const closeRows = securityIds.length
     ? await db
         .select({
@@ -359,26 +549,69 @@ export async function netWorthHistory(db: Database, userId: string) {
         .where(
           and(
             inArray(priceHistory.securityId, securityIds),
-            gte(priceHistory.date, backfillFrom(snapshots[0]!.asOf)),
+            gte(
+              priceHistory.date,
+              range.from && range.from > backfillFrom(snapshots[0]!.asOf)
+                ? range.from
+                : backfillFrom(snapshots[0]!.asOf),
+            ),
+            range.to ? lte(priceHistory.date, range.to) : undefined,
             firstRecorded ? lt(priceHistory.date, firstRecorded) : undefined,
             usableClose(),
           ),
         )
         .orderBy(asc(priceHistory.date))
     : [];
+  const priorCloses =
+    range.from && securityIds.length
+      ? await db
+          .selectDistinctOn([priceHistory.securityId], {
+            securityId: priceHistory.securityId,
+            date: priceHistory.date,
+            close: priceHistory.close,
+            currency: sql<string>`coalesce(${priceHistory.currency}, ${security.currency})`,
+          })
+          .from(priceHistory)
+          .innerJoin(security, eq(security.id, priceHistory.securityId))
+          .where(
+            and(
+              inArray(priceHistory.securityId, securityIds),
+              gte(priceHistory.date, backfillFrom(snapshots[0]!.asOf)),
+              lt(priceHistory.date, range.from),
+              firstRecorded ? lt(priceHistory.date, firstRecorded) : undefined,
+              usableClose(),
+            ),
+          )
+          .orderBy(asc(priceHistory.securityId), desc(priceHistory.date))
+      : [];
   const closes = new Map<string, Close[]>();
-  for (const { securityId, ...close } of closeRows)
-    closes.set(securityId, [...(closes.get(securityId) ?? []), close]);
-
+  for (const { securityId, ...close } of [...priorCloses, ...closeRows]) {
+    let list = closes.get(securityId);
+    if (!list) closes.set(securityId, (list = []));
+    list.push(close);
+  }
+  const positionsBySnapshot = new Map<string, typeof positions>();
+  const cashBySnapshot = new Map<string, typeof cash>();
+  for (const p of positions) {
+    let list = positionsBySnapshot.get(p.snapshotId);
+    if (!list) positionsBySnapshot.set(p.snapshotId, (list = []));
+    list.push(p);
+  }
+  for (const c of cash) {
+    let list = cashBySnapshot.get(c.snapshotId);
+    if (!list) cashBySnapshot.set(c.snapshotId, (list = []));
+    list.push(c);
+  }
   const timeline = estimatedTimeline(
     snapshots.map((snapshot) => ({
       accountId: snapshot.accountId,
       group: groupOf.get(snapshot.accountId)!,
       asOf: snapshot.asOf,
-      positions: positions.filter((p) => p.snapshotId === snapshot.id),
-      cash: cash.filter((c) => c.snapshotId === snapshot.id),
+      positions: positionsBySnapshot.get(snapshot.id) ?? [],
+      cash: cashBySnapshot.get(snapshot.id) ?? [],
     })),
     closes,
+    range,
   );
 
   const { rates } = await ratesInto(db, target, [
