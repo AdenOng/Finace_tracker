@@ -6,6 +6,58 @@ Anthropic-compatible endpoint) into structured data, which you review before any
 
 Built on the T3 stack: Next.js (App Router), tRPC, Drizzle + Postgres, Better Auth, Tailwind.
 
+## Android app
+
+The Expo React Native app lives in [`mobile/`](mobile/README.md). It connects to this
+server and shares your existing sign-in and financial data. It has its own Bun lockfile
+and native dependencies; the root package remains the Next.js backend and web app.
+
+Install the root dependencies with `bun install --frozen-lockfile`, then install the
+mobile dependencies with `bun install --cwd mobile --frozen-lockfile`. See the
+[mobile setup guide](mobile/README.md) for running Metro, building an Android APK,
+and connecting an emulator or physical phone to your Finfolio server.
+
+Production mobile connections require an HTTPS server URL. Local development can
+use the Android emulator's host address, `http://10.0.2.2:3000`, while the backend
+runs with `bun run dev`. The app asks for the server address on first launch.
+No database credentials or AI provider keys belong in the mobile app.
+
+Android supports native statement imports under **More → Imports**, including PDF/image
+selection, upload progress, review, Keep/Skip decisions, category/amount corrections and
+balance checks before saving. Spending supports transaction details, edit/delete, date
+selection and account/category filters. Retrying an unchanged manual save uses the same
+idempotency key. Reconciled records remain protected by the backend.
+
+The app checks `/api/health` before saving a server address. This public endpoint only
+reports whether Finfolio and its database are reachable; authenticated import availability
+checks verify that an eligible AI provider lists the configured model. Actual extraction
+still needs working provider credentials and model access.
+
+Start the complete local stack with `bun run services:up`, and inspect it with
+`bun run services:status`. These use the existing `finfolio` Compose project, `.env` and
+database volume. Put the web service behind your existing HTTPS reverse proxy/tunnel for
+release APKs; Compose publishes it on loopback. For host development, `bun run ai:serve`
+starts an installed OpenCode CLI using the existing credentials and `.env`, alongside
+`bun run dev`. With Snap Bun, use `node --env-file=.env scripts/serve-ai.mjs` and
+`docker compose up -d --build db opencode app` directly from a normal terminal.
+Default local OpenCode provider URLs follow `OPENCODE_URL` when moving between host
+development and Docker; explicitly configured custom provider URLs remain unchanged.
+
+The mobile client uses the same per-user API access checks, invitation policy and
+two-factor requirements as the web app. Initial account setup, invitations, passkey
+management, administration, and advanced workflows remain available on the web.
+
+For safe local testing, `bun scripts/mobile-test-server.ts` starts a disposable
+backend with synthetic accounts and real authentication at port 3100, without
+using your Postgres database or changing `.env`. See the
+[isolated backend guide](docs/mobile-backend-testing.md) and
+[mobile architecture](docs/mobile-architecture.md).
+Use `MOBILE_TEST_AI=fixture` for deterministic native import tests, or `MOBILE_TEST_AI=live`
+to exercise the configured OpenCode service with synthetic statements and an isolated database.
+The latter makes real AI requests. `.github/workflows/android.yml` runs backend/mobile checks
+and builds an Android test APK without production credentials.
+
+
 ## Project location
 
 The active Finfolio app lives in the `Finace_tracker` repository. Run the Bun and Docker
