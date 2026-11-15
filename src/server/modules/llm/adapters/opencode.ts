@@ -113,8 +113,8 @@ export function createOpencodeAdapter(config: LlmProviderConfig): LlmAdapter {
       }
     },
 
-    async listModels(): Promise<ModelInfo[]> {
-      const result = await client.config.providers();
+    async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
+      const result = await client.config.providers({}, { signal });
       if (!result.data) {
         throw new LlmError("opencode: failed to list providers", result.error);
       }

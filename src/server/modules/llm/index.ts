@@ -6,6 +6,7 @@ import { env } from "~/env";
 import type { Database } from "~/server/db";
 import { llmProvider } from "~/server/db/schema";
 import { decryptSecret } from "~/server/lib/secrets";
+import { opencodeBaseUrl } from "./providers";
 import { createOpencodeAdapter } from "./adapters/opencode";
 import {
   createAnthropicAdapter,
@@ -38,7 +39,7 @@ type ProviderRow = typeof llmProvider.$inferSelect;
 export function toProviderConfig(row: ProviderRow): LlmProviderConfig {
   return {
     kind: row.kind,
-    baseUrl: row.baseUrl,
+    baseUrl: row.kind === "opencode" ? opencodeBaseUrl(row.baseUrl, env.OPENCODE_URL) : row.baseUrl,
     apiKey: row.apiKeyEncrypted ? decryptSecret(row.apiKeyEncrypted) : null,
     defaultModel: row.defaultModel,
     basicAuth:

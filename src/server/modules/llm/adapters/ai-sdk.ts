@@ -18,7 +18,7 @@ import {
 function createAiSdkAdapter(
   config: LlmProviderConfig,
   resolveModel: (id: string) => LanguageModel,
-  listModels: () => Promise<ModelInfo[]>,
+  listModels: (signal?: AbortSignal) => Promise<ModelInfo[]>,
 ): LlmAdapter {
   return {
     async generateStructured<T>(
@@ -74,10 +74,11 @@ function createAiSdkAdapter(
 async function fetchModelList(
   url: string,
   headers: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<ModelInfo[]> {
   const response = await fetch(url, {
     headers,
-    signal: AbortSignal.timeout(30_000),
+    signal: signal ?? AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
     throw new LlmError(`Model list failed: HTTP ${response.status}`);
@@ -105,10 +106,11 @@ export function createOpenAICompatibleAdapter(
   return createAiSdkAdapter(
     config,
     (id) => provider(id),
-    () =>
+    (signal) =>
       fetchModelList(
         `${baseURL}/models`,
         config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
+        signal,
       ),
   );
 }
@@ -125,10 +127,10 @@ export function createAnthropicAdapter(config: LlmProviderConfig): LlmAdapter {
   return createAiSdkAdapter(
     config,
     (id) => provider(id),
-    () =>
+    (signal) =>
       fetchModelList(`${baseURL}/models`, {
         "x-api-key": config.apiKey ?? "",
         "anthropic-version": "2023-06-01",
-      }),
+      }, signal),
   );
 }

@@ -206,7 +206,7 @@ function budgetedAdapter(
   jobId?: string,
 ): LlmAdapter {
   return {
-    listModels: () => adapter.listModels(),
+    listModels: (signal) => adapter.listModels(signal),
     async generateStructured(request) {
       request.signal?.throwIfAborted();
       // Conservative: ~2 characters per token for text. Vision models bill an image by its
