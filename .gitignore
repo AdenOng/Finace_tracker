@@ -20,6 +20,14 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 
+# Expo and generated native projects (regenerated from mobile/app config)
+/mobile/.expo/
+/mobile/android/
+/mobile/ios/
+/mobile/dist/
+*.apk
+*.aab
+
 # Environment files: commit only the documented example
 .env
 .env.*
