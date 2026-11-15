@@ -1,5 +1,6 @@
 import "server-only";
 
+import { expo } from "@better-auth/expo";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -39,6 +40,7 @@ const adminPlugin = admin({
 export const auth = betterAuth({
   appName: APP_NAME,
   baseURL: baseUrl.origin,
+  trustedOrigins: ["finfolio://"],
   secret: env.BETTER_AUTH_SECRET,
   disabledPaths: Object.values(adminPlugin.endpoints).map(
     (endpoint) => endpoint.path,
@@ -134,6 +136,9 @@ export const auth = betterAuth({
     },
   },
   plugins: [
+    // Keep the official native cookie/origin handling, but omit its init hook:
+    // Expo 1.7.7 otherwise trusts every exp:// origin in development.
+    { ...expo(), init: undefined },
     adminPlugin,
     twoFactor({ issuer: APP_NAME }),
     passkey({

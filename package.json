@@ -24,6 +24,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.71",
     "@ai-sdk/openai-compatible": "^3.0.62",
+    "@better-auth/expo": "1.7.7",
     "@better-auth/passkey": "^1.7.7",
     "@napi-rs/canvas": "^1.0.10",
     "@opencode-ai/sdk": "^1.19.3",

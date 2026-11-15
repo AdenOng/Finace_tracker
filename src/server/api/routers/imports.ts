@@ -28,6 +28,7 @@ import { isoDateInput, moneyInput } from "~/server/api/inputs";
 import {
   createTRPCRouter,
   expensiveProcedure,
+  expensiveReadProcedure,
   protectedProcedure,
 } from "~/server/api/trpc";
 import {
@@ -81,6 +82,7 @@ import {
   requireOpenPeriod,
 } from "~/server/modules/spending/guards";
 import { normalizeMerchantText } from "~/server/modules/spending/rules";
+import { importProviders } from "~/server/modules/llm/routing";
 
 const jobColumns = {
   id: extractionJob.id,
@@ -148,6 +150,24 @@ function tradedListing(
 
 /** Statement uploads: what the AI read, waiting for the owner to review and commit. */
 export const importsRouter = createTRPCRouter({
+  availability: expensiveReadProcedure.query(async ({ ctx }) => {
+    try {
+      const candidates = await importProviders(ctx.db);
+      for (const { createAdapter, provider } of candidates) {
+        try {
+          const models = await createAdapter().listModels(AbortSignal.timeout(5_000));
+          if (models.some((m) => m.id === provider.defaultModel)) return {
+            available: true,
+            message: "AI service connected. Statements still need your review before saving.",
+          };
+        } catch { /* The import runner can also use the configured fallback. */ }
+      }
+      return { available: false, message: "The configured import models are unavailable. Ask your admin to check Admin → AI." };
+    } catch {
+      return { available: false, message: "AI imports are unavailable. Ask your admin to check the AI service and credentials." };
+    }
+  }),
+
   list: protectedProcedure.query(async ({ ctx }) => {
     const jobs = await ctx.db
       .select({
@@ -301,7 +321,7 @@ export const importsRouter = createTRPCRouter({
               : {}),
           }
         : {};
-      return {
+      const review = {
         ...rest,
         latestHoldingsAsOf: latest[0]?.asOf ?? null,
         statementDates: [
@@ -361,6 +381,10 @@ export const importsRouter = createTRPCRouter({
             })
         )[],
       };
+      return { ...review, balanceCheck: checkImportBalance({
+        summary: review.summary, accountType: review.accountType,
+        accountCurrency: review.accountCurrency, rows: review.rows,
+      }) };
     }),
 
   lineRemovalPreview: protectedProcedure

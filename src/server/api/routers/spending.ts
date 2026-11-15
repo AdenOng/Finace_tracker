@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { TRPCError } from "@trpc/server";
 import Decimal from "decimal.js";
 import {
   and,
@@ -7,6 +8,7 @@ import {
   desc,
   eq,
   gte,
+  getTableColumns,
   inArray,
   lt,
   or,
@@ -214,6 +216,18 @@ async function spendingRows(
 
 /** Day-to-day money in and out of bank, card and cash accounts. */
 export const spendingRouter = createTRPCRouter({
+  get: protectedProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
+    const [row] = await ctx.db.select({
+      ...getTableColumns(transaction), accountName: financialAccount.name,
+      categoryName: category.name,
+    }).from(transaction)
+      .innerJoin(financialAccount, eq(financialAccount.id, transaction.accountId))
+      .leftJoin(category, eq(category.id, transaction.categoryId))
+      .where(and(eq(transaction.id, input.id), writableBy(ctx.scope, transaction.ownerId)))
+      .limit(1);
+    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    return row;
+  }),
   list: protectedProcedure
     .input(
       listInput.extend({
@@ -319,7 +333,7 @@ export const spendingRouter = createTRPCRouter({
     }),
 
   create: protectedProcedure
-    .input(transactionInput)
+    .input(transactionInput.extend({ idempotencyKey: z.uuid().optional() }))
     .mutation(async ({ ctx, input }) =>
       ctx.db.transaction(async (tx) => {
         await lockAccounts(tx, ctx.scope, [input.accountId]);
@@ -342,16 +356,37 @@ export const spendingRouter = createTRPCRouter({
           },
           await loadClassificationCategories(tx),
         );
+        const { idempotencyKey, ...values } = input;
+        const fingerprint = `manual:${idempotencyKey ?? randomUUID()}`;
+        if (idempotencyKey) {
+          const [existing] = await tx.select().from(transaction).where(and(
+            eq(transaction.accountId, input.accountId),
+            eq(transaction.fingerprint, fingerprint),
+            writableBy(ctx.scope, transaction.ownerId),
+          )).limit(1);
+          if (existing) {
+            if (existing.postedDate !== input.postedDate ||
+                existing.description !== input.description ||
+                !new Decimal(existing.amount).eq(input.amount) ||
+                existing.currency !== currency || existing.notes !== input.notes ||
+                existing.merchant !== input.merchant ||
+                existing.categoryId !== classification.categoryId ||
+                existing.isTransfer !== classification.isTransfer || existing.cleared !== input.cleared) {
+              throw new TRPCError({ code: "CONFLICT", message: "This save was already used for a different transaction. Refresh spending before trying again." });
+            }
+            return { id: existing.id };
+          }
+        }
         const [row] = await tx
           .insert(transaction)
           .values({
-            ...input,
+            ...values,
             ownerId: ctx.scope.userId,
             currency,
             ...classification,
             categorySource: input.categoryId ? "user" : rule ? "rule" : null,
             source: "manual",
-            fingerprint: `manual:${randomUUID()}`,
+            fingerprint,
           })
           .returning({ id: transaction.id });
         return row!;

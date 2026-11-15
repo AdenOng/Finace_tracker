@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { getQueryKey } from "@trpc/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
+import { checkImportBalance } from "../src/lib/import-balance-check";
 import { LocaleProvider } from "../src/i18n/client";
 
 import { ConsolidatedPortfolio } from "../src/components/portfolio/consolidated-portfolio";
@@ -639,6 +640,7 @@ test("shared account detail hides cached financial data after permission errors"
 test("completed imports expose removal only for saved rows and keep removed evidence distinct from excluded rows", () => {
   const id = "88888888-8888-4888-8888-888888888888";
   const job: RouterOutputs["imports"]["get"] = {
+    balanceCheck: checkImportBalance({ summary: null, rows: [], accountType: null, accountCurrency: null }),
     id,
     status: "completed",
     error: null,
@@ -761,6 +763,7 @@ test("completed imports expose removal only for saved rows and keep removed evid
 test("import review requires a missing statement date and warns about dated replacements", () => {
   const id = "88888888-8888-4888-8888-888888888888";
   const job: RouterOutputs["imports"]["get"] = {
+    balanceCheck: checkImportBalance({ summary: null, rows: [], accountType: null, accountCurrency: null }),
     id,
     status: "needs_review",
     error: null,
@@ -1064,6 +1067,7 @@ test("manual and bulk entry expose Expense, Income and Transfer choices with dir
 test("import review keeps transfer categories editable and exposes sign-aware transaction types", () => {
   const id = "88888888-8888-4888-8888-888888888888";
   const job: RouterOutputs["imports"]["get"] = {
+    balanceCheck: checkImportBalance({ summary: null, rows: [], accountType: null, accountCurrency: null }),
     id,
     status: "needs_review",
     error: null,
@@ -1196,6 +1200,7 @@ test("bank and trade possible duplicates show Keep/Skip actions and block Save u
   };
   for (const row of [bankRow, tradeRow]) {
     const job: Job = {
+    balanceCheck: checkImportBalance({ summary: null, rows: [], accountType: null, accountCurrency: null }),
       id,
       status: "needs_review",
       error: null,
@@ -1294,6 +1299,7 @@ test("import amount warnings show printed evidence and corrections without block
   type Job = RouterOutputs["imports"]["get"];
   const id = "88888888-8888-4888-8888-888888888888";
   const job: Job = {
+    balanceCheck: checkImportBalance({ summary: null, rows: [], accountType: null, accountCurrency: null }),
     id,
     status: "needs_review",
     error: null,
@@ -1502,6 +1508,7 @@ test("import balance review distinguishes extraction, saved gaps, currencies, pr
     },
   });
   const job: Job = {
+    balanceCheck: checkImportBalance({ summary: null, rows: [], accountType: null, accountCurrency: null }),
     id,
     status: "needs_review",
     error: null,
