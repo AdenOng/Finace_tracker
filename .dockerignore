@@ -12,6 +12,7 @@ docker-compose*.yml
 # Preserved legacy tracker is not part of the Finfolio image.
 finance_tracker
 frontend
+mobile
 uploads
 models
 .venv
@@ -33,6 +34,7 @@ imports
 exports
 tests
 docs
+scripts/mobile-test-server.ts
 .tmp
 tmp
 

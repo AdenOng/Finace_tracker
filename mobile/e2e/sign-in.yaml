@@ -1,0 +1,34 @@
+# Disposable development backend only. Supply EMAIL, PASSWORD, BACKUP_CODE and BACKEND_ORIGIN.
+appId: com.finfolio.mobile
+---
+- stopApp
+- openLink: "finfolio://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081"
+- runFlow:
+    when:
+      visible: "^Connect your Finfolio$"
+    commands:
+      - tapOn:
+          id: server-address
+      - inputText: "${BACKEND_ORIGIN}"
+      - tapOn: "^Continue$"
+- extendedWaitUntil:
+    visible: "Invite only. Ask whoever runs this Finfolio for a link."
+    timeout: 15000
+- tapOn:
+    id: sign-in-email
+- inputText: "${EMAIL}"
+- tapOn:
+    id: sign-in-password
+- inputText: "${PASSWORD}"
+- tapOn: "^Sign in$"
+- extendedWaitUntil:
+    visible: "^Two-step check$"
+    timeout: 15000
+- tapOn: "^Use a backup code instead$"
+- tapOn:
+    id: two-factor-code
+- inputText: "${BACKUP_CODE}"
+- tapOn: "^Verify$"
+- extendedWaitUntil:
+    visible: "TOTAL NET WORTH.*"
+    timeout: 15000

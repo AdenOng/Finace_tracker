@@ -1,0 +1,40 @@
+# Run on a signed-in development build connected to the disposable backend.
+# No credentials are stored in this flow. See docs/mobile-verification.md.
+appId: com.finfolio.mobile
+---
+- openLink: "finfolio://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081"
+- extendedWaitUntil:
+    visible: "TOTAL NET WORTH.*"
+    timeout: 20000
+- tapOn: "^Accounts$"
+- assertVisible: ".*Each keeps its own currency.*"
+- tapOn: "Open Long-term investments"
+- assertVisible: "Synthetic emulator test account"
+- tapOn: "^Portfolio$"
+- assertVisible: "Every holding across your brokers, added up."
+- tapOn: "^More$"
+- runFlow:
+    when:
+      visible: "^Review statement$"
+    commands:
+      - back
+- runFlow:
+    when:
+      visible: "Upload a statement, check what was read, then choose what to save."
+    commands:
+      - back
+- scrollUntilVisible:
+    element:
+      text: "^Sign out$"
+- tapOn: "^Sign out$"
+- extendedWaitUntil:
+    visible: "Invite only. Ask whoever runs this Finfolio for a link."
+    timeout: 10000
+- stopApp
+- openLink: "finfolio://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081"
+- extendedWaitUntil:
+    visible: "Invite only. Ask whoever runs this Finfolio for a link."
+    timeout: 20000
+- assertNotVisible: "TOTAL NET WORTH.*"
+- tapOn: "^Change server$"
+- assertVisible: "Connect your Finfolio"

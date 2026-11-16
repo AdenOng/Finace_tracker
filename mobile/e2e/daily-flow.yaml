@@ -1,0 +1,100 @@
+# Starts signed in to the disposable fixture backend, with the synthetic PNG in Downloads.
+# Run sign-in.yaml first. Finish with session-smoke.yaml for logout/relaunch checks.
+appId: com.finfolio.mobile
+---
+- tapOn: "^Overview$"
+- tapOn: "^Add transaction$"
+- tapOn: "Account: Choose…"
+- tapOn: "Everyday savings · SGD"
+- tapOn:
+    id: transaction-amount
+- inputText: "7.25"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: transaction-description
+- tapOn:
+    id: transaction-description
+- inputText: "Android daily flow expense"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      text: "^Save transaction$"
+- tapOn: "^Save transaction$"
+- extendedWaitUntil:
+    visible: "Transaction saved."
+    timeout: 15000
+- tapOn: "^Back to spending$"
+- scrollUntilVisible:
+    element:
+      id: transaction-search
+- tapOn:
+    id: transaction-search
+- inputText: "Android daily flow expense"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      text: "Open transaction Android daily flow expense"
+- tapOn: "Open transaction Android daily flow expense"
+- tapOn: "^Edit transaction$"
+- tapOn:
+    id: transaction-amount
+- eraseText
+- inputText: "8.25"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      text: "^Save changes$"
+- tapOn: "^Save changes$"
+- extendedWaitUntil:
+    visible: "Transaction updated."
+    timeout: 15000
+- tapOn: "^Back to transaction$"
+- assertVisible: '−S[$]8[.]25'
+- tapOn: "^Delete transaction$"
+- tapOn: "^DELETE$"
+- extendedWaitUntil:
+    visible: "No matching transactions"
+    timeout: 15000
+- tapOn: "^More$"
+- runFlow:
+    when:
+      visible: "^Review statement$"
+    commands:
+      - tapOn: "^Imports$"
+- runFlow:
+    when:
+      visible: "^Your account, privacy, and the rest of Finfolio.$"
+    commands:
+      - tapOn: "^Imports$"
+- scrollUntilVisible:
+    element:
+      text: "Import account:.*"
+    direction: UP
+- tapOn: "Import account:.*"
+- tapOn: "Everyday savings · SGD"
+- tapOn: "^Choose statement$"
+- runFlow:
+    when:
+      visible: "^Show roots$"
+    commands:
+      - tapOn: "^Show roots$"
+      - tapOn: "^Downloads$"
+- longPressOn: "finfolio-synthetic-statement.png"
+- tapOn: "^Select$"
+- extendedWaitUntil:
+    visible: "^Review statement$"
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      text: "Synthetic import lunch"
+- assertVisible: '.*S[$]12[.]34.*'
+- scrollUntilVisible:
+    element:
+      text: "^Save reviewed statement$"
+- tapOn: "^Save reviewed statement$"
+- tapOn: "^SAVE$"
+- extendedWaitUntil:
+    visible: "This import has been saved.*"
+    timeout: 15000
+- tapOn: "^Overview$"

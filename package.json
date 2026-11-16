@@ -19,11 +19,20 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "bun src/server/db/seed/run.ts",
     "db:migrate:run": "bun src/server/db/migrate.ts",
-    "test": "bun test --preload ./tests/setup.ts ./tests"
+    "test": "bun test --preload ./tests/setup.ts ./tests",
+    "mobile:install": "bun install --cwd mobile --frozen-lockfile",
+    "mobile:start": "bun run --cwd mobile start",
+    "mobile:check": "bun run --cwd mobile typecheck",
+    "mobile:test": "bun run --cwd mobile test",
+    "mobile:export": "bun run --cwd mobile export:android",
+    "services:up": "docker compose up -d --build db opencode app",
+    "services:status": "docker compose ps",
+    "ai:serve": "node --env-file=.env scripts/serve-ai.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.71",
     "@ai-sdk/openai-compatible": "^3.0.62",
+    "@better-auth/expo": "1.7.7",
     "@better-auth/passkey": "^1.7.7",
     "@napi-rs/canvas": "^1.0.10",
     "@opencode-ai/sdk": "^1.19.3",

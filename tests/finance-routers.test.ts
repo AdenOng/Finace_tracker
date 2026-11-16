@@ -161,6 +161,25 @@ const bank = {
 };
 const broker = { ...bank, name: "Broker", type: "brokerage" as const };
 
+test("mobile saves are idempotent, reject changed retries and keep transaction details scoped", async () => {
+  const account = await alice.accounts.create(bank);
+  const input = { accountId: account.id, postedDate: todayIso(), description: "Lost response retry",
+    amount: "-12.3400", currency: null, categoryId: null, merchant: null, notes: null,
+    isTransfer: false, cleared: false, idempotencyKey: crypto.randomUUID() };
+  const first = await alice.spending.create(input);
+  expect(await alice.spending.create({ ...input, amount: "-12.34" })).toEqual(first);
+  await expect(alice.spending.create({ ...input, amount: "-13.00" })).rejects.toThrow("different transaction");
+  const rows = await alice.spending.list({ month: todayIso().slice(0, 7), accountId: account.id, categoryId: null });
+  expect(rows).toHaveLength(1);
+  expect((await alice.spending.get(first)).amount).toBe("-12.3400");
+  await expect(bob.spending.get(first)).rejects.toThrow();
+  await expect(bob.spending.create(input)).rejects.toThrow();
+  await alice.spending.update({ ...input, id: first.id, amount: "-15.50" });
+  expect((await alice.spending.get(first)).amount).toBe("-15.5000");
+  await alice.spending.remove(first);
+  await expect(alice.spending.get(first)).rejects.toThrow();
+});
+
 describe("net worth history", () => {
   test("each entry date adds up every account's latest entry per group, backfilling accounts not yet entered", () => {
     const amount = (value: string, currency = "SGD") => ({

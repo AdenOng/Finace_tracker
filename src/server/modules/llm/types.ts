@@ -54,7 +54,7 @@ export interface LlmAdapter {
   generateStructured<T>(
     request: StructuredRequest<T>,
   ): Promise<StructuredResult<T>>;
-  listModels(): Promise<ModelInfo[]>;
+  listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
 }
 
 export class LlmError extends Error {
