@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 
 import type { Database } from "../src/server/db";
@@ -188,6 +188,61 @@ async function stagedJob(
 }
 
 describe("statement imports", () => {
+  test("pages through older pending reviews without skipping timestamp ties or exposing other owners", async () => {
+    const ownerId = "import-pagination";
+    await db.insert(schema.user).values({
+      id: ownerId,
+      name: "Pagination",
+      email: "pagination@example.com",
+    });
+    const [doc] = await db
+      .insert(schema.document)
+      .values({
+        ownerId,
+        fileName: "pagination.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1,
+        sha256: "pagination",
+        storageKey: "synthetic-pagination",
+      })
+      .returning();
+    // Sharing a timestamp exercises the id tie-breaker; microseconds must survive the cursor.
+    const inserted = await db
+      .insert(schema.extractionJob)
+      .values(
+        Array.from({ length: 101 }, () => ({
+          ownerId,
+          documentId: doc!.id,
+          status: "needs_review" as const,
+          createdAt: sql`'2026-01-01 00:00:00.123456+00'::timestamptz`,
+        })),
+      )
+      .returning({ id: schema.extractionJob.id });
+    const caller = callers(ownerId).imports;
+    const first = await caller.list();
+    expect(first).toHaveLength(100);
+    const boundary = first.at(-1)!;
+    // New activity must not shift the second page.
+    await db.insert(schema.extractionJob).values({
+      ownerId,
+      documentId: doc!.id,
+      status: "completed",
+    });
+    const second = await caller.list({
+      cursor: { id: boundary.id, createdAt: boundary.cursorCreatedAt },
+    });
+    expect(second).toHaveLength(1);
+    expect(new Set([...first, ...second].map((job) => job.id))).toEqual(
+      new Set(inserted.map((job) => job.id)),
+    );
+    expect(second[0]!.status).toBe("needs_review");
+    expect(
+      await bob.imports.list({
+        cursor: { id: boundary.id, createdAt: boundary.cursorCreatedAt },
+      }),
+    ).toEqual([]);
+  });
+
   test("old extraction and staged rows without references still parse", () => {
     const bank = Object.fromEntries(
       Object.entries(line("2026-09-01", "Coffee", -5)).filter(

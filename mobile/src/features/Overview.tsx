@@ -1,3 +1,4 @@
+import { SensitiveValue } from "../components/AmountPrivacy";
 import React from "react";
 import { Text, View } from "react-native";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
@@ -62,8 +63,11 @@ export function Overview() {
   const navigation = useNavigation<Nav>();
   const d = q.data;
   const currency = d?.currency ?? "";
-  const money = (v: string | Decimal | null | undefined, signed = false) =>
-    format(v, currency, { hidden, signed });
+  const money = (
+    v: string | Decimal | null | undefined,
+    signed = false,
+    mask = hidden,
+  ) => format(v, currency, { hidden: mask, signed });
   const openAccount = (id: string) =>
     navigation.navigate("Accounts", {
       screen: "AccountDetail",
@@ -138,13 +142,16 @@ export function Overview() {
               : null;
           const row = (a: (typeof d.accounts)[number]) => (
             <AccountRow
+              hidden={hidden}
               key={a.id}
               name={a.name}
               last4={a.last4}
               institution={a.institutionName}
               type={a.type}
               asOf={a.asOf}
-              amounts={a.total === null ? [] : [money(a.total)]}
+              amounts={
+                a.total === null ? [] : [money(a.total, false, false)]
+              }
               negative={!!a.total && new Decimal(a.total).isNegative()}
               warning={
                 a.unpriced > 0
@@ -175,9 +182,22 @@ export function Overview() {
                       Partial total
                     </Text>
                   )}
-                  <HeroFigure value={money(d.total ?? "0")} muted={!recorded} />
+                  <SensitiveValue
+                    hidden={hidden}
+                    render={(hidden) => (
+                      <HeroFigure
+                        value={money(d.total ?? "0", false, hidden)}
+                        muted={!recorded}
+                      />
+                    )}
+                  />
                   <View style={{ gap: 4 }}>
-                    <Text style={[styles.text, { fontSize: 13, color: colors.ink2 }]}>
+                    <Text
+                      style={[
+                        styles.text,
+                        { fontSize: 13, color: colors.ink2 },
+                      ]}
+                    >
                       {!recorded
                         ? "Nothing to total yet. Add an account on the web and record what it holds."
                         : d.oldestAsOf && d.oldestAsOf !== d.asOf
@@ -185,25 +205,30 @@ export function Overview() {
                           : `Latest recorded balances, as of ${formatDate(d.asOf)}.`}
                     </Text>
                     {priceChange && !priceChange.isZero() && (
-                      <Text style={{ fontSize: 13 }}>
-                        <Text
-                          style={[
-                            styles.figure,
-                            {
-                              fontSize: 13,
-                              color: priceChange.isPositive()
-                                ? colors.gain
-                                : colors.loss,
-                            },
-                          ]}
-                        >
-                          {money(priceChange.toFixed(2), true)}
-                        </Text>
-                        <Text style={{ color: colors.ink2 }}>
-                          {" "}
-                          since the previous close
-                        </Text>
-                      </Text>
+                      <SensitiveValue
+                        hidden={hidden}
+                        render={(hidden) => (
+                          <Text style={{ fontSize: 13 }}>
+                            <Text
+                              style={[
+                                styles.figure,
+                                {
+                                  fontSize: 13,
+                                  color: priceChange.isPositive()
+                                    ? colors.gain
+                                    : colors.loss,
+                                },
+                              ]}
+                            >
+                              {money(priceChange.toFixed(2), true, hidden)}
+                            </Text>
+                            <Text style={{ color: colors.ink2 }}>
+                              {" "}
+                              since the previous close
+                            </Text>
+                          </Text>
+                        )}
+                      />
                     )}
                     {d.transferWarnings.length > 0 && (
                       <Text style={styles.warn}>
@@ -212,18 +237,25 @@ export function Overview() {
                       </Text>
                     )}
                     {d.unconverted.length > 0 && (
-                      <Text style={styles.warn}>
-                        Not converted to {d.currency}:{" "}
-                        {d.unconverted
-                          .map((a) => format(a.amount, a.currency, { hidden }))
-                          .join(", ")}
-                        .
-                      </Text>
+                      <SensitiveValue
+                        hidden={hidden}
+                        render={(hidden) => (
+                          <Text style={styles.warn}>
+                            Not converted to {d.currency}:{" "}
+                            {d.unconverted
+                              .map((a) =>
+                                format(a.amount, a.currency, { hidden }),
+                              )
+                              .join(", ")}
+                            .
+                          </Text>
+                        )}
+                      />
                     )}
                     {d.unpriced > 0 && (
                       <Text style={styles.warn}>
-                        {d.unpriced} holding{d.unpriced === 1 ? " has" : "s have"}{" "}
-                        no price yet.
+                        {d.unpriced} holding
+                        {d.unpriced === 1 ? " has" : "s have"} no price yet.
                       </Text>
                     )}
                     {d.fxAsOf && (
@@ -238,13 +270,41 @@ export function Overview() {
                   items={[
                     {
                       label: groupLabels.investments,
-                      value: money(investTotal),
+                      value: (
+                        <SensitiveValue
+                          hidden={hidden}
+                          render={(hidden) => (
+                            <Text
+                              style={[
+                                styles.poster,
+                                { fontSize: 20, lineHeight: 25 },
+                              ]}
+                            >
+                              {money(investTotal, false, hidden)}
+                            </Text>
+                          )}
+                        />
+                      ),
                       note: `${accounts(investing.length)} · ${share(investTotal)}`,
                       onPress: () => navigation.navigate("Portfolio"),
                     },
                     {
                       label: groupLabels.banking,
-                      value: money(bankTotal),
+                      value: (
+                        <SensitiveValue
+                          hidden={hidden}
+                          render={(hidden) => (
+                            <Text
+                              style={[
+                                styles.poster,
+                                { fontSize: 20, lineHeight: 25 },
+                              ]}
+                            >
+                              {money(bankTotal, false, hidden)}
+                            </Text>
+                          )}
+                        />
+                      ),
                       note: owed.isZero()
                         ? `${accounts(banking.length)} · ${share(bankTotal)}`
                         : `After ${money(owed)} card debt`,
@@ -257,7 +317,21 @@ export function Overview() {
                     items={[
                       {
                         label: groupLabels.cpf_srs,
-                        value: money(forLaterTotal),
+                        value: (
+                          <SensitiveValue
+                            hidden={hidden}
+                            render={(hidden) => (
+                              <Text
+                                style={[
+                                  styles.poster,
+                                  { fontSize: 20, lineHeight: 25 },
+                                ]}
+                              >
+                                {money(forLaterTotal, false, hidden)}
+                              </Text>
+                            )}
+                          />
+                        ),
                         note: d.countCpfSrs
                           ? `Locked for later · ${share(forLaterTotal)}`
                           : "Not counted in net worth",
@@ -292,13 +366,18 @@ export function Overview() {
 
               {/* Investments */}
               <Card>
-                <SheetHeader
-                  eyebrow={groupLabels.investments}
-                  figure={money(investTotal)}
-                  link={{
-                    label: "Portfolio",
-                    onPress: () => navigation.navigate("Portfolio"),
-                  }}
+                <SensitiveValue
+                  hidden={hidden}
+                  render={(hidden) => (
+                    <SheetHeader
+                      eyebrow={groupLabels.investments}
+                      figure={money(investTotal, false, hidden)}
+                      link={{
+                        label: "Portfolio",
+                        onPress: () => navigation.navigate("Portfolio"),
+                      }}
+                    />
+                  )}
                 />
                 {investmentIncomplete && (
                   <Text style={styles.warn}>
@@ -343,9 +422,14 @@ export function Overview() {
                   ]}
                 >
                   <Eyebrow>{groupLabels.banking}</Eyebrow>
-                  <Text style={[styles.figure, { fontSize: 13 }]}>
-                    {money(bankTotal)}
-                  </Text>
+                  <SensitiveValue
+                    hidden={hidden}
+                    render={(hidden) => (
+                      <Text style={[styles.figure, { fontSize: 13 }]}>
+                        {money(bankTotal, false, hidden)}
+                      </Text>
+                    )}
+                  />
                 </View>
                 {banking.length === 0 ? (
                   <Text style={[styles.subtitle, { fontSize: 14 }]}>
@@ -359,9 +443,14 @@ export function Overview() {
 
               {(d.cpfSrsEnabled || forLater.length > 0) && (
                 <Card>
-                  <SheetHeader
-                    eyebrow={groupLabels.cpf_srs}
-                    figure={money(forLaterTotal)}
+                  <SensitiveValue
+                    hidden={hidden}
+                    render={(hidden) => (
+                      <SheetHeader
+                        eyebrow={groupLabels.cpf_srs}
+                        figure={money(forLaterTotal, false, hidden)}
+                      />
+                    )}
                   />
                   <Text style={styles.muted}>
                     {d.countCpfSrs
@@ -409,7 +498,8 @@ export function SpendingSheet({
   onOpen?: () => void;
 }>) {
   const currency = summary?.currency ?? "";
-  const money = (v: string | Decimal) => format(v, currency, { hidden });
+  const money = (v: string | Decimal, signed = false, mask = hidden) =>
+    format(v, currency, { hidden: mask, signed });
   const moneyIn = new Decimal(summary?.received ?? 0);
   const moneyOut = new Decimal(summary?.spent ?? 0);
   // A partial last month would make the comparison misleading.
@@ -427,7 +517,10 @@ export function SpendingSheet({
     const root = r.categoryId
       ? (parentOf.get(r.categoryId) ?? r.categoryId)
       : "none";
-    byCategory.set(root, (byCategory.get(root) ?? new Decimal(0)).plus(r.spent));
+    byCategory.set(
+      root,
+      (byCategory.get(root) ?? new Decimal(0)).plus(r.spent),
+    );
   }
   const ranked = [...byCategory]
     .map(([id, spent]) => ({
@@ -444,11 +537,16 @@ export function SpendingSheet({
   ].map((c) => ({ ...c, display: money(c.spent.toFixed(2)) }));
 
   return (
-    <Card>
-      <SheetHeader
-        eyebrow={`Spending · ${formatMonth(month)}`}
-        figure={summary ? money(moneyOut.toFixed(2)) : "—"}
-        link={onOpen && { label: "Transactions", onPress: onOpen }}
+    <Card key={month}>
+      <SensitiveValue
+        hidden={hidden}
+        render={(hidden) => (
+          <SheetHeader
+            eyebrow={`Spending · ${formatMonth(month)}`}
+            figure={summary ? money(moneyOut.toFixed(2), false, hidden) : "—"}
+            link={onOpen && { label: "Transactions", onPress: onOpen }}
+          />
+        )}
       />
       {pending ? (
         <Text style={styles.muted}>Getting this month’s spending…</Text>
@@ -465,27 +563,45 @@ export function SpendingSheet({
             {[
               { label: "Money in", value: moneyIn, color: colors.gain },
               { label: "Money out", value: moneyOut, color: colors.loss },
-              { label: "Left over", value: moneyIn.minus(moneyOut), color: colors.ink },
+              {
+                label: "Left over",
+                value: moneyIn.minus(moneyOut),
+                color: colors.ink,
+              },
             ].map((f) => (
               <View key={f.label} style={{ flex: 1, minWidth: 0, gap: 4 }}>
                 <Eyebrow>{f.label}</Eyebrow>
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  style={[styles.figure, { fontSize: 14, color: f.color }]}
-                >
-                  {money(f.value.toFixed(2))}
-                </Text>
+                <SensitiveValue
+                  hidden={hidden}
+                  render={(hidden) => (
+                    <Text
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      style={[styles.figure, { fontSize: 14, color: f.color }]}
+                    >
+                      {money(f.value.toFixed(2), false, hidden)}
+                    </Text>
+                  )}
+                />
               </View>
             ))}
           </View>
           {!lastOut.isZero() && (
-            <Text style={styles.muted}>
-              {money(moneyOut.minus(lastOut).abs().toFixed(2))}{" "}
-              {moneyOut.lessThan(lastOut) ? "less" : "more"} than{" "}
-              {formatMonth(shiftMonth(month, -1))}. Transfers between your own
-              accounts aren’t counted.
-            </Text>
+            <SensitiveValue
+              hidden={hidden}
+              render={(hidden) => (
+                <Text style={styles.muted}>
+                  {money(
+                    moneyOut.minus(lastOut).abs().toFixed(2),
+                    false,
+                    hidden,
+                  )}{" "}
+                  {moneyOut.lessThan(lastOut) ? "less" : "more"} than{" "}
+                  {formatMonth(shiftMonth(month, -1))}. Transfers between your
+                  own accounts aren’t counted.
+                </Text>
+              )}
+            />
           )}
           {bars.length > 0 ? (
             <CategoryBars rows={bars} />
@@ -496,7 +612,8 @@ export function SpendingSheet({
           )}
           {!!summary?.unconverted.length && (
             <Text style={styles.muted}>
-              Not included, no exchange rate yet: {summary.unconverted.join(", ")}.
+              Not included, no exchange rate yet:{" "}
+              {summary.unconverted.join(", ")}.
             </Text>
           )}
         </>

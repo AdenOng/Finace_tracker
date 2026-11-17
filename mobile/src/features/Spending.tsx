@@ -1,3 +1,4 @@
+import { SensitiveValue } from "../components/AmountPrivacy";
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 import { usePreventRemove } from "@react-navigation/native";
@@ -255,9 +256,14 @@ export function TransactionDetail({
       {t && (
         <Card>
           <Text style={styles.title}>{t.description}</Text>
-          <Text style={styles.figure}>
-            {money(t.amount, t.currency, { hidden, signed: true })}
-          </Text>
+          <SensitiveValue
+            hidden={hidden}
+            render={(hidden) => (
+              <Text style={styles.figure}>
+                {money(t.amount, t.currency, { hidden, signed: true })}
+              </Text>
+            )}
+          />
           <Text style={styles.text}>
             {t.postedDate} · {t.accountName}
           </Text>

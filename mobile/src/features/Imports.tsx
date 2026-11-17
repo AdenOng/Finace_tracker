@@ -1,3 +1,4 @@
+import { SensitiveValue } from "../components/AmountPrivacy";
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -47,9 +48,17 @@ export function Imports({
 }: NativeStackScreenProps<MoreStack, "Imports">) {
   const { origin, auth, expireSession } = useFinfolio();
   const accounts = api.accounts.list.useQuery();
-  const jobs = api.imports.list.useQuery(undefined, {
-    refetchInterval: (q) => (q.state.data?.some(reading) ? 2500 : false),
+  const jobs = api.imports.list.useInfiniteQuery({}, {
+    getNextPageParam: (last) => {
+      const job = last.at(-1);
+      return last.length === 100 && job
+        ? { id: job.id, createdAt: job.cursorCreatedAt }
+        : undefined;
+    },
+    refetchInterval: (q) =>
+      q.state.data?.pages.some((page) => page.some(reading)) ? 2500 : false,
   });
+  const rows = jobs.data?.pages.flat() ?? [];
   const availability = api.imports.availability.useQuery(undefined, {
     staleTime: 30_000,
     retry: false,
@@ -92,58 +101,66 @@ export function Imports({
         "Upload was interrupted. Refresh Imports before retrying; the server may have received the file.",
       );
       let dropped = false;
-      const send = () => new Promise<string>((resolve, reject) => {
-        dropped = false;
-        const xhr = new XMLHttpRequest();
-        upload.current = xhr;
-        xhr.open("POST", origin + "/api/imports");
-        xhr.withCredentials = false;
-        xhr.setRequestHeader("Cookie", cookie);
-        xhr.timeout = 120_000;
-        xhr.upload.onprogress = (e) =>
-          setProgress(
-            e.lengthComputable ? Math.round((e.loaded / e.total) * 100) : null,
-          );
-        xhr.onerror = () => {
-          dropped = true;
-          reject(interrupted);
-        };
-        xhr.ontimeout = () => reject(interrupted);
-        xhr.onabort = () =>
-          reject(
-            new Error(
-              "Upload cancelled. Refresh Imports to check whether the server received the file.",
-            ),
-          );
-        xhr.onload = () => {
-          if (xhr.status === 401) {
-            expireSession();
-            reject(new Error("Your session ended. Sign in again before uploading."));
-            return;
-          }
-          try {
-            const result = JSON.parse(xhr.responseText) as {
-              jobId?: string;
-              error?: string;
-            };
-            if ((xhr.status === 202 || xhr.status === 409) && result.jobId)
-              resolve(result.jobId);
-            else
-              reject(
-                new Error(
-                  result.error ?? "Upload failed. Refresh Imports before trying again.",
-                ),
-              );
-          } catch {
+      const send = () =>
+        new Promise<string>((resolve, reject) => {
+          dropped = false;
+          const xhr = new XMLHttpRequest();
+          upload.current = xhr;
+          xhr.open("POST", origin + "/api/imports");
+          xhr.withCredentials = false;
+          xhr.setRequestHeader("Cookie", cookie);
+          xhr.timeout = 120_000;
+          xhr.upload.onprogress = (e) =>
+            setProgress(
+              e.lengthComputable
+                ? Math.round((e.loaded / e.total) * 100)
+                : null,
+            );
+          xhr.onerror = () => {
+            dropped = true;
+            reject(interrupted);
+          };
+          xhr.ontimeout = () => reject(interrupted);
+          xhr.onabort = () =>
             reject(
               new Error(
-                "The server returned an unexpected upload response. Refresh Imports before retrying.",
+                "Upload cancelled. Refresh Imports to check whether the server received the file.",
               ),
             );
-          }
-        };
-        xhr.send(form);
-      });
+          xhr.onload = () => {
+            if (xhr.status === 401) {
+              expireSession();
+              reject(
+                new Error(
+                  "Your session ended. Sign in again before uploading.",
+                ),
+              );
+              return;
+            }
+            try {
+              const result = JSON.parse(xhr.responseText) as {
+                jobId?: string;
+                error?: string;
+              };
+              if ((xhr.status === 202 || xhr.status === 409) && result.jobId)
+                resolve(result.jobId);
+              else
+                reject(
+                  new Error(
+                    result.error ??
+                      "Upload failed. Refresh Imports before trying again.",
+                  ),
+                );
+            } catch {
+              reject(
+                new Error(
+                  "The server returned an unexpected upload response. Refresh Imports before retrying.",
+                ),
+              );
+            }
+          };
+          xhr.send(form);
+        });
       // Android cuts a backgrounded app's connections while the file picker is open, so the
       // first request can go out on a dead socket. The server answers a re-sent file with the
       // original job (409), so one retry after a dropped connection cannot import it twice.
@@ -169,7 +186,7 @@ export function Imports({
   }
   return (
     <ListPage
-      data={jobs.data ?? []}
+      data={rows}
       refreshing={jobs.isRefetching}
       refresh={() => {
         void jobs.refetch();
@@ -264,7 +281,7 @@ export function Imports({
             error={jobs.error}
             retry={() => void jobs.refetch()}
           />
-          {jobs.data?.length === 0 && (
+          {!jobs.isPending && !jobs.error && rows.length === 0 && (
             <EmptyState
               title="No imports yet"
               detail="Choose an account and a statement to begin."
@@ -288,6 +305,16 @@ export function Imports({
           />
         </Card>
       )}
+      footer={
+        jobs.hasNextPage ? (
+          <Button
+            title={jobs.isFetchingNextPage ? "Loading…" : "Load older imports"}
+            variant="secondary"
+            disabled={jobs.isFetchingNextPage}
+            onPress={() => void jobs.fetchNextPage()}
+          />
+        ) : undefined
+      }
     />
   );
 }
@@ -425,13 +452,20 @@ export function ImportReview({
           {check.complete && (
             <Section title="Statement balance check">
               {check.currencies.map((c) => (
-                <Text key={c.currency} style={styles.text}>
-                  {c.currency}: opening{" "}
-                  {money(c.openingBalance, c.currency, { hidden })} +
-                  kept/recorded {money(c.saved.total, c.currency, { hidden })} =
-                  closing {money(c.closingBalance, c.currency, { hidden })}
-                  {c.saved.balances === false ? " · does not balance" : ""}
-                </Text>
+                <SensitiveValue
+                  key={c.currency}
+                  hidden={hidden}
+                  render={(hidden) => (
+                    <Text style={styles.text}>
+                      {c.currency}: opening{" "}
+                      {money(c.openingBalance, c.currency, { hidden })} +
+                      kept/recorded{" "}
+                      {money(c.saved.total, c.currency, { hidden })} = closing{" "}
+                      {money(c.closingBalance, c.currency, { hidden })}
+                      {c.saved.balances === false ? " · does not balance" : ""}
+                    </Text>
+                  )}
+                />
               ))}
               {check.requiresAcknowledgment && (
                 <Notice tone="warn">
@@ -610,29 +644,36 @@ function ReviewRow({
   const [editing, setEditing] = useState(false);
   const d = row.data;
   let description: string;
-  let detail: string;
+  let detail: (hidden: boolean) => string;
   switch (row.kind) {
     case "transaction":
       description = row.data.description;
-      detail = `${row.data.postedDate} · ${money(row.data.amount, row.data.currency, { hidden, signed: true })}`;
+      detail = (hidden) =>
+        `${row.data.postedDate} · ${money(row.data.amount, row.data.currency, { hidden, signed: true })}`;
       break;
     case "position":
       description = row.data.name ?? row.data.symbol;
-      detail = `${row.data.symbol} · ${hidden ? "••••" : row.data.quantity} units · price ${money(row.data.price, row.data.currency, { hidden })} · cost ${money(row.data.averageCost, row.data.currency, { hidden })}`;
+      detail = (hidden) =>
+        `${row.data.symbol} · ${hidden ? "••••" : row.data.quantity} units · price ${money(row.data.price, row.data.currency, { hidden })} · cost ${money(row.data.averageCost, row.data.currency, { hidden })}`;
       break;
     case "cash_balance":
       description = `Cash balance${row.data.bucket ? " · " + row.data.bucket : ""}`;
-      detail = money(row.data.amount, row.data.currency, { hidden });
+      detail = (hidden) =>
+        money(row.data.amount, row.data.currency, { hidden });
       break;
     case "investment_transaction":
       description = row.data.description ?? row.data.type;
-      detail = `${row.data.tradeDate} · ${row.data.symbol ?? row.data.type} · ${money(row.data.amount, row.data.currency, { hidden, signed: true })}`;
+      detail = (hidden) =>
+        `${row.data.tradeDate} · ${row.data.symbol ?? row.data.type} · ${money(row.data.amount, row.data.currency, { hidden, signed: true })}`;
       break;
   }
   return (
     <Card>
       <Text style={styles.strong}>{description}</Text>
-      <Text style={styles.text}>{detail}</Text>
+      <SensitiveValue
+        hidden={hidden}
+        render={(hidden) => <Text style={styles.text}>{detail(hidden)}</Text>}
+      />
       {row.kind === "transaction" && (
         <Text style={styles.muted}>
           {categories.find((c) => c.id === row.data.categoryId)?.name ??
@@ -643,18 +684,28 @@ function ReviewRow({
         </Text>
       )}
       {row.kind === "position" && (
-        <Text style={styles.muted}>
-          {row.data.exchange || "Exchange unspecified"} · value{" "}
-          {money(row.data.value, row.data.currency, { hidden })}
-        </Text>
+        <SensitiveValue
+          hidden={hidden}
+          render={(hidden) => (
+            <Text style={styles.muted}>
+              {row.data.exchange || "Exchange unspecified"} · value{" "}
+              {money(row.data.value, row.data.currency, { hidden })}
+            </Text>
+          )}
+        />
       )}
       {row.kind === "investment_transaction" && (
-        <Text style={styles.muted}>
-          Quantity {hidden ? "••••" : (row.data.quantity ?? "—")} · price{" "}
-          {money(row.data.price, row.data.currency, { hidden })} · fees{" "}
-          {money(row.data.fees, row.data.currency, { hidden })}
-          {row.data.settleDate ? " · settles " + row.data.settleDate : ""}
-        </Text>
+        <SensitiveValue
+          hidden={hidden}
+          render={(hidden) => (
+            <Text style={styles.muted}>
+              Quantity {hidden ? "••••" : (row.data.quantity ?? "—")} · price{" "}
+              {money(row.data.price, row.data.currency, { hidden })} · fees{" "}
+              {money(row.data.fees, row.data.currency, { hidden })}
+              {row.data.settleDate ? " · settles " + row.data.settleDate : ""}
+            </Text>
+          )}
+        />
       )}
       <Text style={styles.muted}>
         {row.removed
@@ -664,16 +715,23 @@ function ReviewRow({
             : `${row.matchStatus.replaceAll("_", " ")} · ${row.decision === "accept" ? "Keep" : row.decision === "skip" ? "Skip" : "Decision needed"}`}
       </Text>
       {row.kind === "transaction" && row.data.signMismatch && (
-        <Notice tone="warn">
-          Printed {row.data.printedDirection ?? "direction"}:{" "}
-          {money(row.data.printedAmount, row.data.currency, { hidden })}.
-          Suggested amount:{" "}
-          {money(row.data.suggestedAmount, row.data.currency, {
-            hidden,
-            signed: true,
-          })}
-          . Edit or confirm the signed amount.
-        </Notice>
+        <SensitiveValue
+          hidden={hidden}
+          render={(hidden) =>
+            row.kind === "transaction" ? (
+              <Notice tone="warn">
+                Printed {row.data.printedDirection ?? "direction"}:{" "}
+                {money(row.data.printedAmount, row.data.currency, { hidden })}.
+                Suggested amount:{" "}
+                {money(row.data.suggestedAmount, row.data.currency, {
+                  hidden,
+                  signed: true,
+                })}
+                . Edit or confirm the signed amount.
+              </Notice>
+            ) : null
+          }
+        />
       )}
       {editable && !row.committedRecordId && (
         <>

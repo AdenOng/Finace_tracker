@@ -937,7 +937,7 @@ export function FigureGrid({
 }: {
   items: {
     label: string;
-    value: string;
+    value: React.ReactNode;
     note?: string;
     tone?: "gain" | "loss";
     onPress?: () => void;
@@ -955,17 +955,23 @@ export function FigureGrid({
         const body = (
           <>
             <Eyebrow>{item.label}</Eyebrow>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              style={[
-                styles.poster,
-                { fontSize: 20, lineHeight: 25, marginTop: 4 },
-                item.tone && { color: colors[item.tone] },
-              ]}
-            >
-              {item.value}
-            </Text>
+            <View style={{ marginTop: 4 }}>
+              {typeof item.value === "string" ? (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  style={[
+                    styles.poster,
+                    { fontSize: 20, lineHeight: 25 },
+                    item.tone && { color: colors[item.tone] },
+                  ]}
+                >
+                  {item.value}
+                </Text>
+              ) : (
+                item.value
+              )}
+            </View>
             {item.note && (
               <Text numberOfLines={2} style={styles.muted}>
                 {item.note}
@@ -985,7 +991,7 @@ export function FigureGrid({
           <Pressable
             key={item.label}
             accessibilityRole="button"
-            accessibilityLabel={`${item.label}: ${item.value}`}
+            accessibilityLabel={item.label}
             onPress={item.onPress}
             style={({ pressed }) => [
               style,

@@ -1,4 +1,4 @@
-import Decimal from "decimal.js";
+import DecimalJs from "decimal.js";
 
 import type { AccountType } from "~/lib/accounts";
 import type { Holdings } from "./holdings";
@@ -8,6 +8,9 @@ import {
   multiply,
   sumByCurrency,
 } from "./valuation";
+
+// Keep all 28 quantity digits, with headroom for sums and valuation arithmetic.
+const Decimal = DecimalJs.clone({ precision: 60 });
 
 export type PortfolioBroker = {
   id: string;

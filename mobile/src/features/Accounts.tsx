@@ -1,3 +1,4 @@
+import { SensitiveValue } from "../components/AmountPrivacy";
 import React, { useCallback, useState } from "react";
 import { BackHandler, Linking, Text, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
@@ -142,7 +143,12 @@ export function Accounts({
                         paddingVertical: 18,
                       }}
                     >
-                      <Text style={[styles.muted, { fontSize: 13, color: colors.ink2 }]}>
+                      <Text
+                        style={[
+                          styles.muted,
+                          { fontSize: 13, color: colors.ink2 },
+                        ]}
+                      >
                         {g.empty}
                       </Text>
                     </View>
@@ -159,15 +165,18 @@ export function Accounts({
                           }
                         >
                           <AccountRow
+                            hidden={hidden}
                             name={a.name}
                             last4={a.last4}
                             institution={a.institutionName}
                             type={a.type}
                             asOf={a.asOf}
                             amounts={a.totals.map((t) =>
-                              money(t.amount, t.currency, { hidden }),
+                              money(t.amount, t.currency, { hidden: false }),
                             )}
-                            negative={a.totals.some((t) => isNegative(t.amount))}
+                            negative={a.totals.some((t) =>
+                              isNegative(t.amount),
+                            )}
                             warning={
                               a.unpriced > 0
                                 ? `${a.unpriced} unpriced`
@@ -280,10 +289,15 @@ export function AccountDetail({
                   <Text style={styles.muted}>Nothing held.</Text>
                 ) : (
                   h.totals.map((t) => (
-                    <HeroFigure
+                    <SensitiveValue
                       key={t.currency}
-                      size={h.totals.length > 1 ? 34 : 44}
-                      value={money(t.amount, t.currency, { hidden })}
+                      hidden={hidden}
+                      render={(hidden) => (
+                        <HeroFigure
+                          size={h.totals.length > 1 ? 34 : 44}
+                          value={money(t.amount, t.currency, { hidden })}
+                        />
+                      )}
                     />
                   ))
                 )}
@@ -327,7 +341,10 @@ export function AccountDetail({
                     style={[
                       styles.row,
                       { paddingVertical: 11, alignItems: "flex-start" },
-                      i > 0 && { borderTopWidth: 1, borderTopColor: colors.line },
+                      i > 0 && {
+                        borderTopWidth: 1,
+                        borderTopColor: colors.line,
+                      },
                     ]}
                   >
                     <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -344,14 +361,34 @@ export function AccountDetail({
                       </Text>
                     </View>
                     <View style={{ alignItems: "flex-end", gap: 2 }}>
-                      <Text style={[styles.figure, { fontSize: 13 }]}>
-                        {p.value
-                          ? money(p.value.amount, p.value.currency, { hidden })
-                          : "No price"}
-                      </Text>
-                      <Text style={[styles.muted, { fontFamily: styles.figure.fontFamily }]}>
-                        {hidden ? "••••" : new Decimal(p.quantity).toFixed()} units
-                      </Text>
+                      <SensitiveValue
+                        hidden={hidden}
+                        render={(hidden) => (
+                          <Text style={[styles.figure, { fontSize: 13 }]}>
+                            {p.value
+                              ? money(p.value.amount, p.value.currency, {
+                                  hidden,
+                                })
+                              : "No price"}
+                          </Text>
+                        )}
+                      />
+                      <SensitiveValue
+                        hidden={hidden}
+                        render={(hidden) => (
+                          <Text
+                            style={[
+                              styles.muted,
+                              { fontFamily: styles.figure.fontFamily },
+                            ]}
+                          >
+                            {hidden
+                              ? "••••"
+                              : new Decimal(p.quantity).toFixed()}{" "}
+                            units
+                          </Text>
+                        )}
+                      />
                     </View>
                   </View>
                 ))}
@@ -367,15 +404,24 @@ export function AccountDetail({
                     style={[
                       styles.row,
                       { minHeight: 40 },
-                      i > 0 && { borderTopWidth: 1, borderTopColor: colors.line },
+                      i > 0 && {
+                        borderTopWidth: 1,
+                        borderTopColor: colors.line,
+                      },
                     ]}
                   >
                     <Text style={[styles.text, { color: colors.ink2 }]}>
                       {c.currency}
                     </Text>
-                    <Text style={styles.figure}>
-                      {money(c.amount, c.currency, { hidden })}
-                    </Text>
+                    <SensitiveValue
+                      key={c.currency}
+                      hidden={hidden}
+                      render={(hidden) => (
+                        <Text style={styles.figure}>
+                          {money(c.amount, c.currency, { hidden })}
+                        </Text>
+                      )}
+                    />
                   </View>
                 ))}
               </View>

@@ -44,12 +44,21 @@ export function ImportsView({
   } | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const jobs = api.imports.list.useQuery(undefined, {
+  const jobs = api.imports.list.useInfiniteQuery({}, {
+    getNextPageParam: (last) => {
+      const job = last.at(-1);
+      return last.length === 100 && job
+        ? { id: job.id, createdAt: job.cursorCreatedAt }
+        : undefined;
+    },
     refetchInterval: (query) =>
-      query.state.data?.some((j) => isReading(j.status, j.stale))
+      query.state.data?.pages.some((page) =>
+        page.some((j) => isReading(j.status, j.stale)),
+      )
         ? 3000
         : false,
   });
+  const rows = jobs.data?.pages.flat() ?? [];
   const account = open.find((a) => a.id === accountId);
   const group = account ? accountGroupOf(account.type) : null;
 
@@ -258,13 +267,14 @@ export function ImportsView({
         title={t.imports.importsView.recentImports}
         description={t.imports.importsView.openOneToCheckWhat}
       >
-        {(jobs.data ?? []).length === 0 ? (
+        {jobs.error ? <Notice tone="error">{jobs.error.message}</Notice> : null}
+        {rows.length === 0 ? (
           <p className="text-ink-2 text-sm">
             {t.imports.importsView.nothingUploadedYet}
           </p>
         ) : (
           <ul className="-mx-2">
-            {jobs.data!.map((j) => (
+            {rows.map((j) => (
               <li key={j.id}>
                 <Link
                   href={`/imports/${j.id}`}
@@ -306,6 +316,16 @@ export function ImportsView({
             ))}
           </ul>
         )}
+        {jobs.hasNextPage ? (
+          <Button
+            variant="ghost"
+            className="mt-3"
+            loading={jobs.isFetchingNextPage}
+            onClick={() => void jobs.fetchNextPage()}
+          >
+            {t.imports.importsView.loadOlderImports}
+          </Button>
+        ) : null}
       </Section>
     </div>
   );

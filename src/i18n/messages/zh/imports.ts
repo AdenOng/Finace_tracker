@@ -182,6 +182,7 @@ const imports: Translation<typeof en> = {
       "上传会将对账单文本或图片发送给此实例配置的 AI 服务商，必要时也会发送给备用服务商。请仅上传你同意与这些服务商共享的文档。",
     openIt: "打开查看",
     recentImports: "最近导入",
+    loadOlderImports: "加载更早导入",
     openOneToCheckWhat: "打开导入任务，审核提取结果后再保存。",
     nothingUploadedYet: "暂无上传文件。",
     removedAccount: "已移除账户",

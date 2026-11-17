@@ -20,6 +20,8 @@ import {
   WallText,
 } from "./screens";
 
+import { AmountPrivacy } from "../components/AmountPrivacy";
+
 const INVITE_ONLY = "Invite only. Ask whoever runs this Finfolio for a link.";
 const Context = createContext<{
   origin: string;
@@ -53,7 +55,9 @@ export function Provider({ children }: React.PropsWithChildren) {
   }, []);
   async function connect() {
     if (!input.trim()) {
-      setError("Enter your Finfolio address, such as https://finance.example.com.");
+      setError(
+        "Enter your Finfolio address, such as https://finance.example.com.",
+      );
       return;
     }
     setBusy(true);
@@ -144,7 +148,12 @@ function ServerSession({
 }>) {
   const auth = bundle.client;
   const session = auth.useSession();
-  const [hidden, setHidden] = useState(false);
+  const [hidden, updateHidden] = useState(false);
+  const [privacyRevision, setPrivacyRevision] = useState(0);
+  const setHidden = (value: boolean) => {
+    updateHidden(value);
+    setPrivacyRevision((revision) => revision + 1);
+  };
   const [expired, setExpired] = useState(false);
   // A deliberate sign-out also clears the session, but shouldn't read as "your session ended".
   const [signedOut, setSignedOut] = useState(false);
@@ -171,50 +180,52 @@ function ServerSession({
     }
   }
   return (
-    <Context.Provider
-      value={{
-        origin,
-        auth,
-        user: {
-          name: session.data?.user.name ?? "",
-          email: session.data?.user.email ?? "",
-        },
-        hidden,
-        setHidden,
-        logout,
-        expireSession: () => setExpired(true),
-        switchServer: async () => {
-          await logout();
-          await disconnect();
-        },
-      }}
-    >
-      <SessionGate
-        pending={session.isPending}
-        authenticated={!!session.data && !expired}
-        loading={<AuthSplash message="Checking your session…" />}
-        signIn={
-          <SignIn
-            onSignedIn={() => {
-              setExpired(false);
-              setSignedOut(false);
-            }}
-            expired={expired && !signedOut}
-          />
-        }
+    <AmountPrivacy.Provider value={privacyRevision}>
+      <Context.Provider
+        value={{
+          origin,
+          auth,
+          user: {
+            name: session.data?.user.name ?? "",
+            email: session.data?.user.email ?? "",
+          },
+          hidden,
+          setHidden,
+          logout,
+          expireSession: () => setExpired(true),
+          switchServer: async () => {
+            await logout();
+            await disconnect();
+          },
+        }}
       >
-        {session.data && (
-          <FinanceProvider
-            key={session.data.user.id}
-            origin={origin}
-            auth={auth}
-            onUnauthorized={() => setExpired(true)}
-          >
-            {children}
-          </FinanceProvider>
-        )}
-      </SessionGate>
-    </Context.Provider>
+        <SessionGate
+          pending={session.isPending}
+          authenticated={!!session.data && !expired}
+          loading={<AuthSplash message="Checking your session…" />}
+          signIn={
+            <SignIn
+              onSignedIn={() => {
+                setExpired(false);
+                setSignedOut(false);
+              }}
+              expired={expired && !signedOut}
+            />
+          }
+        >
+          {session.data && (
+            <FinanceProvider
+              key={session.data.user.id}
+              origin={origin}
+              auth={auth}
+              onUnauthorized={() => setExpired(true)}
+            >
+              {children}
+            </FinanceProvider>
+          )}
+        </SessionGate>
+      </Context.Provider>
+    </AmountPrivacy.Provider>
   );
 }
 function SignIn({

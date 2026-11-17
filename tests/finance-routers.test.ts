@@ -1778,6 +1778,21 @@ describe("spending", () => {
 });
 
 describe("valuation", () => {
+  test("preserves four decimal places when large balances cancel", () => {
+    const amounts = [
+      { amount: "9999999999999999.9999", currency: "SGD" },
+      { amount: "9999999999999999.9999", currency: "SGD" },
+      { amount: "-9999999999999999.9999", currency: "SGD" },
+    ];
+    expect(sumByCurrency(amounts)).toEqual([
+      { amount: "9999999999999999.9999", currency: "SGD" },
+    ]);
+    expect(convertAmounts(amounts, "SGD", new Map())).toEqual({
+      total: "9999999999999999.9999",
+      unconverted: [],
+    });
+  });
+
   test("prefers a live quote, then the statement value, then quantity × price", () => {
     const base = {
       quantity: "2",
@@ -3083,6 +3098,36 @@ const consolidatedStock = {
 };
 
 describe("consolidated portfolio", () => {
+  test("preserves all ten fractional quantity digits when summing large holdings", async () => {
+    const a = await alice.accounts.create({ ...broker, name: "Large holding" });
+    const b = await alice.accounts.create({
+      ...broker,
+      name: "Fractional holding",
+    });
+    for (const [accountId, quantity] of [
+      [a.id, "123456789012345678.1234567890"],
+      [b.id, "0.0000000001"],
+    ] as const) {
+      await alice.portfolio.recordSnapshot({
+        accountId,
+        asOf: "2026-10-19",
+        positions: [
+          {
+            ...consolidatedStock,
+            quantity,
+            price: null,
+            averageCost: null,
+          },
+        ],
+        cash: [],
+      });
+    }
+    const result = await alice.portfolio.consolidated();
+    expect(result.positions).toHaveLength(1);
+    expect(result.positions[0]!.quantity).toBe("123456789012345678.1234567891");
+    expect(result.positions[0]!.brokers).toHaveLength(2);
+  });
+
   test("combines exact fractional quantities across active owned brokers, retains exchange identity and uses only current entries", async () => {
     const a = await alice.accounts.create({ ...broker, name: "Broker A" });
     const b = await alice.accounts.create({ ...broker, name: "Broker B" });

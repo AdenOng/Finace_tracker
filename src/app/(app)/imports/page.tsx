@@ -20,7 +20,7 @@ export default async function ImportsPage({
   await requireEnrolledSession();
   const { account } = await searchParams;
   void api.accounts.list.prefetch();
-  void api.imports.list.prefetch();
+  void api.imports.list.prefetchInfinite({});
   return (
     <HydrateClient>
       <PageHeader

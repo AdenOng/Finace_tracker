@@ -190,6 +190,7 @@ const imports = {
       "Uploading sends statement text or images to this instance's configured AI provider, including its fallback if needed. Only upload documents you agree to share with those providers.",
     openIt: "Open it",
     recentImports: "Recent imports",
+    loadOlderImports: "Load older imports",
     openOneToCheckWhat: "Open one to check what was read before it's saved.",
     nothingUploadedYet: "Nothing uploaded yet.",
     removedAccount: "Removed account",

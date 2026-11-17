@@ -24,7 +24,7 @@ import {
   type RecordedTransaction,
 } from "~/lib/import-balance-check";
 import { categoryKind } from "~/lib/transaction-classification";
-import { isoDateInput, moneyInput } from "~/server/api/inputs";
+import { isoDateInput, moneyInput, pgTimestampText } from "~/server/api/inputs";
 import {
   createTRPCRouter,
   expensiveProcedure,
@@ -168,22 +168,38 @@ export const importsRouter = createTRPCRouter({
     }
   }),
 
-  list: protectedProcedure.query(async ({ ctx }) => {
-    const jobs = await ctx.db
-      .select({
-        ...jobColumns,
-        rows: sql<number>`(select count(*)::int from ${stagedRow} where ${stagedRow.jobId} = ${extractionJob.id})`,
-        accepted: sql<number>`(select count(*)::int from ${stagedRow} where ${stagedRow.jobId} = ${extractionJob.id} and ${stagedRow.decision} = 'accept')`,
-      })
-      .from(extractionJob)
-      .innerJoin(document, eq(document.id, extractionJob.documentId))
-      .leftJoin(financialAccount, eq(financialAccount.id, document.accountId))
-      .leftJoin(institution, eq(institution.id, financialAccount.institutionId))
-      .where(writableBy(ctx.scope, extractionJob.ownerId))
-      .orderBy(desc(extractionJob.createdAt))
-      .limit(100);
-    return jobs.map((j) => ({ ...j, stale: isStaleJob(j) }));
-  }),
+  list: protectedProcedure
+    .input(
+      z
+        .object({
+          cursor: z.object({ createdAt: pgTimestampText, id: z.uuid() }).nullish(),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const jobs = await ctx.db
+        .select({
+          ...jobColumns,
+          cursorCreatedAt: sql<string>`${extractionJob.createdAt}::text`,
+          rows: sql<number>`(select count(*)::int from ${stagedRow} where ${stagedRow.jobId} = ${extractionJob.id})`,
+          accepted: sql<number>`(select count(*)::int from ${stagedRow} where ${stagedRow.jobId} = ${extractionJob.id} and ${stagedRow.decision} = 'accept')`,
+        })
+        .from(extractionJob)
+        .innerJoin(document, eq(document.id, extractionJob.documentId))
+        .leftJoin(financialAccount, eq(financialAccount.id, document.accountId))
+        .leftJoin(institution, eq(institution.id, financialAccount.institutionId))
+        .where(
+          and(
+            writableBy(ctx.scope, extractionJob.ownerId),
+            input?.cursor
+              ? sql`(${extractionJob.createdAt}, ${extractionJob.id}) < (${input.cursor.createdAt}::timestamptz, ${input.cursor.id}::uuid)`
+              : undefined,
+          ),
+        )
+        .orderBy(desc(extractionJob.createdAt), desc(extractionJob.id))
+        .limit(100);
+      return jobs.map((j) => ({ ...j, stale: isStaleJob(j) }));
+    }),
 
   get: protectedProcedure
     .input(z.object({ id: z.uuid() }))

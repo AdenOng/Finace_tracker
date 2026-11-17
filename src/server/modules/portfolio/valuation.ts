@@ -1,4 +1,7 @@
-import Decimal from "decimal.js";
+import DecimalJs from "decimal.js";
+
+// A 28-digit quantity × a 24-digit price needs 52 digits; leave headroom for sums.
+const Decimal = DecimalJs.clone({ precision: 60 });
 
 /**
  * Pure valuation helpers. Every amount stays a decimal string in its own currency; conversion to
@@ -9,7 +12,7 @@ import Decimal from "decimal.js";
 export type Amount = { amount: string; currency: string };
 
 /** Money columns hold four decimal places. */
-const toMoney = (value: Decimal) => value.toDecimalPlaces(4).toFixed();
+const toMoney = (value: DecimalJs) => value.toDecimalPlaces(4).toFixed();
 
 export function valuePosition(input: {
   quantity: string;
@@ -68,7 +71,7 @@ export function multiply(a: string, b: string) {
 
 /** Sums amounts per currency, ordered by currency code. */
 export function sumByCurrency(amounts: Amount[]): Amount[] {
-  const totals = new Map<string, Decimal>();
+  const totals = new Map<string, DecimalJs>();
   for (const { amount, currency } of amounts) {
     totals.set(currency, (totals.get(currency) ?? new Decimal(0)).plus(amount));
   }
@@ -86,7 +89,7 @@ export function convertAmounts(
   target: string,
   rates: ReadonlyMap<string, string>,
 ): { total: string | null; unconverted: Amount[] } {
-  let total: Decimal | null = null;
+  let total: DecimalJs | null = null;
   const unconverted: Amount[] = [];
   for (const { amount, currency } of sumByCurrency(amounts)) {
     if (new Decimal(amount).isZero()) {
@@ -110,7 +113,7 @@ export function ratesFromRows(
   rows: { date: string; base: string; quote: string; rate: string }[],
   target: string,
 ): Map<string, string> {
-  const best = new Map<string, { date: string; rate: Decimal }>();
+  const best = new Map<string, { date: string; rate: DecimalJs }>();
   for (const row of rows) {
     const direct = row.quote === target;
     if (!direct && row.base !== target) continue;

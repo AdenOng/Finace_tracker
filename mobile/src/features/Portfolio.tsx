@@ -1,3 +1,4 @@
+import { SensitiveValue } from "../components/AmountPrivacy";
 import React, { useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
 import Decimal from "decimal.js";
@@ -40,9 +41,16 @@ export function Portfolio() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const d = q.data;
   const currency = d?.currency ?? "";
-  const money = (v: string | null | undefined, signed = false) =>
-    v === null || v === undefined ? "—" : format(v, currency, { hidden, signed });
-  const units = (v: string) => (hidden ? "••••" : new Decimal(v).toFixed());
+  const money = (
+    v: string | null | undefined,
+    signed = false,
+    mask = hidden,
+  ) =>
+    v === null || v === undefined
+      ? "—"
+      : format(v, currency, { hidden: mask, signed });
+  const units = (v: string, mask = hidden) =>
+    mask ? "••••" : new Decimal(v).toFixed();
 
   // Allocation by asset class, shown only when every holding is valued (as on the web).
   const slices: Slice[] = (() => {
@@ -102,14 +110,26 @@ export function Portfolio() {
                   {d.oldestEntry ? "Not valued" : "Not recorded"}
                 </Text>
               ) : (
-                <HeroFigure value={money(d.total)} />
+                <SensitiveValue
+                  hidden={hidden}
+                  render={(hidden) => (
+                    <HeroFigure value={money(d.total, false, hidden)} />
+                  )}
+                />
               )}
-              <Text style={[styles.subtitle, { fontSize: 14, lineHeight: 20 }]}>
-                {`${d.positions.length} holding${d.positions.length === 1 ? "" : "s"} across ${d.selectedBrokerCount} account${d.selectedBrokerCount === 1 ? "" : "s"}${d.newestEntry ? `, up to ${formatDate(d.newestEntry)}` : ""}.`}
-                {d.srs?.total && !new Decimal(d.srs.total).isZero()
-                  ? ` Includes ${money(d.srs.total)} in SRS.`
-                  : ""}
-              </Text>
+              <SensitiveValue
+                hidden={hidden}
+                render={(hidden) => (
+                  <Text
+                    style={[styles.subtitle, { fontSize: 14, lineHeight: 20 }]}
+                  >
+                    {`${d.positions.length} holding${d.positions.length === 1 ? "" : "s"} across ${d.selectedBrokerCount} account${d.selectedBrokerCount === 1 ? "" : "s"}${d.newestEntry ? `, up to ${formatDate(d.newestEntry)}` : ""}.`}
+                    {d.srs?.total && !new Decimal(d.srs.total).isZero()
+                      ? ` Includes ${money(d.srs.total, false, hidden)} in SRS.`
+                      : ""}
+                  </Text>
+                )}
+              />
               {unrecorded.length > 0 && (
                 <Text style={styles.muted}>
                   Nothing recorded yet for{" "}
@@ -124,15 +144,63 @@ export function Portfolio() {
             </View>
             <FigureGrid
               items={[
-                { label: "Holdings", value: money(d.securities.total) },
-                { label: "Broker cash", value: money(d.cash.total) },
+                {
+                  label: "Holdings",
+                  value: (
+                    <SensitiveValue
+                      hidden={hidden}
+                      render={(hidden) => (
+                        <Text
+                          style={[
+                            styles.poster,
+                            { fontSize: 20, lineHeight: 25 },
+                          ]}
+                        >
+                          {money(d.securities.total, false, hidden)}
+                        </Text>
+                      )}
+                    />
+                  ),
+                },
+                {
+                  label: "Broker cash",
+                  value: (
+                    <SensitiveValue
+                      hidden={hidden}
+                      render={(hidden) => (
+                        <Text
+                          style={[
+                            styles.poster,
+                            { fontSize: 20, lineHeight: 25 },
+                          ]}
+                        >
+                          {money(d.cash.total, false, hidden)}
+                        </Text>
+                      )}
+                    />
+                  ),
+                },
               ]}
             />
             <FigureGrid
               items={[
                 {
                   label: "Unrealised gain",
-                  value: d.gain ? money(d.gain.amount, true) : "—",
+                  value: (
+                    <SensitiveValue
+                      hidden={hidden}
+                      render={(hidden) => (
+                        <Text
+                          style={[
+                            styles.poster,
+                            { fontSize: 20, lineHeight: 25 },
+                          ]}
+                        >
+                          {d.gain ? money(d.gain.amount, true, hidden) : "—"}
+                        </Text>
+                      )}
+                    />
+                  ),
                   tone: d.gain
                     ? new Decimal(d.gain.amount).isNegative()
                       ? "loss"
@@ -157,7 +225,9 @@ export function Portfolio() {
                 {d.unconverted.length > 0 && (
                   <Text style={[styles.text, { fontSize: 14 }]}>
                     Waiting for exchange rates:{" "}
-                    {[...new Set(d.unconverted.map((u) => u.currency))].join(", ")}
+                    {[...new Set(d.unconverted.map((u) => u.currency))].join(
+                      ", ",
+                    )}
                   </Text>
                 )}
               </View>
@@ -199,10 +269,26 @@ export function Portfolio() {
                   const open = expanded === p.securityId;
                   const partial = p.unpriced > 0 || p.unconverted.length > 0;
                   const body = (
-                    <View style={[styles.row, { alignItems: "flex-start", paddingVertical: 12 }]}>
+                    <View
+                      style={[
+                        styles.row,
+                        { alignItems: "flex-start", paddingVertical: 12 },
+                      ]}
+                    >
                       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                        <View style={[styles.row, { justifyContent: "flex-start", gap: 6 }]}>
-                          <Text numberOfLines={1} style={[styles.strong, { fontSize: 14, flexShrink: 1 }]}>
+                        <View
+                          style={[
+                            styles.row,
+                            { justifyContent: "flex-start", gap: 6 },
+                          ]}
+                        >
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.strong,
+                              { fontSize: 14, flexShrink: 1 },
+                            ]}
+                          >
                             {p.symbol}
                           </Text>
                           {p.inSrs && <Tag tone="outline">SRS</Tag>}
@@ -217,32 +303,64 @@ export function Portfolio() {
                             .filter(Boolean)
                             .join(" · ")}
                         </Text>
-                        <Text style={[styles.muted, { fontFamily: styles.figure.fontFamily }]}>
-                          {units(p.quantity)} units ·{" "}
-                          {hidden ? MASK : p.weight !== null ? `${p.weight}%` : "—"}
-                        </Text>
+                        <SensitiveValue
+                          hidden={hidden}
+                          render={(hidden) => (
+                            <Text
+                              style={[
+                                styles.muted,
+                                { fontFamily: styles.figure.fontFamily },
+                              ]}
+                            >
+                              {units(p.quantity, hidden)} units ·{" "}
+                              {hidden
+                                ? MASK
+                                : p.weight !== null
+                                  ? `${p.weight}%`
+                                  : "—"}
+                            </Text>
+                          )}
+                        />
                       </View>
                       <View style={{ alignItems: "flex-end", gap: 2 }}>
-                        <Text style={styles.figure}>{money(p.total)}</Text>
-                        {partial && <Text style={[styles.warn, { fontSize: 11 }]}>Partial</Text>}
-                        {p.gain && (
-                          <Text
-                            style={[
-                              styles.figure,
-                              {
-                                fontSize: 12,
-                                fontWeight: "500",
-                                color: new Decimal(p.gain.amount).isNegative()
-                                  ? colors.loss
-                                  : colors.gain,
-                              },
-                            ]}
-                          >
-                            {money(p.gain.amount, true)}
-                            {p.gain.percent !== null
-                              ? ` · ${hidden ? MASK : signedPercent(p.gain.percent)}`
-                              : ""}
+                        <SensitiveValue
+                          hidden={hidden}
+                          render={(hidden) => (
+                            <Text style={styles.figure}>
+                              {money(p.total, false, hidden)}
+                            </Text>
+                          )}
+                        />
+                        {partial && (
+                          <Text style={[styles.warn, { fontSize: 11 }]}>
+                            Partial
                           </Text>
+                        )}
+                        {p.gain && (
+                          <SensitiveValue
+                            hidden={hidden}
+                            render={(hidden) => (
+                              <Text
+                                style={[
+                                  styles.figure,
+                                  {
+                                    fontSize: 12,
+                                    fontWeight: "500",
+                                    color: new Decimal(
+                                      p.gain!.amount,
+                                    ).isNegative()
+                                      ? colors.loss
+                                      : colors.gain,
+                                  },
+                                ]}
+                              >
+                                {money(p.gain!.amount, true, hidden)}
+                                {p.gain!.percent !== null
+                                  ? ` · ${hidden ? MASK : signedPercent(p.gain!.percent)}`
+                                  : ""}
+                              </Text>
+                            )}
+                          />
                         )}
                       </View>
                       {several && (
@@ -259,7 +377,12 @@ export function Portfolio() {
                   return (
                     <View
                       key={p.securityId}
-                      style={i > 0 && { borderTopWidth: 1, borderTopColor: colors.line }}
+                      style={
+                        i > 0 && {
+                          borderTopWidth: 1,
+                          borderTopColor: colors.line,
+                        }
+                      }
                     >
                       {several ? (
                         <Pressable
@@ -287,15 +410,40 @@ export function Portfolio() {
                           {p.brokers.map((b) => (
                             <View key={b.accountId} style={{ gap: 2 }}>
                               <View style={styles.row}>
-                                <Text numberOfLines={1} style={[styles.strong, { fontSize: 13, flex: 1 }]}>
+                                <Text
+                                  numberOfLines={1}
+                                  style={[
+                                    styles.strong,
+                                    { fontSize: 13, flex: 1 },
+                                  ]}
+                                >
                                   {b.accountName}
                                 </Text>
-                                <Text style={[styles.figure, { fontSize: 13 }]}>{money(b.total)}</Text>
+                                <SensitiveValue
+                                  hidden={hidden}
+                                  render={(hidden) => (
+                                    <Text
+                                      style={[styles.figure, { fontSize: 13 }]}
+                                    >
+                                      {money(b.total, false, hidden)}
+                                    </Text>
+                                  )}
+                                />
                               </View>
-                              <Text style={styles.muted}>
-                                {units(b.quantity)} units · as of {formatDate(b.asOf)} ·{" "}
-                                {b.source === "statement" ? "Imported" : b.source === "manual" ? "Manual" : "Synced"}
-                              </Text>
+                              <SensitiveValue
+                                hidden={hidden}
+                                render={(hidden) => (
+                                  <Text style={styles.muted}>
+                                    {units(b.quantity, hidden)} units · as of{" "}
+                                    {formatDate(b.asOf)} ·{" "}
+                                    {b.source === "statement"
+                                      ? "Imported"
+                                      : b.source === "manual"
+                                        ? "Manual"
+                                        : "Synced"}
+                                  </Text>
+                                )}
+                              />
                             </View>
                           ))}
                         </View>
@@ -316,16 +464,31 @@ export function Portfolio() {
                     style={[
                       styles.row,
                       { minHeight: 44 },
-                      i > 0 && { borderTopWidth: 1, borderTopColor: colors.line },
+                      i > 0 && {
+                        borderTopWidth: 1,
+                        borderTopColor: colors.line,
+                      },
                     ]}
                   >
                     <Text style={[styles.text, { color: colors.ink2 }]}>{c.currency}</Text>
                     <View style={{ alignItems: "flex-end" }}>
-                      <Text style={styles.figure}>
-                        {format(c.amount, c.currency, { hidden })}
-                      </Text>
+                      <SensitiveValue
+                        hidden={hidden}
+                        render={(hidden) => (
+                          <Text style={styles.figure}>
+                            {format(c.amount, c.currency, { hidden })}
+                          </Text>
+                        )}
+                      />
                       {c.currency !== currency && c.total !== null && (
-                        <Text style={styles.muted}>≈ {money(c.total)}</Text>
+                        <SensitiveValue
+                          hidden={hidden}
+                          render={(hidden) => (
+                            <Text style={styles.muted}>
+                              ≈ {money(c.total, false, hidden)}
+                            </Text>
+                          )}
+                        />
                       )}
                     </View>
                   </View>
@@ -355,7 +518,14 @@ export function Portfolio() {
                     </Text>
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
-                    <Text style={styles.figure}>{b.asOf ? money(b.total) : "—"}</Text>
+                    <SensitiveValue
+                      hidden={hidden}
+                      render={(hidden) => (
+                        <Text style={styles.figure}>
+                          {b.asOf ? money(b.total, false, hidden) : "—"}
+                        </Text>
+                      )}
+                    />
                     {b.unpriced > 0 && (
                       <Text style={[styles.warn, { fontSize: 11 }]}>Partial</Text>
                     )}

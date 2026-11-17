@@ -1,3 +1,4 @@
+import { SensitiveValue } from "./AmountPrivacy";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
@@ -143,6 +144,7 @@ export function AccountRow({
   type,
   asOf,
   amounts,
+  hidden = false,
   negative = false,
   warning,
   onPress,
@@ -154,6 +156,7 @@ export function AccountRow({
   asOf: string | null;
   /** Balance lines, one per currency. */
   amounts: string[];
+  hidden?: boolean;
   negative?: boolean;
   warning?: string;
   onPress?: () => void;
@@ -185,15 +188,20 @@ export function AccountRow({
         {!asOf || amounts.length === 0 ? (
           <Text style={[styles.muted, { fontSize: 13 }]}>Not recorded</Text>
         ) : (
-          amounts.map((a) => (
-            <Text
-              key={a}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              style={[styles.figure, negative && { color: colors.loss }]}
-            >
-              {a}
-            </Text>
+          amounts.map((a, i) => (
+            <SensitiveValue
+              key={i}
+              hidden={hidden}
+              render={(mask) => (
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  style={[styles.figure, negative && { color: colors.loss }]}
+                >
+                  {mask ? "••••" : a}
+                </Text>
+              )}
+            />
           ))
         )}
         {negative && <Text style={[styles.muted, { fontSize: 11 }]}>Owed</Text>}
@@ -337,22 +345,27 @@ export function Allocation({
             <Text style={[styles.figure, { fontSize: 12, fontWeight: "400" }]}>
               {s.display}
             </Text>
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.figure,
-                {
-                  fontSize: 12,
-                  fontWeight: "400",
-                  color: colors.ink3,
-                  minWidth: 48,
-                  flexShrink: 0,
-                  textAlign: "right",
-                },
-              ]}
-            >
-              {hidden ? "••••" : `${s.share.toFixed(1)}%`}
-            </Text>
+            <SensitiveValue
+              hidden={hidden}
+              render={(hidden) => (
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.figure,
+                    {
+                      fontSize: 12,
+                      fontWeight: "400",
+                      color: colors.ink3,
+                      minWidth: 48,
+                      flexShrink: 0,
+                      textAlign: "right",
+                    },
+                  ]}
+                >
+                  {hidden ? "••••" : `${s.share.toFixed(1)}%`}
+                </Text>
+              )}
+            />
           </View>
         ))}
       </View>
@@ -501,15 +514,20 @@ export function TransactionRow({
         >
           {merchant ?? description}
         </Text>
-        <Text
-          style={[
-            styles.figure,
-            { fontSize: 13, fontWeight: "500" },
-            incoming && { color: colors.gain },
-          ]}
-        >
-          {money(amount, currency, { hidden, signed: true })}
-        </Text>
+        <SensitiveValue
+          hidden={hidden}
+          render={(hidden) => (
+            <Text
+              style={[
+                styles.figure,
+                { fontSize: 13, fontWeight: "500" },
+                incoming && { color: colors.gain },
+              ]}
+            >
+              {money(amount, currency, { hidden, signed: true })}
+            </Text>
+          )}
+        />
       </View>
       <Text numberOfLines={1} style={[styles.muted, { fontSize: 11 }]}>
         {[formatDate(postedDate), accountName].filter(Boolean).join(" · ")}
