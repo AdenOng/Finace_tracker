@@ -10,7 +10,8 @@ const config: ExpoConfig = {
   android: {
     package: "com.finfolio.mobile",
     adaptiveIcon: {
-      foregroundImage: "./assets/icon.png",
+      foregroundImage: "./assets/adaptive-icon.png",
+      monochromeImage: "./assets/adaptive-monochrome.png",
       backgroundColor: "#efe6d2",
     },
   },

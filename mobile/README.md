@@ -37,8 +37,14 @@ The output is `android/app/build/outputs/apk/release/app-release.apk`. Expo's
 generated local release configuration uses the development signing key; this is
 a local test artifact, not a Play Store release. Configure your own signing through
 EAS for distribution. The standalone release requires an HTTPS backend and does
-not need Metro. Generated native directories and APKs are ignored by Git. The app
-icon is derived from Finfolio's existing `public/favicon.svg`.
+not need Metro. Generated native directories and APKs are ignored by Git.
+
+The app icon is Finfolio's `BrandMark` (`src/components/brand.tsx`). Its sources are
+`assets/icon/*.svg`: a full icon, an adaptive foreground and an Android 13+ monochrome
+layer, all fitted to the 66dp safe zone. After editing them, run
+`bun scripts/render-mobile-icons.ts` from the repository root to regenerate the PNGs,
+then run `bunx expo prebuild --platform android --no-install --clean` so the native
+launcher icons update.
 
 EAS builds (requires your own Expo account/project configuration):
 
