@@ -1,4 +1,5 @@
 import { SensitiveValue } from "../components/AmountPrivacy";
+import { NetWorthChart } from "../components/NetWorthChart";
 import React from "react";
 import { Text, View } from "react-native";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
@@ -52,8 +53,10 @@ const sum = (values: (string | null | undefined)[]) =>
   values.reduce((total, v) => (v ? total.plus(v) : total), new Decimal(0));
 
 export function Overview() {
-  const month = today().slice(0, 7);
+  const date = today();
+  const month = date.slice(0, 7);
   const q = api.portfolio.netWorth.useQuery();
+  const history = api.portfolio.netWorthHistory.useQuery();
   const categories = api.catalog.categories.useQuery();
   const thisMonth = api.spending.converted.useQuery({ month });
   const lastMonth = api.spending.converted.useQuery({
@@ -76,6 +79,7 @@ export function Overview() {
     });
   const refresh = () => {
     void q.refetch();
+    void history.refetch();
     void thisMonth.refetch();
     void lastMonth.refetch();
     void categories.refetch();
@@ -86,7 +90,7 @@ export function Overview() {
     <Page
       header={<TopBar />}
       refresh={refresh}
-      refreshing={q.isRefetching || thisMonth.isRefetching}
+      refreshing={q.isRefetching || history.isRefetching || thisMonth.isRefetching}
     >
       <Status
         pending={q.isPending}
@@ -96,6 +100,7 @@ export function Overview() {
       {d &&
         (() => {
           const recorded = d.asOf !== null;
+          const partial = d.unconverted.length > 0 || d.unpriced > 0;
           const investing = d.accounts.filter(
             (a) => accountGroupOf(a.type) === "investments",
           );
@@ -177,7 +182,7 @@ export function Overview() {
                     </Eyebrow>
                     <Tag tone="outline">{d.currency}</Tag>
                   </View>
-                  {(d.unconverted.length > 0 || d.unpriced > 0) && (
+                  {partial && (
                     <Text style={[styles.warn, { fontWeight: "600" }]}>
                       Partial total
                     </Text>
@@ -265,6 +270,23 @@ export function Overview() {
                       </Text>
                     )}
                   </View>
+                  {!hidden &&
+                    (history.data?.currency === d.currency ? (
+                      <NetWorthChart
+                        history={history.data.points}
+                        current={
+                          recorded && d.total !== null ? { total: d.total, partial } : null
+                        }
+                        date={date}
+                        currency={d.currency}
+                      />
+                    ) : (
+                      <Status
+                        pending={history.isPending}
+                        error={history.error}
+                        retry={() => void history.refetch()}
+                      />
+                    ))}
                 </View>
                 <FigureGrid
                   items={[
