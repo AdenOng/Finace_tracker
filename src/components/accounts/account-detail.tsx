@@ -18,6 +18,7 @@ import { SnapshotDrawer } from "~/components/accounts/snapshot-drawer";
 import { Amounts } from "~/components/finance/amounts";
 import { BalanceDate } from "~/components/finance/balance-date";
 import { Button } from "~/components/ui/button";
+import { FlashNotice } from "~/components/ui/flash-notice";
 import {
   EmptyState,
   Notice,
@@ -26,6 +27,7 @@ import {
   Tag,
 } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
+import { useFlash } from "~/components/ui/use-flash";
 import { accountGroupOf, holdsSecurities } from "~/lib/accounts";
 import { formatMoney, formatQuantity } from "~/lib/format";
 import { api, type RouterOutputs } from "~/trpc/react";
@@ -58,7 +60,7 @@ export function AccountDetail({
   const [editing, setEditing] = useState(false);
   const [updating, setUpdating] = useState(startRecording);
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  const flash = useFlash();
   const invalidate = () =>
     Promise.all([
       utils.accounts.get.invalidate({ id }),
@@ -166,11 +168,11 @@ export function AccountDetail({
           {t.accounts.detail.thisAccountIsArchivedItIsLeftOutOfYour}
         </Notice>
       ) : null}
-      {flash ? (
-        <Notice tone="success" className="mb-8">
-          {flash}
-        </Notice>
-      ) : null}
+      <FlashNotice
+        flash={flash.flash}
+        onDismiss={flash.clear}
+        className="mb-8"
+      />
 
       <div className="space-y-4">
         {!readOnly && account.type === "credit_card" ? (
@@ -267,7 +269,73 @@ export function AccountDetail({
                 {t.accounts.detail.onlyCashIsHeld}
               </p>
             ) : (
-              <Table>
+              <>
+                <ul className="divide-line -mx-1 divide-y md:hidden">
+                  {holdings.positions.map((p) => {
+                    const share =
+                      positionsTotal && p.value && !positionsTotal.isZero()
+                        ? new Decimal(p.value.amount)
+                            .div(positionsTotal)
+                            .times(100)
+                            .toNumber()
+                        : null;
+                    return (
+                      <li key={p.id} className="space-y-1.5 px-1 py-3">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <span className="min-w-0 truncate">
+                            <span className="font-semibold">{p.symbol}</span>
+                            {p.exchange ? (
+                              <span className="text-ink-3 ml-1.5 text-[12px]">
+                                {p.exchange}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="figures shrink-0 font-mono text-[14px] font-semibold">
+                            {p.value ? (
+                              <span className="sensitive">
+                                {formatMoney(p.value.amount, p.value.currency)}
+                              </span>
+                            ) : (
+                              <Tag tone="warn">
+                                {t.accounts.detail.noPrice}
+                              </Tag>
+                            )}
+                          </span>
+                        </div>
+                        {p.name ? (
+                          <p className="text-ink-2 truncate text-[12px]">
+                            {p.name}
+                          </p>
+                        ) : null}
+                        <div className="text-ink-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px]">
+                          <span>
+                            {t.common.assetClasses[p.assetClass]} ·{" "}
+                            <span className="figures sensitive">
+                              {formatQuantity(p.quantity)}
+                            </span>
+                            {p.statementPrice
+                              ? ` × ${formatMoney(p.statementPrice, p.currency)}`
+                              : ""}
+                          </span>
+                          {share !== null ? (
+                            <span className="figures font-mono">
+                              {share.toFixed(1)}%
+                            </span>
+                          ) : null}
+                        </div>
+                        {p.averageCost ? (
+                          <p className="text-ink-3 text-[11px]">
+                            {t.accounts.detail.averageCost}:{" "}
+                            <span className="figures font-mono">
+                              {formatMoney(p.averageCost, p.currency)}
+                            </span>
+                          </p>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <Table className="hidden md:block">
                 <thead>
                   <tr>
                     <Th>{t.accounts.detail.holding}</Th>
@@ -344,6 +412,7 @@ export function AccountDetail({
                   ))}
                 </tbody>
               </Table>
+              </>
             )}
           </Section>
         ) : null}
@@ -364,7 +433,7 @@ export function AccountDetail({
             onEdit={setEditingEntry}
             onAdd={() => setUpdating(true)}
             onChanged={async (message) => {
-              setFlash(message);
+              flash.success(message);
               await invalidate();
               router.refresh();
             }}
@@ -402,7 +471,7 @@ export function AccountDetail({
               router.replace("/accounts");
               return;
             }
-            setFlash(message);
+            flash.success(message);
             await invalidate();
             router.refresh();
           }}
@@ -416,7 +485,7 @@ export function AccountDetail({
           onClose={() => setUpdating(false)}
           onSaved={async (message) => {
             setUpdating(false);
-            setFlash(message);
+            flash.success(message);
             await invalidate();
             router.refresh();
           }}

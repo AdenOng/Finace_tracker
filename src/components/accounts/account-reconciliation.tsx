@@ -7,8 +7,10 @@ import { useState } from "react";
 import { Button } from "~/components/ui/button";
 import { Drawer } from "~/components/ui/dialog";
 import { Field, Input, Select } from "~/components/ui/field";
+import { FlashNotice } from "~/components/ui/flash-notice";
 import { Notice, Section } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
+import { useFlash } from "~/components/ui/use-flash";
 import { currentMonth, todayIso } from "~/lib/dates";
 import { errorMessage } from "~/lib/errors";
 import { formatDate, formatMoney } from "~/lib/format";
@@ -29,7 +31,7 @@ export function AccountReconciliation({
   const reopen = api.reconciliation.reopen.useMutation();
   const [open, setOpen] = useState(false);
   const [reopening, setReopening] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  const flash = useFlash();
   async function refresh() {
     await Promise.all([
       utils.reconciliation.invalidate(),
@@ -58,11 +60,11 @@ export function AccountReconciliation({
           {errorMessage((history.error ?? reopen.error)!)}
         </Notice>
       ) : null}
-      {flash ? (
-        <Notice tone="success" className="mb-4">
-          {flash}
-        </Notice>
-      ) : null}
+      <FlashNotice
+        flash={flash.flash}
+        onDismiss={flash.clear}
+        className="mb-4"
+      />
       {history.isLoading ? (
         <p className="text-ink-2 text-sm">
           {t.accounts.reconciliation.loadingStatementPeriods}
@@ -116,7 +118,7 @@ export function AccountReconciliation({
                           .mutateAsync({ id: record.id })
                           .then(async () => {
                             setReopening(null);
-                            setFlash(
+                            flash.success(
                               t.accounts.reconciliation
                                 .statementReopenedItsEntriesCanBeChangedAndReconciledAgain,
                             );
@@ -152,7 +154,7 @@ export function AccountReconciliation({
           onClose={() => setOpen(false)}
           onSaved={async () => {
             setOpen(false);
-            setFlash(
+            flash.success(
               t.accounts.reconciliation
                 .statementReconciledItsTransactionsAreClearedAndProtected,
             );

@@ -28,7 +28,7 @@ export const accountTypeLabels: Record<AccountType, string> = {
 };
 
 /** Accounts that hold securities; the rest only carry cash balances and spending. */
-export function holdsSecurities(type: AccountType) {
+export function holdsSecurities(type: string) {
   return (
     type === "brokerage" ||
     type === "retirement" ||
@@ -90,7 +90,7 @@ export const accountGroups = {
 >;
 export type AccountGroup = keyof typeof accountGroups;
 
-export function accountGroupOf(type: AccountType): AccountGroup {
+export function accountGroupOf(type: string): AccountGroup {
   if (type === "cpf" || type === "srs") return "cpf_srs";
   return holdsSecurities(type) ? "investments" : "banking";
 }
