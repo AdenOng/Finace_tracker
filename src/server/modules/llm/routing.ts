@@ -25,6 +25,86 @@ type ProviderRow = typeof llmProvider.$inferSelect;
 /** Usage at or above this share of a monthly limit is flagged on the Status page. */
 export const LIMIT_WARNING_SHARE = 0.8;
 
+export type ImportAvailability = { available: boolean; message: string };
+const AVAILABILITY_TTL_MS = 30_000;
+const availabilityCache = new WeakMap<
+  object,
+  { value?: ImportAvailability; expiresAt: number; pending?: Promise<ImportAvailability> }
+>();
+
+export function invalidateImportAvailability(db?: object) {
+  if (db) availabilityCache.delete(db);
+}
+
+/**
+ * Checks whether an eligible import provider currently lists its configured model.
+ * Cached briefly per database handle and coalesced across concurrent callers so polling
+ * clients do not repeatedly probe upstream provider APIs.
+ */
+export async function getImportAvailability(
+  db: Database,
+): Promise<ImportAvailability> {
+  const now = Date.now();
+  const existing = availabilityCache.get(db);
+  if (existing?.value && existing.expiresAt > now) return existing.value;
+  if (existing?.pending) return existing.pending;
+
+  const entry: {
+    value?: ImportAvailability;
+    expiresAt: number;
+    pending?: Promise<ImportAvailability>;
+  } = { expiresAt: 0 };
+
+  const probe = (async (): Promise<ImportAvailability> => {
+    try {
+      const candidates = await importProviders(db);
+      for (const { createAdapter, provider } of candidates) {
+        try {
+          const models = await createAdapter().listModels(
+            AbortSignal.timeout(5_000),
+          );
+          if (models.some((m) => m.id === provider.defaultModel)) {
+            return {
+              available: true,
+              message:
+                "AI service connected. Statements still need your review before saving.",
+            };
+          }
+        } catch {
+          /* The import runner can also use the configured fallback. */
+        }
+      }
+      return {
+        available: false,
+        message:
+          "The configured import models are unavailable. Ask your admin to check Admin → AI.",
+      };
+    } catch {
+      return {
+        available: false,
+        message:
+          "AI imports are unavailable. Ask your admin to check the AI service and credentials.",
+      };
+    }
+  })();
+
+  entry.pending = probe;
+  availabilityCache.set(db, entry);
+  try {
+    const value = await probe;
+    // Only populate if not invalidated while the probe was in flight.
+    if (availabilityCache.get(db) === entry) {
+      entry.value = value;
+      entry.expiresAt = Date.now() + AVAILABILITY_TTL_MS;
+      entry.pending = undefined;
+    }
+    return value;
+  } catch (error) {
+    if (availabilityCache.get(db) === entry) availabilityCache.delete(db);
+    throw error;
+  }
+}
+
 /** Start of the current calendar month in UTC; monthly limits reset here. */
 export function monthStart(now = new Date()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));

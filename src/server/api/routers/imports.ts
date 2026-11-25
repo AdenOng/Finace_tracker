@@ -1,29 +1,13 @@
-import { createHash } from "node:crypto";
-
 import { TRPCError } from "@trpc/server";
-import Decimal from "decimal.js";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  exists,
-  inArray,
-  isNull,
-  lte,
-  ne,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { z } from "zod";
 
-import { accountGroupOf, holdsSecurities } from "~/lib/accounts";
 import {
   checkImportBalance,
   type BalanceSummary,
   type RecordedTransaction,
 } from "~/lib/import-balance-check";
-import { categoryKind } from "~/lib/transaction-classification";
 import { isoDateInput, moneyInput, pgTimestampText } from "~/server/api/inputs";
 import {
   createTRPCRouter,
@@ -34,27 +18,27 @@ import {
 import {
   accountSnapshot,
   auditLog,
-  cashBalance,
   document,
   extractionJob,
   financialAccount,
   institution,
-  investmentTransaction,
-  position,
-  security,
   stagedRow,
   transaction,
 } from "~/server/db/schema";
 import { writableBy } from "~/server/lib/access";
-import {
-  classifyTransaction,
-  loadClassificationCategories,
-} from "~/server/modules/spending/classification";
-import { requireWritableAccount } from "~/server/modules/accounts/ownership";
 import type { StatementExtraction } from "~/server/modules/extraction";
+import { commitImportJob } from "~/server/modules/imports/commit";
+import {
+  importLinePreview,
+  LINE_REMOVED,
+} from "~/server/modules/imports/line-items";
+import {
+  discardImportJob,
+  removeCommittedLine,
+  updateStagedRows,
+} from "~/server/modules/imports/review-mutations";
 import {
   stagedSchemas,
-  type StagedKind,
   type StagedCashBalance,
   type StagedInvestmentTransaction,
   type StagedPosition,
@@ -66,23 +50,8 @@ import {
   requeueImportJob,
   runImportJob,
 } from "~/server/modules/imports/runner";
-import { removeUpload } from "~/server/modules/imports/storage";
-import {
-  importLinePreview,
-  LINE_REMOVED,
-} from "~/server/modules/imports/line-items";
-import {
-  snapshotInput,
-  writeSnapshot,
-} from "~/server/modules/portfolio/snapshots";
+import { getImportAvailability } from "~/server/modules/llm/routing";
 import { hasSnapshotEntries } from "~/server/modules/portfolio/holdings";
-import {
-  checkCategory,
-  lockAccounts,
-  requireOpenPeriod,
-} from "~/server/modules/spending/guards";
-import { normalizeMerchantText } from "~/server/modules/spending/rules";
-import { importProviders } from "~/server/modules/llm/routing";
 
 const jobColumns = {
   id: extractionJob.id,
@@ -107,97 +76,74 @@ const jobColumns = {
   institutionKey: institution.key,
 };
 
-/** Deterministic, so committing the same statement line twice is caught by the unique index. */
-function fingerprint(
-  parts: (string | null)[],
-  seen: Map<string, number>,
-  matched: ReadonlySet<string>,
-) {
-  const key = parts.map((p) => p ?? "").join("\u0000");
-  let n = seen.get(key) ?? 0;
-  let value: string;
-  // Skipped duplicates already occupy occurrence numbers; a new identical line needs a free one.
-  do {
-    n++;
-    value = `statement:${createHash("sha256").update(`${key}\u0000${n}`).digest("hex")}`;
-  } while (matched.has(value));
-  seen.set(key, n);
-  return value;
-}
-
-/**
- * A trade names only a symbol, which can match listings on several exchanges or in several
- * currencies. Listings held in `holdings` win, in the order given (the statement's own holdings
- * first), then one in the trade's currency. If the best evidence still points at more than one
- * listing, the trade is left unlinked.
- */
-function tradedListing(
-  listings: { id: string; currency: string }[],
-  currency: string,
-  holdings: ReadonlySet<string>[],
-) {
-  for (const pool of [
-    ...holdings.flatMap((held) => [
-      listings.filter((l) => held.has(l.id) && l.currency === currency),
-      listings.filter((l) => held.has(l.id)),
-    ]),
-    listings.filter((l) => l.currency === currency),
-  ]) {
-    if (pool.length > 0) return pool.length === 1 ? pool[0]!.id : null;
-  }
-  return null;
-}
-
 /** Statement uploads: what the AI read, waiting for the owner to review and commit. */
 export const importsRouter = createTRPCRouter({
-  availability: expensiveReadProcedure.query(async ({ ctx }) => {
-    try {
-      const candidates = await importProviders(ctx.db);
-      for (const { createAdapter, provider } of candidates) {
-        try {
-          const models = await createAdapter().listModels(AbortSignal.timeout(5_000));
-          if (models.some((m) => m.id === provider.defaultModel)) return {
-            available: true,
-            message: "AI service connected. Statements still need your review before saving.",
-          };
-        } catch { /* The import runner can also use the configured fallback. */ }
-      }
-      return { available: false, message: "The configured import models are unavailable. Ask your admin to check Admin → AI." };
-    } catch {
-      return { available: false, message: "AI imports are unavailable. Ask your admin to check the AI service and credentials." };
-    }
-  }),
+  availability: expensiveReadProcedure.query(({ ctx }) =>
+    getImportAvailability(ctx.db),
+  ),
 
   list: protectedProcedure
     .input(
       z
         .object({
-          cursor: z.object({ createdAt: pgTimestampText, id: z.uuid() }).nullish(),
+          cursor: z
+            .object({ createdAt: pgTimestampText, id: z.uuid() })
+            .nullish(),
         })
         .optional(),
     )
     .query(async ({ ctx, input }) => {
+      const page = ctx.db.$with("import_page").as(
+        ctx.db
+          .select({
+            id: extractionJob.id,
+            createdAt: extractionJob.createdAt,
+          })
+          .from(extractionJob)
+          .where(
+            and(
+              writableBy(ctx.scope, extractionJob.ownerId),
+              input?.cursor
+                ? sql`(${extractionJob.createdAt}, ${extractionJob.id}) < (${input.cursor.createdAt}::timestamptz, ${input.cursor.id}::uuid)`
+                : undefined,
+            ),
+          )
+          .orderBy(desc(extractionJob.createdAt), desc(extractionJob.id))
+          .limit(100),
+      );
+      const rowCounts = ctx.db
+        .select({
+          jobId: stagedRow.jobId,
+          rows: sql<number>`count(*)::int`.as("rows"),
+          accepted:
+            sql<number>`count(*) filter (where ${stagedRow.decision} = 'accept')::int`.as(
+              "accepted",
+            ),
+        })
+        .from(stagedRow)
+        .innerJoin(page, eq(page.id, stagedRow.jobId))
+        .where(writableBy(ctx.scope, stagedRow.ownerId))
+        .groupBy(stagedRow.jobId)
+        .as("staged_row_counts");
+
       const jobs = await ctx.db
+        .with(page)
         .select({
           ...jobColumns,
           cursorCreatedAt: sql<string>`${extractionJob.createdAt}::text`,
-          rows: sql<number>`(select count(*)::int from ${stagedRow} where ${stagedRow.jobId} = ${extractionJob.id})`,
-          accepted: sql<number>`(select count(*)::int from ${stagedRow} where ${stagedRow.jobId} = ${extractionJob.id} and ${stagedRow.decision} = 'accept')`,
+          rows: sql<number>`coalesce(${rowCounts.rows}, 0)::int`,
+          accepted: sql<number>`coalesce(${rowCounts.accepted}, 0)::int`,
         })
-        .from(extractionJob)
+        .from(page)
+        .innerJoin(extractionJob, eq(extractionJob.id, page.id))
         .innerJoin(document, eq(document.id, extractionJob.documentId))
         .leftJoin(financialAccount, eq(financialAccount.id, document.accountId))
-        .leftJoin(institution, eq(institution.id, financialAccount.institutionId))
-        .where(
-          and(
-            writableBy(ctx.scope, extractionJob.ownerId),
-            input?.cursor
-              ? sql`(${extractionJob.createdAt}, ${extractionJob.id}) < (${input.cursor.createdAt}::timestamptz, ${input.cursor.id}::uuid)`
-              : undefined,
-          ),
+        .leftJoin(
+          institution,
+          eq(institution.id, financialAccount.institutionId),
         )
-        .orderBy(desc(extractionJob.createdAt), desc(extractionJob.id))
-        .limit(100);
+        .leftJoin(rowCounts, eq(rowCounts.jobId, extractionJob.id))
+        .orderBy(desc(page.createdAt), desc(page.id));
       return jobs.map((j) => ({ ...j, stale: isStaleJob(j) }));
     }),
 
@@ -397,10 +343,15 @@ export const importsRouter = createTRPCRouter({
             })
         )[],
       };
-      return { ...review, balanceCheck: checkImportBalance({
-        summary: review.summary, accountType: review.accountType,
-        accountCurrency: review.accountCurrency, rows: review.rows,
-      }) };
+      return {
+        ...review,
+        balanceCheck: checkImportBalance({
+          summary: review.summary,
+          accountType: review.accountType,
+          accountCurrency: review.accountCurrency,
+          rows: review.rows,
+        }),
+      };
     }),
 
   lineRemovalPreview: protectedProcedure
@@ -416,106 +367,8 @@ export const importsRouter = createTRPCRouter({
         version: z.string().length(64),
       }),
     )
-    .mutation(async ({ ctx, input }) =>
-      ctx.db.transaction(async (tx) => {
-        // Same lock order as commit: job, account, then its financial records.
-        const [job] = await tx
-          .select({ id: extractionJob.id, accountId: document.accountId })
-          .from(extractionJob)
-          .innerJoin(document, eq(document.id, extractionJob.documentId))
-          .where(
-            and(
-              eq(extractionJob.id, input.jobId),
-              writableBy(ctx.scope, extractionJob.ownerId),
-            ),
-          )
-          .for("update", { of: extractionJob });
-        if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-        if (!job.accountId)
-          throw new TRPCError({
-            code: "CONFLICT",
-            message:
-              "The original account was deleted. Adding the broker again creates a separate account; this import is not automatically transferred.",
-          });
-        await lockAccounts(tx, ctx.scope, [job.accountId]);
-        const line = await importLinePreview(tx, ctx.scope, input);
-        if (line.version !== input.version)
-          throw new TRPCError({
-            code: "CONFLICT",
-            message:
-              "This row changed after you opened the review. Close and review it again.",
-          });
-        if (line.kind === "transaction")
-          await tx
-            .delete(transaction)
-            .where(
-              and(
-                eq(transaction.id, line.targetId),
-                writableBy(ctx.scope, transaction.ownerId),
-              ),
-            );
-        else if (line.kind === "investment_transaction")
-          await tx
-            .delete(investmentTransaction)
-            .where(
-              and(
-                eq(investmentTransaction.id, line.targetId),
-                writableBy(ctx.scope, investmentTransaction.ownerId),
-              ),
-            );
-        else {
-          if (line.kind === "position")
-            await tx.delete(position).where(eq(position.id, line.targetId));
-          else
-            await tx
-              .delete(cashBalance)
-              .where(eq(cashBalance.id, line.targetId));
-          if (line.lastInSnapshot)
-            await tx
-              .delete(accountSnapshot)
-              .where(
-                and(
-                  eq(accountSnapshot.id, line.snapshotId!),
-                  writableBy(ctx.scope, accountSnapshot.ownerId),
-                ),
-              );
-          else
-            await tx
-              .update(accountSnapshot)
-              .set({
-                updatedAt: sql`greatest(clock_timestamp(), ${accountSnapshot.updatedAt} + interval '1 microsecond')`,
-              })
-              .where(
-                and(
-                  eq(accountSnapshot.id, line.snapshotId!),
-                  writableBy(ctx.scope, accountSnapshot.ownerId),
-                ),
-              );
-        }
-        await tx
-          .update(stagedRow)
-          .set({ decision: "skip" })
-          .where(
-            and(
-              eq(stagedRow.id, input.rowId),
-              eq(stagedRow.jobId, input.jobId),
-              writableBy(ctx.scope, stagedRow.ownerId),
-            ),
-          );
-        await tx.insert(auditLog).values({
-          actorId: ctx.scope.userId,
-          action: LINE_REMOVED,
-          targetType: "staged_row",
-          targetId: input.rowId,
-          details: {
-            jobId: input.jobId,
-            accountId: line.accountId,
-            kind: line.kind,
-            recordId: line.targetId,
-          },
-        });
-        return { removed: true };
-      }),
+    .mutation(({ ctx, input }) =>
+      removeCommittedLine(ctx.db, ctx.scope, input),
     ),
 
   /** Accept or skip rows, and correct amounts or transaction classification before saving. */
@@ -536,124 +389,7 @@ export const importsRouter = createTRPCRouter({
           .optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) =>
-      ctx.db.transaction(async (tx) => {
-        const [job] = await tx
-          .select({ status: extractionJob.status })
-          .from(extractionJob)
-          .where(
-            and(
-              eq(extractionJob.id, input.jobId),
-              writableBy(ctx.scope, extractionJob.ownerId),
-            ),
-          )
-          .for("update");
-        if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-        if (job.status !== "needs_review") {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "This import is no longer open for review",
-          });
-        }
-        const rows = await tx
-          .select({
-            id: stagedRow.id,
-            kind: stagedRow.kind,
-            data: stagedRow.data,
-            matchStatus: stagedRow.matchStatus,
-          })
-          .from(stagedRow)
-          .where(
-            and(
-              eq(stagedRow.jobId, input.jobId),
-              inArray(stagedRow.id, input.ids),
-              isNull(stagedRow.committedRecordId),
-              writableBy(ctx.scope, stagedRow.ownerId),
-            ),
-          );
-        if (rows.length !== input.ids.length) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Rows changed" });
-        }
-        if (input.patch?.categoryId)
-          await checkCategory(tx, input.patch.categoryId);
-        const categories = await loadClassificationCategories(tx);
-        for (const row of rows) {
-          let patch;
-          const amount =
-            input.patch?.amount === undefined
-              ? undefined
-              : new Decimal(input.patch.amount).toFixed();
-          const amountChanged =
-            amount !== undefined &&
-            typeof row.data.amount === "string" &&
-            !new Decimal(amount).equals(row.data.amount);
-          if (input.patch && row.kind === "transaction") {
-            const current = stagedSchemas.transaction.parse(row.data);
-            const classification = classifyTransaction(
-              current,
-              input.patch,
-              categories,
-            );
-            if (
-              amountChanged &&
-              amount !== undefined &&
-              new Decimal(current.amount).isNegative() !==
-                new Decimal(amount).isNegative()
-            ) {
-              const kind = categoryKind(categories, classification.categoryId);
-              // A direction correction clears an incompatible income/expense label; transfers remain transfers.
-              if (
-                (kind === "expense" && !new Decimal(amount).isNegative()) ||
-                (kind === "income" && new Decimal(amount).isNegative())
-              ) {
-                classification.categoryId = null;
-              }
-            }
-            patch = stagedSchemas.transaction.parse({
-              ...current,
-              ...Object.fromEntries(
-                Object.entries(input.patch).filter(([, v]) => v !== undefined),
-              ),
-              ...classification,
-              ...(amount !== undefined ? { amount } : {}),
-              ...(input.patch.amount !== undefined || input.patch.confirmAmount
-                ? { signMismatch: false, suggestedAmount: null }
-                : {}),
-            });
-          } else if (amount !== undefined) {
-            if (
-              row.kind !== "cash_balance" &&
-              row.kind !== "investment_transaction"
-            )
-              throw new TRPCError({
-                code: "BAD_REQUEST",
-                message: "This row has no editable cash amount",
-              });
-            patch = stagedSchemas[row.kind].parse({
-              ...row.data,
-              amount,
-            });
-          }
-          // An edited exact duplicate is now uncertain and must receive a fresh Keep/Skip choice.
-          const changedDuplicate =
-            amountChanged && row.matchStatus === "duplicate";
-          await tx
-            .update(stagedRow)
-            .set({
-              ...(input.decision ? { decision: input.decision } : {}),
-              ...(patch ? { data: patch } : {}),
-              ...(changedDuplicate
-                ? {
-                    matchStatus: "possible_duplicate",
-                    decision: input.decision ?? "pending",
-                  }
-                : {}),
-            })
-            .where(eq(stagedRow.id, row.id));
-        }
-        return { updated: rows.length };
-      }),
-    ),
+    .mutation(({ ctx, input }) => updateStagedRows(ctx.db, ctx.scope, input)),
 
   /** Write every accepted row into the account. All of it is saved, or none of it. */
   commit: expensiveProcedure
@@ -664,421 +400,7 @@ export const importsRouter = createTRPCRouter({
         acknowledgeBalanceMismatch: z.boolean().optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) =>
-      ctx.db.transaction(async (tx) => {
-        const [job] = await tx
-          .select({
-            id: extractionJob.id,
-            status: extractionJob.status,
-            result: extractionJob.result,
-            documentId: document.id,
-            accountId: document.accountId,
-          })
-          .from(extractionJob)
-          .innerJoin(document, eq(document.id, extractionJob.documentId))
-          .where(
-            and(
-              eq(extractionJob.id, input.jobId),
-              writableBy(ctx.scope, extractionJob.ownerId),
-            ),
-          )
-          .for("update", { of: extractionJob });
-        if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-        if (job.status !== "needs_review" || !job.accountId) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "This import is no longer open for review",
-          });
-        }
-        await lockAccounts(tx, ctx.scope, [job.accountId]);
-        const account = await requireWritableAccount(
-          tx,
-          ctx.scope,
-          job.accountId,
-        );
-
-        const rows = await tx
-          .select()
-          .from(stagedRow)
-          .where(
-            and(
-              eq(stagedRow.jobId, job.id),
-              isNull(stagedRow.committedRecordId),
-            ),
-          )
-          .orderBy(asc(stagedRow.createdAt), asc(stagedRow.id));
-        if (
-          rows.some(
-            (r) =>
-              r.matchStatus === "possible_duplicate" &&
-              r.decision === "pending",
-          )
-        ) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              "Choose Keep or Skip for every possible duplicate before saving",
-          });
-        }
-        const matchedRecordIds = rows.flatMap((r) =>
-          r.matchStatus !== "new" && r.matchedRecordId
-            ? [r.matchedRecordId]
-            : [],
-        );
-        // Reserve occurrences matched at review time, including possible duplicates the user keeps.
-        // Rows added by another pending import still meet the unique constraint below,
-        // so concurrent reviews cannot duplicate them.
-        const matches = matchedRecordIds.length
-          ? (
-              await Promise.all([
-                tx
-                  .select({
-                    id: transaction.id,
-                    fingerprint: transaction.fingerprint,
-                    recordedTransaction: {
-                      amount: transaction.amount,
-                      currency: transaction.currency,
-                      postedDate: transaction.postedDate,
-                    },
-                  })
-                  .from(transaction)
-                  .where(
-                    and(
-                      eq(transaction.accountId, account.id),
-                      writableBy(ctx.scope, transaction.ownerId),
-                      inArray(transaction.id, matchedRecordIds),
-                    ),
-                  ),
-                tx
-                  .select({
-                    id: investmentTransaction.id,
-                    fingerprint: investmentTransaction.fingerprint,
-                    recordedTransaction: {
-                      amount: investmentTransaction.amount,
-                      currency: investmentTransaction.currency,
-                      postedDate: investmentTransaction.tradeDate,
-                    },
-                  })
-                  .from(investmentTransaction)
-                  .where(
-                    and(
-                      eq(investmentTransaction.accountId, account.id),
-                      writableBy(ctx.scope, investmentTransaction.ownerId),
-                      inArray(investmentTransaction.id, matchedRecordIds),
-                    ),
-                  ),
-              ])
-            ).flat()
-          : [];
-        const matchedIds = new Set(matches.map((r) => r.id));
-        const matchedFingerprints = new Set(matches.map((r) => r.fingerprint));
-        const recordedById = new Map(
-          matches.map((r) => [r.id, r.recordedTransaction]),
-        );
-        const balanceCheck = checkImportBalance({
-          summary: job.result as BalanceSummary | null,
-          accountType: account.type,
-          accountCurrency: account.currency,
-          rows: rows.map((r) => ({
-            ...r,
-            data: stagedSchemas[r.kind].parse(r.data),
-            recorded: matchedIds.has(r.matchedRecordId ?? ""),
-            recordedTransaction:
-              recordedById.get(r.matchedRecordId ?? "") ?? null,
-          })),
-        });
-        if (
-          balanceCheck.requiresAcknowledgment &&
-          !input.acknowledgeBalanceMismatch
-        ) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              "The statement balance check does not match. Correct the rows or confirm “I've checked this — save anyway” before saving.",
-          });
-        }
-        const of = <S extends z.ZodType>(kind: StagedKind, schema: S) =>
-          rows
-            .filter((r) => r.kind === kind && r.decision === "accept")
-            .map((r) => ({
-              id: r.id,
-              data: schema.parse(r.data),
-              duplicate:
-                r.matchStatus === "duplicate" &&
-                matchedIds.has(r.matchedRecordId ?? ""),
-            }));
-
-        const committed = new Map<string, string>();
-        const counts = {
-          transactions: 0,
-          duplicates: 0,
-          holdings: 0,
-          activity: 0,
-          balances: 0,
-        };
-        const seen = new Map<string, number>();
-
-        if (accountGroupOf(account.type) === "banking") {
-          const categories = await loadClassificationCategories(tx);
-          for (const { id, data, duplicate } of of(
-            "transaction",
-            stagedSchemas.transaction,
-          )) {
-            if (duplicate) {
-              counts.duplicates++;
-              continue;
-            }
-            await requireOpenPeriod(tx, ctx.scope, {
-              accountId: account.id,
-              currency: data.currency,
-              postedDate: data.postedDate,
-            });
-            await checkCategory(tx, data.categoryId);
-            const classification = classifyTransaction(
-              data,
-              { categoryId: data.categoryId },
-              categories,
-            );
-            const [row] = await tx
-              .insert(transaction)
-              .values({
-                ownerId: ctx.scope.userId,
-                accountId: account.id,
-                postedDate: data.postedDate,
-                transactionDate: data.transactionDate,
-                description: data.description,
-                reference: data.reference,
-                merchant: data.merchant,
-                amount: data.amount,
-                currency: data.currency,
-                originalAmount: data.originalAmount,
-                originalCurrency: data.originalCurrency,
-                ...classification,
-                categorySource: classification.categoryId ? "ai" : null,
-                source: "statement",
-                documentId: job.documentId,
-                fingerprint: fingerprint(
-                  [
-                    data.postedDate,
-                    data.amount,
-                    data.currency,
-                    normalizeMerchantText(data.description),
-                    data.reference,
-                  ],
-                  seen,
-                  matchedFingerprints,
-                ),
-              })
-              .onConflictDoNothing({
-                target: [transaction.accountId, transaction.fingerprint],
-              })
-              .returning({ id: transaction.id });
-            if (row) {
-              committed.set(id, row.id);
-              counts.transactions++;
-            } else counts.duplicates++;
-          }
-        }
-
-        const positions = holdsSecurities(account.type)
-          ? of("position", stagedSchemas.position)
-          : [];
-        const cash = of("cash_balance", stagedSchemas.cash_balance);
-        let imported: string | null = null;
-        if (positions.length > 0 || cash.length > 0) {
-          const parsed = snapshotInput.safeParse({
-            accountId: account.id,
-            asOf: input.asOf,
-            positions: positions.map(({ data }) => ({
-              symbol: data.symbol,
-              exchange: data.exchange,
-              name: data.name ?? "",
-              assetClass: data.assetClass,
-              currency: data.currency,
-              quantity: data.quantity,
-              averageCost: data.averageCost,
-              price: data.price,
-              value: data.value,
-            })),
-            cash: cash.map(({ data }) => data),
-          });
-          if (!parsed.success) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message:
-                parsed.error.issues[0]?.message ??
-                "Some holdings could not be saved",
-            });
-          }
-          const snapshot = await writeSnapshot(
-            tx,
-            ctx.scope,
-            account,
-            parsed.data,
-            { source: "statement", documentId: job.documentId },
-          );
-          imported = snapshot.id;
-          for (const r of [...positions, ...cash])
-            committed.set(r.id, snapshot.id);
-          counts.holdings = positions.length;
-          counts.balances = cash.length;
-        }
-
-        const activity = holdsSecurities(account.type)
-          ? of("investment_transaction", stagedSchemas.investment_transaction)
-          : [];
-        if (activity.length > 0) {
-          const symbols = [
-            ...new Set(
-              activity.flatMap(({ data }) =>
-                data.symbol ? [data.symbol.toUpperCase()] : [],
-              ),
-            ),
-          ];
-          // A September statement imported after October's entry must not use October's listings.
-          const [known, [earlier]] =
-            symbols.length > 0
-              ? await Promise.all([
-                  tx
-                    .select({
-                      id: security.id,
-                      symbol: security.symbol,
-                      currency: security.currency,
-                    })
-                    .from(security)
-                    .where(inArray(security.symbol, symbols)),
-                  tx
-                    .select({ id: accountSnapshot.id })
-                    .from(accountSnapshot)
-                    .where(
-                      and(
-                        eq(accountSnapshot.accountId, account.id),
-                        lte(accountSnapshot.asOf, input.asOf),
-                        imported ? ne(accountSnapshot.id, imported) : undefined,
-                        exists(
-                          tx
-                            .select({ id: position.id })
-                            .from(position)
-                            .where(eq(position.snapshotId, accountSnapshot.id)),
-                        ),
-                      ),
-                    )
-                    .orderBy(
-                      desc(accountSnapshot.asOf),
-                      desc(accountSnapshot.createdAt),
-                      desc(accountSnapshot.id),
-                    )
-                    .limit(1),
-                ])
-              : [[], []];
-          const heldIn = async (snapshotId: string | null | undefined) =>
-            new Set(
-              snapshotId
-                ? (
-                    await tx
-                      .select({ id: position.securityId })
-                      .from(position)
-                      .where(eq(position.snapshotId, snapshotId))
-                  ).map((p) => p.id)
-                : [],
-            );
-          const holdings = [await heldIn(imported), await heldIn(earlier?.id)];
-          for (const { id, data, duplicate } of activity) {
-            if (duplicate) {
-              counts.duplicates++;
-              continue;
-            }
-            const [row] = await tx
-              .insert(investmentTransaction)
-              .values({
-                ownerId: ctx.scope.userId,
-                accountId: account.id,
-                securityId: tradedListing(
-                  known.filter((k) => k.symbol === data.symbol?.toUpperCase()),
-                  data.currency,
-                  holdings,
-                ),
-                type: data.type,
-                tradeDate: data.tradeDate,
-                settleDate: data.settleDate,
-                quantity: data.quantity,
-                price: data.price,
-                amount: data.amount,
-                fees: data.fees,
-                reference: data.reference,
-                currency: data.currency,
-                description: data.description,
-                source: "statement",
-                documentId: job.documentId,
-                fingerprint: fingerprint(
-                  [
-                    data.tradeDate,
-                    data.type,
-                    data.symbol,
-                    data.amount,
-                    data.currency,
-                    data.quantity,
-                    data.price,
-                    data.fees,
-                    data.reference,
-                  ],
-                  seen,
-                  matchedFingerprints,
-                ),
-              })
-              .onConflictDoNothing({
-                target: [
-                  investmentTransaction.accountId,
-                  investmentTransaction.fingerprint,
-                ],
-              })
-              .returning({ id: investmentTransaction.id });
-            if (row) {
-              committed.set(id, row.id);
-              counts.activity++;
-            } else counts.duplicates++;
-          }
-        }
-
-        if (committed.size > 0) {
-          const values = sql.join(
-            [...committed].map(
-              ([rowId, recordId]) => sql`(${rowId}::uuid, ${recordId}::uuid)`,
-            ),
-            sql`, `,
-          );
-          await tx
-            .update(stagedRow)
-            .set({ committedRecordId: sql`committed.record_id` })
-            .from(sql`(values ${values}) as committed(id, record_id)`)
-            .where(
-              and(
-                eq(stagedRow.id, sql`committed.id`),
-                eq(stagedRow.jobId, job.id),
-              ),
-            );
-        }
-        await tx
-          .update(extractionJob)
-          .set({
-            status: "completed",
-            ...(balanceCheck.requiresAcknowledgment &&
-            input.acknowledgeBalanceMismatch
-              ? {
-                  result: {
-                    ...(job.result as Record<string, unknown>),
-                    balanceAcknowledgment: {
-                      acknowledgedAt: new Date().toISOString(),
-                      check: balanceCheck,
-                    },
-                  },
-                }
-              : {}),
-          })
-          .where(eq(extractionJob.id, job.id));
-        return counts;
-      }),
-    ),
+    .mutation(({ ctx, input }) => commitImportJob(ctx.db, ctx.scope, input)),
 
   /** Read the file again, e.g. after a provider error or a restart mid-way. */
   retry: expensiveProcedure
@@ -1109,7 +431,10 @@ export const importsRouter = createTRPCRouter({
       const requeued = await requeueImportJob(ctx.db, job.id, job.status).catch(
         (error: unknown) => {
           if (!(error instanceof ImportLimitError)) throw error;
-          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: error.message });
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: error.message,
+          });
         },
       );
       if (!requeued) throw conflict;
@@ -1120,21 +445,7 @@ export const importsRouter = createTRPCRouter({
   /** Remove the upload and anything staged from it. Records already committed stay. */
   discard: protectedProcedure
     .input(z.object({ jobId: z.uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      const [doc] = await ctx.db
-        .select({ id: document.id, storageKey: document.storageKey })
-        .from(extractionJob)
-        .innerJoin(document, eq(document.id, extractionJob.documentId))
-        .where(
-          and(
-            eq(extractionJob.id, input.jobId),
-            writableBy(ctx.scope, extractionJob.ownerId),
-          ),
-        )
-        .limit(1);
-      if (!doc) throw new TRPCError({ code: "NOT_FOUND" });
-      await ctx.db.delete(document).where(eq(document.id, doc.id));
-      await removeUpload(doc.storageKey);
-      return { ok: true };
-    }),
+    .mutation(({ ctx, input }) =>
+      discardImportJob(ctx.db, ctx.scope, input.jobId),
+    ),
 });
