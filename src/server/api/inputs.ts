@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { moneyPattern } from "~/lib/money";
 
 /**
  * Shared input validators for financial routers. Numbers arrive as decimal strings sized to their
@@ -14,7 +15,10 @@ const decimal = (integerDigits: number, fractionDigits: number) =>
       "Enter a number",
     );
 
-export const moneyInput = decimal(16, 4);
+export const moneyInput = z
+  .string()
+  .trim()
+  .regex(moneyPattern, "Enter a number");
 export const priceInput = decimal(16, 8).refine(
   (v) => !v.startsWith("-"),
   "Prices cannot be negative",
