@@ -1,4 +1,5 @@
 import { getT } from "~/i18n/server";
+import { TRPCError } from "@trpc/server";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { z } from "zod";
@@ -20,13 +21,14 @@ export default async function ImportPage({
   await requireEnrolledSession();
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const job = await api.imports.get({ id }).catch(() => null);
-  if (!job) notFound();
-  void api.imports.get.prefetch({ id });
+  const job = await api.imports.get({ id }).catch((error: unknown) => {
+    if (error instanceof TRPCError && error.code === "NOT_FOUND") notFound();
+    throw error;
+  });
   void api.catalog.categories.prefetch();
   return (
     <HydrateClient>
-      <ImportReview id={id} />
+      <ImportReview id={id} initialJob={job} />
     </HydrateClient>
   );
 }

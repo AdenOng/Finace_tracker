@@ -1146,9 +1146,8 @@ test("import review keeps transfer categories editable and exposes sign-aware tr
   );
   expect(html).toContain('value="income" disabled=""');
   expect(html).toContain('aria-label="Category"');
-  expect(html).toContain(
-    `<option value="${categoryId}" selected="">Transfers</option>`,
-  );
+  expect(html).toContain('role="combobox"');
+  expect(html).toContain("Transfers");
 });
 
 test("bank and trade possible duplicates show Keep/Skip actions and block Save until resolved", () => {

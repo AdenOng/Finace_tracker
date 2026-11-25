@@ -1,97 +1,42 @@
 "use client";
 
-import type { Locale } from "~/i18n/config";
-import type { Messages } from "~/i18n/messages";
-import { useT, useLocale, categoryLabel } from "~/i18n/client";
-import Decimal from "decimal.js";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  Check,
-  RotateCcw,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
-import { ImportLineRemoval } from "~/components/imports/line-removal";
 import { ImportStatus, isReading } from "~/components/imports/import-status";
+import { ImportLineRemoval } from "~/components/imports/line-removal";
+import { ReviewCommitBar } from "~/components/imports/review/commit-bar";
+import { RowControls } from "~/components/imports/review/row-controls";
+import { ActivitySection } from "./review/activity-section";
+import { BalanceSection, HoldingsSection } from "./review/holdings-section";
+import { TransactionsSection } from "./review/transactions-section";
+import { Summary } from "~/components/imports/review/summary";
+import type { Job, Row, RowOf } from "~/components/imports/review/types";
 import { ReadGlyph } from "~/components/landing/glyphs";
-import { TransactionTypeSelect } from "~/components/spending/transaction-type-select";
-import { transactionType } from "~/lib/transaction-classification";
 import { Button } from "~/components/ui/button";
-import { Input, Select } from "~/components/ui/field";
-import { Notice, Section, Tag } from "~/components/ui/panel";
+import { ConfirmButton } from "~/components/ui/confirm-button";
+import { FlashNotice } from "~/components/ui/flash-notice";
+import { Notice } from "~/components/ui/panel";
+import { useFlash } from "~/components/ui/use-flash";
+import { useLocale, useT } from "~/i18n/client";
 import { accountGroupOf } from "~/lib/accounts";
-import { orderCategories } from "~/lib/categories";
 import { cn } from "~/lib/cn";
-import { checkImportBalance } from "~/lib/import-balance-check";
 import { todayIso } from "~/lib/dates";
 import { errorMessage } from "~/lib/errors";
-import { formatDate, formatMoney, formatQuantity } from "~/lib/format";
-import { moneyInput } from "~/server/api/inputs";
-import { api, type RouterOutputs } from "~/trpc/react";
+import { formatDate } from "~/lib/format";
+import { checkImportBalance } from "~/lib/import-balance-check";
+import { api } from "~/trpc/react";
 
-type Job = RouterOutputs["imports"]["get"];
-type Row = Job["rows"][number];
-type RowOf<K extends Row["kind"]> = Extract<Row, { kind: K }>;
-
-const RowControls = createContext<{
-  completed: boolean;
-  canRemove: boolean;
-  onRemove: (row: Row) => void;
-  editingAmount: string | null;
-  setEditingAmount: (id: string | null) => void;
-  onAmount: (id: string, amount: string) => void;
-  onConfirmAmount: (id: string) => void;
-}>({
-  completed: false,
-  canRemove: false,
-  onRemove: () => undefined,
-  editingAmount: null,
-  setEditingAmount: () => undefined,
-  onAmount: () => undefined,
-  onConfirmAmount: () => undefined,
-});
-
-const documentLabels = (t: Messages): Record<string, string> => ({
-  bank_statement: t.imports.importReview.bankStatement,
-  card_statement: t.imports.importReview.cardStatement,
-  brokerage_statement: t.imports.importReview.brokerageStatement,
-  trade_confirmation: t.imports.importReview.tradeConfirmation,
-  screenshot: t.imports.importReview.screenshot,
-  other: t.imports.importReview.document,
-});
-
-const activityLabels = (t: Messages): Record<string, string> => ({
-  buy: t.imports.importReview.buy,
-  sell: t.imports.importReview.sell,
-  dividend: t.imports.importReview.dividend,
-  interest: t.imports.importReview.interest,
-  fee: t.imports.importReview.fee,
-  tax: t.imports.importReview.tax,
-  deposit: t.imports.importReview.deposit,
-  withdrawal: t.imports.importReview.withdrawal,
-  transfer_in: t.imports.importReview.transferIn,
-  transfer_out: t.imports.importReview.transferOut,
-  split: t.imports.importReview.split,
-  fx: t.imports.importReview.fx,
-  other: t.imports.importReview.other,
-});
-
-/** "12 Sept" — the statement period already gives the year. */
-const shortDate = (iso: string, locale: Locale) =>
-  formatDate(iso, locale).replace(locale === "zh" ? /^\d{4}年/ : / \d{4}$/, "");
-
-const money = (
-  amount: string | number | Decimal,
-  currency: string,
-  signed = false,
-) => formatMoney(new Decimal(amount).toFixed(2), currency, { signed });
-
-export function ImportReview({ id }: { id: string }) {
+export function ImportReview({
+  id,
+  initialJob,
+}: {
+  id: string;
+  initialJob?: Job;
+}) {
   const t = useT();
   const locale = useLocale();
   const router = useRouter();
@@ -99,6 +44,7 @@ export function ImportReview({ id }: { id: string }) {
   const [job] = api.imports.get.useSuspenseQuery(
     { id },
     {
+      ...(initialJob ? { initialData: initialJob } : {}),
       refetchInterval: (query) => {
         const data = query.state.data;
         return data && isReading(data.status, data.stale) ? 2500 : false;
@@ -116,12 +62,13 @@ export function ImportReview({ id }: { id: string }) {
   const asOf = needsDate
     ? (asOfChoice ?? job.summary?.periodEnd ?? "")
     : (job.summary?.periodEnd ?? today);
-  const [flash, setFlash] = useState<string | null>(null);
+  const flash = useFlash();
   const [removing, setRemoving] = useState<Row | null>(null);
   const [editingAmount, setEditingAmount] = useState<string | null>(null);
   const [acknowledgedCheck, setAcknowledgedCheck] = useState<string | null>(
     null,
   );
+  const [commitBarHeight, setCommitBarHeight] = useState(0);
   const balanceCheck = checkImportBalance({
     summary: job.summary,
     accountType: job.accountType,
@@ -154,7 +101,24 @@ export function ImportReview({ id }: { id: string }) {
   });
   const commit = api.imports.commit.useMutation({
     onSuccess: async (counts) => {
-      setFlash(t.imports.importReview.saved(counts));
+      const targetGroup = job.accountType
+        ? accountGroupOf(job.accountType)
+        : null;
+      flash.success(
+        t.imports.importReview.saved(counts),
+        <Link
+          href={
+            targetGroup === "banking"
+              ? `/spending?account=${job.accountId}`
+              : `/accounts/${job.accountId}`
+          }
+          className="font-semibold underline underline-offset-4"
+        >
+          {targetGroup === "banking"
+            ? t.imports.importReview.seeThemInSpending
+            : t.imports.importReview.openTheAccount}
+        </Link>,
+      );
       await Promise.all([
         utils.imports.invalidate(),
         utils.accounts.invalidate(),
@@ -175,7 +139,7 @@ export function ImportReview({ id }: { id: string }) {
   });
   const restore = api.accounts.restore.useMutation({
     onSuccess: async () => {
-      setFlash(t.imports.importReview.originalAccountRestoredItsImports);
+      flash.success(t.imports.importReview.originalAccountRestoredItsImports);
       await Promise.all([
         utils.accounts.invalidate(),
         utils.imports.invalidate(),
@@ -213,6 +177,13 @@ export function ImportReview({ id }: { id: string }) {
     holdingsDate < job.latestHoldingsAsOf;
   const setDecision = (ids: string[], decision: "accept" | "skip") =>
     ids.length > 0 && update.mutate({ jobId: id, ids, decision });
+
+  // Reserve enough bottom scroll space on mobile for the fixed commit bar (even when an error wraps)
+  // above the fixed mobile bottom tab bar so the final section's controls are always reachable.
+  const reviewBottomPadding =
+    job.status === "needs_review" && commitBarHeight > 0
+      ? commitBarHeight + 40
+      : undefined;
 
   return (
     <RowControls.Provider
@@ -314,23 +285,11 @@ export function ImportReview({ id }: { id: string }) {
         </p>
       ) : null}
 
-      {flash ? (
-        <Notice tone="success" className="mb-4">
-          {flash}{" "}
-          <Link
-            href={
-              group === "banking"
-                ? `/spending?account=${job.accountId}`
-                : `/accounts/${job.accountId}`
-            }
-            className="font-semibold underline underline-offset-4"
-          >
-            {group === "banking"
-              ? t.imports.importReview.seeThemInSpending
-              : t.imports.importReview.openTheAccount}
-          </Link>
-        </Notice>
-      ) : null}
+      <FlashNotice
+        flash={flash.flash}
+        onDismiss={flash.clear}
+        className="mb-4"
+      />
       {update.error ? (
         <Notice tone="error" className="mb-4">
           {errorMessage(update.error)}
@@ -370,14 +329,14 @@ export function ImportReview({ id }: { id: string }) {
               <RotateCcw className="size-4" />
               {t.imports.importReview.tryAgain}
             </Button>
-            <Button
+            <ConfirmButton
               variant="ghost"
-              onClick={() => discard.mutate({ jobId: id })}
+              onConfirm={() => discard.mutate({ jobId: id })}
               loading={discard.isPending}
             >
               <Trash2 className="size-4" />
               {t.imports.importReview.removeUpload}
-            </Button>
+            </ConfirmButton>
           </div>
           {retry.error ? (
             <Notice tone="error" className="mt-4">
@@ -386,7 +345,21 @@ export function ImportReview({ id }: { id: string }) {
           ) : null}
         </section>
       ) : (
-        <div className="space-y-4 pb-24">
+        <div
+          // On phones the commit bar is fixed above the tab bar, so leave room for its measured
+          // height; on desktop it is sticky and in flow, so the usual gap is enough.
+          className={cn(
+            "space-y-4 lg:pb-24",
+            reviewBottomPadding ? "pb-(--review-bar-space)" : "pb-44",
+          )}
+          style={
+            reviewBottomPadding
+              ? ({
+                  "--review-bar-space": `${reviewBottomPadding}px`,
+                } as CSSProperties)
+              : undefined
+          }
+        >
           <Summary job={job} check={balanceCheck} />
           {job.status === "needs_review" &&
           balanceCheck.requiresAcknowledgment ? (
@@ -518,72 +491,38 @@ export function ImportReview({ id }: { id: string }) {
           )}
 
           {job.status === "needs_review" ? (
-            <div className="card fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center gap-3 px-4 py-3 lg:sticky lg:inset-x-auto lg:bottom-4">
-              <p className="text-ink-2 mr-auto text-[13px]">
-                {t.imports.importReview.selected(
-                  accepted.length,
-                  rows.length,
-                  undecided.length,
-                )}
-                {mismatches.length > 0 ? (
-                  <span className="text-warn">
-                    {t.imports.importReview.warnings(mismatches.length)}
-                  </span>
-                ) : null}
-              </p>
-              {needsDate ? (
-                <label className="flex items-center gap-2 text-[13px]">
-                  <span className="text-ink-2">
-                    {t.imports.importReview.asOf}
-                  </span>
-                  <Input
-                    type="date"
-                    value={asOf}
-                    onChange={(e) => setAsOf(e.target.value)}
-                    className="h-8 w-40"
-                  />
-                </label>
-              ) : null}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => discard.mutate({ jobId: id })}
-                loading={discard.isPending}
-              >
-                {t.imports.importReview.discard}
-              </Button>
-              <Button
-                onClick={() =>
-                  commit.mutate({
-                    jobId: id,
-                    asOf,
-                    acknowledgeBalanceMismatch: acknowledged,
-                  })
-                }
-                loading={commit.isPending}
-                disabled={
-                  accepted.length === 0 ||
-                  (balanceCheck.requiresAcknowledgment && !acknowledged) ||
-                  undecided.length > 0 ||
-                  !asOf ||
-                  update.isPending ||
-                  editingAmount !== null ||
-                  !job.accountId ||
-                  !!job.accountArchivedAt
-                }
-              >
-                <Check className="size-4" />
-                {t.imports.importReview.saveTo(
-                  accepted.length,
-                  job.accountName,
-                )}
-              </Button>
-              {commit.error ? (
-                <Notice tone="error" className="w-full">
-                  {errorMessage(commit.error)}
-                </Notice>
-              ) : null}
-            </div>
+            <ReviewCommitBar
+              acceptedCount={accepted.length}
+              totalCount={rows.length}
+              undecidedCount={undecided.length}
+              mismatchCount={mismatches.length}
+              needsDate={needsDate}
+              asOf={asOf}
+              onAsOfChange={setAsOf}
+              accountName={job.accountName}
+              onDiscard={() => discard.mutate({ jobId: id })}
+              discardPending={discard.isPending}
+              onCommit={() =>
+                commit.mutate({
+                  jobId: id,
+                  asOf,
+                  acknowledgeBalanceMismatch: acknowledged,
+                })
+              }
+              commitPending={commit.isPending}
+              commitDisabled={
+                accepted.length === 0 ||
+                (balanceCheck.requiresAcknowledgment && !acknowledged) ||
+                undecided.length > 0 ||
+                !asOf ||
+                update.isPending ||
+                editingAmount !== null ||
+                !job.accountId ||
+                !!job.accountArchivedAt
+              }
+              commitError={commit.error}
+              onHeightChange={setCommitBarHeight}
+            />
           ) : null}
         </div>
       )}
@@ -594,7 +533,7 @@ export function ImportReview({ id }: { id: string }) {
         onClose={() => setRemoving(null)}
         onRemoved={async () => {
           setRemoving(null);
-          setFlash(t.imports.importReview.rowRemovedFromTheAccount);
+          flash.success(t.imports.importReview.rowRemovedFromTheAccount);
           await Promise.all([
             utils.imports.invalidate(),
             utils.accounts.invalidate(),
@@ -605,879 +544,5 @@ export function ImportReview({ id }: { id: string }) {
         }}
       />
     </RowControls.Provider>
-  );
-}
-
-function Summary({
-  job,
-  check,
-}: {
-  job: Job;
-  check: ReturnType<typeof checkImportBalance>;
-}) {
-  const t = useT();
-  const locale = useLocale();
-  const s = job.summary;
-  if (!s) return null;
-  const currency = check.currency;
-  const facts = [
-    {
-      label: t.imports.importReview.document,
-      value:
-        documentLabels(t)[s.documentType] ?? t.imports.importReview.document,
-    },
-    {
-      label: t.imports.importReview.period,
-      value:
-        s.periodStart && s.periodEnd
-          ? s.periodStart === s.periodEnd
-            ? formatDate(s.periodEnd, locale)
-            : `${s.periodStart.slice(0, 4) === s.periodEnd.slice(0, 4) ? shortDate(s.periodStart, locale) : formatDate(s.periodStart, locale)} – ${formatDate(s.periodEnd, locale)}`
-          : s.periodEnd
-            ? formatDate(s.periodEnd, locale)
-            : t.imports.importReview.notShown,
-    },
-    ...(check.openingBalance !== null
-      ? [
-          {
-            label: t.imports.importReview.opening,
-            value: money(check.openingBalance, currency),
-          },
-        ]
-      : []),
-    ...(check.closingBalance !== null
-      ? [
-          {
-            label: t.imports.importReview.closing,
-            value: money(check.closingBalance, currency),
-          },
-        ]
-      : []),
-  ];
-  return (
-    <section className="card overflow-hidden">
-      <div className="ink-strip h-1.5" />
-      <div className="p-5 sm:p-8">
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-          {facts.map((f) => (
-            <div key={f.label} className="min-w-0">
-              <dt className="eyebrow">{f.label}</dt>
-              <dd className="figures mt-1 text-[15px] font-semibold">
-                {f.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <div className="mt-5 space-y-3 text-[13px]">
-          {check.provisional ? (
-            <Tag tone="warn">
-              {t.imports.importReview.provisionalDecidePossibleDuplicates}
-            </Tag>
-          ) : null}
-          {!check.complete ? (
-            <p className="text-ink-2">
-              {t.imports.summary.unverified(
-                check.openingBalance !== null && check.closingBalance !== null,
-              )}
-            </p>
-          ) : null}
-          {check.currencies.map((c) =>
-            c.extraction.difference === null ? (
-              c.lineCount > 0 ? (
-                <p key={c.currency} className="text-ink-2">
-                  {t.imports.summary.excluded(c.lineCount, c.currency)}
-                </p>
-              ) : null
-            ) : (
-              <div key={c.currency} className="space-y-1">
-                <p className="font-semibold">
-                  {t.imports.summary.balanceCheck(c.currency)}
-                </p>
-                {(
-                  [
-                    [t.imports.importReview.extractionBalances, c.extraction],
-                    [t.imports.importReview.savedRecordsWillBalance, c.saved],
-                  ] as const
-                ).map(([label, result]) => (
-                  <p
-                    key={label}
-                    className={result.balances ? "text-gain" : "text-warn"}
-                  >
-                    {t.imports.summary.result(
-                      label,
-                      result.balances,
-                      money(new Decimal(result.difference!).abs(), c.currency),
-                      new Decimal(result.difference!).isPositive(),
-                    )}
-                  </p>
-                ))}
-                {c.skippedRows.length > 0 ? (
-                  <div className="text-ink-2">
-                    <p>
-                      {t.imports.summary.skipped(
-                        c.skippedExplainDifference,
-                        money(c.skippedTotal, c.currency, true),
-                      )}
-                    </p>
-                    <ul className="mt-1 space-y-1">
-                      {c.skippedRows.map((r) => (
-                        <li key={r.id}>
-                          {r.postedDate
-                            ? `${shortDate(r.postedDate, locale)} · `
-                            : ""}
-                          {r.description} · {money(r.amount, c.currency, true)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            ),
-          )}
-          {s.balanceAcknowledgment ? (
-            <Tag tone="warn">
-              {t.imports.importReview.savedWithAnAcknowledgedBalance}
-            </Tag>
-          ) : null}
-        </div>
-        {s.warnings.length > 0 ? (
-          <ul className="mt-4 space-y-1">
-            {s.warnings.map((w) => (
-              <li key={w} className="text-warn flex gap-2 text-[13px]">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                {w}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {job.model ? (
-          <p className="text-ink-3 mt-4 font-mono text-[11px] tracking-wide">
-            {t.imports.summary.readBy(job.model.toUpperCase())}
-          </p>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function RowControl({
-  row,
-  ...props
-}: {
-  row: Row;
-  checked: boolean;
-  disabled: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-}) {
-  const t = useT();
-  const controls = useContext(RowControls);
-  if (!controls.completed)
-    return (
-      <Toggle {...props} disabled={props.disabled || !controls.canRemove} />
-    );
-  if (row.removed) return <Tag>{t.imports.importReview.removed}</Tag>;
-  if (!row.committedRecordId)
-    return <Tag>{t.imports.importReview.excluded}</Tag>;
-  return (
-    <button
-      type="button"
-      aria-label={t.imports.importReview.remove(props.label)}
-      title={
-        controls.canRemove
-          ? t.imports.importReview.reviewRemoval
-          : t.imports.importReview.restoreTheOriginalAccountToText
-      }
-      disabled={!controls.canRemove}
-      onClick={() => controls.onRemove(row)}
-      className="text-loss hover:bg-wash rounded-ctl grid size-10 shrink-0 place-items-center disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      <Trash2 className="size-4" />
-    </button>
-  );
-}
-
-function Toggle({
-  checked,
-  disabled,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  disabled: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-}) {
-  return (
-    <input
-      type="checkbox"
-      aria-label={label}
-      checked={checked}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.checked)}
-      className="accent-ink size-4 shrink-0 cursor-pointer disabled:cursor-default"
-    />
-  );
-}
-
-function SelectAll({
-  rows,
-  disabled,
-  onDecision,
-}: {
-  rows: Row[];
-  disabled: boolean;
-  onDecision: (ids: string[], decision: "accept" | "skip") => void;
-}) {
-  const t = useT();
-  if (disabled || rows.length < 2) return null;
-  return (
-    <div className="flex gap-1">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() =>
-          onDecision(
-            rows.filter((r) => r.decision !== "accept").map((r) => r.id),
-            "accept",
-          )
-        }
-      >
-        {t.imports.importReview.all}
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() =>
-          onDecision(
-            rows.filter((r) => r.decision !== "skip").map((r) => r.id),
-            "skip",
-          )
-        }
-      >
-        {t.imports.importReview.none}
-      </Button>
-    </div>
-  );
-}
-
-function MatchTag({ status }: { status: Row["matchStatus"] }) {
-  const t = useT();
-  if (status === "duplicate")
-    return <Tag tone="outline">{t.imports.importReview.alreadyRecorded}</Tag>;
-  if (status === "possible_duplicate")
-    return <Tag tone="warn">{t.imports.importReview.similarOneRecorded}</Tag>;
-  return null;
-}
-
-function DuplicateDecision({
-  row,
-  disabled,
-  onDecision,
-}: {
-  row: Row;
-  disabled: boolean;
-  onDecision: (ids: string[], decision: "accept" | "skip") => void;
-}) {
-  const t = useT();
-  if (disabled || row.matchStatus !== "possible_duplicate") return null;
-  return (
-    <span className="mt-2 flex items-center gap-2">
-      {row.decision === "pending" ? (
-        <Tag tone="warn">{t.imports.importReview.needsDecision}</Tag>
-      ) : null}
-      <Button
-        variant="secondary"
-        size="sm"
-        disabled={row.decision === "accept"}
-        onClick={() => onDecision([row.id], "accept")}
-      >
-        {t.imports.importReview.keep}
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={row.decision === "skip"}
-        onClick={() => onDecision([row.id], "skip")}
-      >
-        {t.imports.importReview.skip}
-      </Button>
-    </span>
-  );
-}
-
-function TransactionsSection({
-  rows,
-  disabled,
-  onDecision,
-  onCategory,
-  onTransfer,
-}: {
-  rows: RowOf<"transaction">[];
-  disabled: boolean;
-  onDecision: (ids: string[], decision: "accept" | "skip") => void;
-  onCategory: (rowId: string, categoryId: string | null) => void;
-  onTransfer: (rowId: string, isTransfer: boolean) => void;
-}) {
-  const t = useT();
-  const locale = useLocale();
-  const [categories] = api.catalog.categories.useSuspenseQuery();
-  const ordered = orderCategories(categories);
-  const currencies = [...new Set(rows.map((r) => r.data.currency))];
-  const sum = (currency: string, sign: 1 | -1) =>
-    rows
-      .filter(
-        (r) =>
-          r.decision === "accept" &&
-          r.data.currency === currency &&
-          !r.data.isTransfer &&
-          new Decimal(r.data.amount).isPositive() === sign > 0,
-      )
-      .reduce((t, r) => t.plus(r.data.amount), new Decimal(0))
-      .abs();
-
-  return (
-    <Section
-      title={t.imports.importReview.transactions(rows.length)}
-      description={
-        !disabled && rows.length > 0
-          ? t.imports.importReview.totals(
-              currencies
-                .map((currency) => money(sum(currency, 1), currency))
-                .join(" · "),
-              currencies
-                .map((currency) => money(sum(currency, -1), currency))
-                .join(" · "),
-            )
-          : undefined
-      }
-      actions={
-        <SelectAll rows={rows} disabled={disabled} onDecision={onDecision} />
-      }
-    >
-      {rows.length === 0 ? (
-        <p className="text-ink-2 text-sm">
-          {t.imports.importReview.noTransactionsWereFound}
-        </p>
-      ) : (
-        <ul className="-mx-1">
-          {rows.map((r) => {
-            const amount = new Decimal(r.data.amount);
-            const skipped = r.decision === "skip";
-            return (
-              <li
-                key={r.id}
-                className={cn(
-                  "border-line grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 border-b px-1 py-3 last:border-b-0 sm:grid-cols-[auto_4.5rem_minmax(0,1fr)_12rem_auto] sm:items-center",
-                  skipped && "opacity-50",
-                  r.decision === "pending" && "bg-warn-wash",
-                )}
-              >
-                <span className="pt-0.5 sm:pt-0">
-                  <RowControl
-                    row={r}
-                    checked={r.decision === "accept"}
-                    disabled={disabled}
-                    label={t.imports.importReview.saveRow(r.data.description)}
-                    onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
-                  />
-                </span>
-                <span className="figures text-ink-3 hidden font-mono text-[12px] sm:block">
-                  {shortDate(r.data.postedDate, locale)}
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-[14px] font-semibold">
-                    {r.data.merchant ?? r.data.description}
-                  </span>
-                  <span className="text-ink-3 block truncate text-[12px]">
-                    <span className="sm:hidden">
-                      {shortDate(r.data.postedDate, locale)}
-                      {r.data.merchant ? " · " : ""}
-                    </span>
-                    {r.data.merchant ? r.data.description : null}
-                    {r.data.reference
-                      ? t.imports.importReview.reference(r.data.reference)
-                      : null}
-                    {r.data.originalAmount && r.data.originalCurrency
-                      ? ` · ${money(r.data.originalAmount, r.data.originalCurrency)}`
-                      : null}
-                  </span>
-                  <span className="mt-1 flex flex-wrap gap-1">
-                    {r.data.isTransfer ? (
-                      <Tag>{t.imports.importReview.transfer}</Tag>
-                    ) : null}
-                    <MatchTag status={r.matchStatus} />
-                    {r.data.signMismatch ? (
-                      <Tag tone="warn">
-                        {t.imports.importReview.checkAmountdirection}
-                      </Tag>
-                    ) : null}
-                  </span>
-                  <AmountWarning row={r} disabled={disabled} />
-                  <DuplicateDecision
-                    row={r}
-                    disabled={disabled}
-                    onDecision={onDecision}
-                  />
-                  <span className="mt-2 block sm:hidden">
-                    <CategoryPicker
-                      row={r}
-                      categories={ordered}
-                      disabled={disabled}
-                      onCategory={onCategory}
-                      onTransfer={onTransfer}
-                    />
-                  </span>
-                </span>
-                <span className="hidden sm:block">
-                  <CategoryPicker
-                    row={r}
-                    categories={ordered}
-                    disabled={disabled}
-                    onCategory={onCategory}
-                    onTransfer={onTransfer}
-                  />
-                </span>
-                <span
-                  className={cn(
-                    "figures text-right font-mono text-[13px] font-semibold",
-                    amount.isPositive() && "text-gain",
-                  )}
-                >
-                  <RowAmount row={r} disabled={disabled} />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </Section>
-  );
-}
-
-function AmountWarning({
-  row,
-  disabled,
-}: {
-  row: RowOf<"transaction">;
-  disabled: boolean;
-}) {
-  const t = useT();
-  const controls = useContext(RowControls);
-  const data = row.data;
-  if (!data.signMismatch) return null;
-  const direction =
-    data.printedDirection === "credit"
-      ? "CR "
-      : data.printedDirection === "debit"
-        ? "DR "
-        : "";
-  return (
-    <span className="text-warn mt-1 block text-[12px]">
-      {t.imports.importReview.printed(
-        direction,
-        data.printedAmount ?? new Decimal(data.amount).abs().toFixed(),
-      )}
-      {!disabled ? (
-        <span className="mt-1 flex flex-wrap gap-1">
-          {data.suggestedAmount !== null ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => controls.onAmount(row.id, data.suggestedAmount!)}
-            >
-              {t.imports.importReview.useAmount(
-                money(data.suggestedAmount, data.currency, true),
-              )}
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => controls.onConfirmAmount(row.id)}
-          >
-            {t.imports.importReview.confirmCurrentAmount}
-          </Button>
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function RowAmount({
-  row,
-  disabled,
-}: {
-  row:
-    | RowOf<"transaction">
-    | RowOf<"cash_balance">
-    | RowOf<"investment_transaction">;
-  disabled: boolean;
-}) {
-  const t = useT();
-  const controls = useContext(RowControls);
-  const [draft, setDraft] = useState(row.data.amount);
-  const editing = controls.editingAmount === row.id;
-  const valid = moneyInput.safeParse(draft).success;
-  const label =
-    row.kind === "transaction"
-      ? row.data.description
-      : row.kind === "cash_balance"
-        ? t.imports.importReview.balanceLabel(
-            row.data.currency,
-            row.data.bucket ? t.common.cpfBuckets[row.data.bucket] : null,
-          )
-        : t.imports.importReview.activityLabel(
-            activityLabels(t)[row.data.type] ?? row.data.type,
-            row.data.symbol,
-          );
-  return (
-    <span className="inline-grid gap-1">
-      {money(row.data.amount, row.data.currency, row.kind !== "cash_balance")}
-      {!disabled && !editing ? (
-        <button
-          type="button"
-          className="text-ink-3 text-right font-sans text-[12px] font-normal underline"
-          aria-label={t.imports.importReview.editAmountFor(label)}
-          onClick={() => {
-            setDraft(row.data.amount);
-            controls.setEditingAmount(row.id);
-          }}
-        >
-          {t.imports.importReview.editAmount}
-        </button>
-      ) : null}
-      {!disabled && editing ? (
-        <span className="grid max-w-52 gap-1 font-sans font-normal">
-          <Input
-            aria-label={t.imports.importReview.amountFor(label)}
-            inputMode="decimal"
-            value={draft}
-            aria-invalid={!valid}
-            onChange={(e) => setDraft(e.target.value)}
-            className="h-8"
-          />
-          <span className="text-ink-3 text-[11px]">
-            {row.kind === "cash_balance"
-              ? t.imports.importReview.negativeDebtoverdraftPositiveCashcredit
-              : t.imports.importReview.negativeMoneyOutPositiveMoney}
-          </span>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            disabled={!valid}
-            onClick={() =>
-              setDraft(new Decimal(draft.trim()).negated().toFixed())
-            }
-          >
-            {t.imports.importReview.flipDirection}
-          </Button>
-          <span className="flex justify-end gap-1">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => controls.setEditingAmount(null)}
-            >
-              {t.imports.importReview.cancel}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!valid}
-              onClick={() => {
-                controls.onAmount(row.id, draft.trim());
-                controls.setEditingAmount(null);
-              }}
-            >
-              {t.imports.importReview.applyAmount}
-            </Button>
-          </span>
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function CategoryPicker({
-  row,
-  categories,
-  disabled,
-  onCategory,
-  onTransfer,
-}: {
-  row: RowOf<"transaction">;
-  categories: RouterOutputs["catalog"]["categories"];
-  disabled: boolean;
-  onCategory: (rowId: string, categoryId: string | null) => void;
-  onTransfer: (rowId: string, isTransfer: boolean) => void;
-}) {
-  const t = useT();
-  return (
-    <span className="grid gap-1">
-      <TransactionTypeSelect
-        value={transactionType(row.data.amount, row.data.isTransfer)}
-        disabled={disabled}
-        expenseDisabled={new Decimal(row.data.amount).isPositive()}
-        incomeDisabled={!new Decimal(row.data.amount).isPositive()}
-        onChange={(value) => onTransfer(row.id, value === "transfer")}
-      />
-      <Select
-        aria-label={t.imports.importReview.category}
-        value={row.data.categoryId ?? ""}
-        disabled={disabled}
-        onChange={(e) => onCategory(row.id, e.target.value || null)}
-        className={cn("h-8 text-[12px]", !row.data.categoryId && "text-ink-3")}
-      >
-        <option value="">{t.imports.importReview.uncategorised}</option>
-        {categories.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.parentId
-              ? `— ${categoryLabel(t, c.name)}`
-              : categoryLabel(t, c.name)}
-          </option>
-        ))}
-      </Select>
-    </span>
-  );
-}
-
-function BalanceSection({
-  rows,
-  asOf,
-  disabled,
-  onDecision,
-}: {
-  rows: RowOf<"cash_balance">[];
-  asOf: string;
-  disabled: boolean;
-  onDecision: (ids: string[], decision: "accept" | "skip") => void;
-}) {
-  const t = useT();
-  const locale = useLocale();
-  if (rows.length === 0) return null;
-  return (
-    <Section
-      title={t.imports.importReview.closingBalance}
-      description={t.imports.importReview.savedAsTheAccountsBalance}
-    >
-      {rows.map((r) => (
-        <div key={r.id} className="flex items-center gap-3 py-2 text-sm">
-          <RowControl
-            row={r}
-            checked={r.decision === "accept"}
-            disabled={disabled}
-            label={
-              r.data.bucket
-                ? t.imports.importReview.saveBucket(
-                    t.common.cpfBuckets[r.data.bucket],
-                  )
-                : t.imports.importReview.saveTheClosingBalance
-            }
-            onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
-          />
-          <span>
-            {t.imports.importReview.recordBefore}{" "}
-            <span className="figures font-mono font-semibold">
-              <RowAmount row={r} disabled={disabled} />
-            </span>{" "}
-            {t.imports.importReview.recordAfter(
-              r.data.bucket ? t.common.cpfBuckets[r.data.bucket] : null,
-              asOf
-                ? formatDate(asOf, locale)
-                : t.imports.importReview.statementDate,
-            )}
-          </span>
-        </div>
-      ))}
-    </Section>
-  );
-}
-
-function HoldingsSection({
-  positions,
-  cash,
-  disabled,
-  onDecision,
-}: {
-  positions: RowOf<"position">[];
-  cash: RowOf<"cash_balance">[];
-  disabled: boolean;
-  onDecision: (ids: string[], decision: "accept" | "skip") => void;
-}) {
-  const t = useT();
-  const all = [...positions, ...cash];
-  return (
-    <Section
-      title={t.imports.importReview.holdings(positions.length)}
-      description={t.imports.importReview.savedTogetherAsWhatThe}
-      actions={
-        <SelectAll rows={all} disabled={disabled} onDecision={onDecision} />
-      }
-    >
-      {all.length === 0 ? (
-        <p className="text-ink-2 text-sm">
-          {t.imports.importReview.noHoldingsOrCashWere}
-        </p>
-      ) : (
-        <ul className="-mx-1">
-          {positions.map((r) => (
-            <li
-              key={r.id}
-              className={cn(
-                "border-line grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b px-1 py-3",
-                r.decision !== "accept" && "opacity-50",
-              )}
-            >
-              <RowControl
-                row={r}
-                checked={r.decision === "accept"}
-                disabled={disabled}
-                label={t.imports.importReview.saveSymbol(r.data.symbol)}
-                onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
-              />
-              <span className="min-w-0">
-                <span className="block truncate text-[14px] font-semibold">
-                  {r.data.symbol}
-                  {r.data.exchange ? (
-                    <span className="text-ink-3 ml-1.5 text-[12px] font-normal">
-                      {r.data.exchange}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="text-ink-3 block truncate text-[12px]">
-                  {[
-                    t.common.assetClasses[r.data.assetClass],
-                    r.data.name,
-                    `${formatQuantity(r.data.quantity)}${r.data.price ? ` × ${money(r.data.price, r.data.currency)}` : ""}`,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </span>
-              <span className="figures text-right font-mono text-[13px] font-semibold">
-                {r.data.value
-                  ? money(r.data.value, r.data.currency)
-                  : r.data.price
-                    ? money(
-                        new Decimal(r.data.quantity).times(r.data.price),
-                        r.data.currency,
-                      )
-                    : t.imports.importReview.noPrice}
-              </span>
-            </li>
-          ))}
-          {cash.map((r) => (
-            <li
-              key={r.id}
-              className={cn(
-                "border-line grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b px-1 py-3 last:border-b-0",
-                r.decision !== "accept" && "opacity-50",
-              )}
-            >
-              <RowControl
-                row={r}
-                checked={r.decision === "accept"}
-                disabled={disabled}
-                label={t.imports.importReview.saveCash(r.data.currency)}
-                onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
-              />
-              <span className="text-[14px] font-semibold">
-                {t.imports.importReview.cash(r.data.currency)}
-              </span>
-              <span className="figures text-right font-mono text-[13px] font-semibold">
-                <RowAmount row={r} disabled={disabled} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Section>
-  );
-}
-
-function ActivitySection({
-  rows,
-  disabled,
-  onDecision,
-}: {
-  rows: RowOf<"investment_transaction">[];
-  disabled: boolean;
-  onDecision: (ids: string[], decision: "accept" | "skip") => void;
-}) {
-  const t = useT();
-  const locale = useLocale();
-  if (rows.length === 0) return null;
-  return (
-    <Section
-      title={t.imports.importReview.activity(rows.length)}
-      description={t.imports.importReview.buysSellsDividendsFeesAnd}
-      actions={
-        <SelectAll rows={rows} disabled={disabled} onDecision={onDecision} />
-      }
-    >
-      <ul className="-mx-1">
-        {rows.map((r) => (
-          <li
-            key={r.id}
-            className={cn(
-              "border-line grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b px-1 py-3 last:border-b-0",
-              r.decision === "skip" && "opacity-50",
-              r.decision === "pending" && "bg-warn-wash",
-            )}
-          >
-            <RowControl
-              row={r}
-              checked={r.decision === "accept"}
-              disabled={disabled}
-              label={t.imports.importReview.saveActivity(
-                activityLabels(t)[r.data.type] ?? r.data.type,
-                r.data.symbol,
-              )}
-              onChange={(c) => onDecision([r.id], c ? "accept" : "skip")}
-            />
-            <span className="min-w-0">
-              <span className="block truncate text-[14px] font-semibold">
-                {activityLabels(t)[r.data.type]}
-                {r.data.symbol ? ` · ${r.data.symbol}` : ""}
-              </span>
-              <span className="text-ink-3 block truncate text-[12px]">
-                {[
-                  formatDate(r.data.tradeDate, locale),
-                  r.data.quantity && r.data.price
-                    ? `${formatQuantity(r.data.quantity)} × ${money(r.data.price, r.data.currency)}`
-                    : null,
-                  r.data.description,
-                  r.data.reference
-                    ? t.imports.importReview.ref(r.data.reference)
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              <span className="mt-1 flex gap-1">
-                <MatchTag status={r.matchStatus} />
-              </span>
-              <DuplicateDecision
-                row={r}
-                disabled={disabled}
-                onDecision={onDecision}
-              />
-            </span>
-            <span
-              className={cn(
-                "figures text-right font-mono text-[13px] font-semibold",
-                new Decimal(r.data.amount).isPositive() && "text-gain",
-              )}
-            >
-              <RowAmount row={r} disabled={disabled} />
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Section>
   );
 }
