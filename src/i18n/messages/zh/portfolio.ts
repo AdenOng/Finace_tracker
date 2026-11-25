@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/portfolio";
 import type { Translation } from "../../types";
 
@@ -43,21 +44,36 @@ const portfolio: Translation<typeof en> = {
     synced: "已同步",
     exchangeRateUnavailable: " · 暂无汇率",
     beforeConversion: "（换汇前）",
-    summary: (positions: number, accounts: number, date: string | null) =>
-      `${accounts} 个账户，共 ${positions} 项持仓${date ? `，截至 ${date}` : ""}。`,
+    summary: message<
+      [positions: number, accounts: number, date: string | null]
+    >([
+      "text",
+      1,
+      " 个账户，共 ",
+      0,
+      " 项持仓",
+      ["if", 2, ["text", "，截至 ", 2], ""],
+      "。",
+    ]),
     includesBefore: "其中 SRS 为",
     includesAfter: "。",
-    costCount: (percent: string | null, count: number, total: number) =>
-      `${percent !== null ? `${percent} · ` : ""}${total} 项持仓中有 ${count} 项已记录成本`,
-    unpriced: (n: number) => `${n} 项持仓暂无价格，未计入市值。`,
-    holdingsCount: (n: number) => `持仓 · ${n}`,
-    fxDate: (date: string) => ` 汇率截至 ${date}。`,
-    archivedBefore: (n: number) => `${n} 个已归档账户未计入（`,
+    costCount: message<[percent: string | null, count: number, total: number]>([
+      "text",
+      ["if", ["!==", 0, null], ["text", 0, " · "], ""],
+      2,
+      " 项持仓中有 ",
+      1,
+      " 项已记录成本",
+    ]),
+    unpriced: message<[n: number]>("{0} 项持仓暂无价格，未计入市值。"),
+    holdingsCount: message<[n: number]>("持仓 · {0}"),
+    fxDate: message<[date: string]>(" 汇率截至 {0}。"),
+    archivedBefore: message<[n: number]>("{0} 个已归档账户未计入（"),
     archivedAfter: "）。",
-    brokerCount: (n: number) => ` · ${n} 家券商`,
-    quoteDate: (date: string) => ` · 报价 ${date}`,
+    brokerCount: message<[n: number]>(" · {0} 家券商"),
+    quoteDate: message<[date: string]>(" · 报价 {0}"),
     unitsWeight: " 单位 · ",
-    unitsDate: (date: string) => `单位 · ${date}`,
+    unitsDate: message<[date: string]>("单位 · {0}"),
   },
   meta: {
     title: "合并投资组合",

@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/workspaces";
 import type { Translation } from "../../types";
 const workspaces: Translation<typeof en> = {
@@ -23,11 +24,12 @@ const workspaces: Translation<typeof en> = {
     joinWorkspace: "加入共享空间",
   },
   workspaceDetail: {
-    balances: (currency: string) => `最新记录的余额，以 ${currency} 显示。`,
-    unpricedExcluded: (n: number) => `${n} 项缺少价格的持仓未计入。`,
-    unpriced: (n: number) => `${n} 项缺少价格`,
-    snapshot: (date: string) =>
-      `最新快照：${date}。各账户的快照日期可能不同。超过 45 天的余额会标记为待更新。`,
+    balances: message<[currency: string]>("最新记录的余额，以 {0} 显示。"),
+    unpricedExcluded: message<[n: number]>("{0} 项缺少价格的持仓未计入。"),
+    unpriced: message<[n: number]>("{0} 项缺少价格"),
+    snapshot: message<[date: string]>(
+      "最新快照：{0}。各账户的快照日期可能不同。超过 45 天的余额会标记为待更新。",
+    ),
     archived: " · 已归档",
 
     backToWorkspaces: "返回共享空间",
@@ -60,8 +62,10 @@ const workspaces: Translation<typeof en> = {
   workspaceManagement: {
     archived: "（已归档）",
     you: "（你）",
-    invitation: (email: string, role: string, date: string) =>
-      `${email} · ${role} · ${date} 到期`,
+    invitation:
+      message<[email: string, role: string, date: string]>(
+        "{0} · {1} · {2} 到期",
+      ),
 
     theActionCouldNotBeCompleted: "无法完成此操作",
     accountSharing: "账户共享",

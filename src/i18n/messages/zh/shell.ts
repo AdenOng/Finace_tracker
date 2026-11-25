@@ -29,6 +29,7 @@ const shell: Translation<typeof en> = {
   },
   signOut: "退出登录",
   openMenu: "打开菜单",
+  skipToContent: "跳至正文",
   meta: {
     description: "一站掌握所有账户的净资产与收支。",
   },

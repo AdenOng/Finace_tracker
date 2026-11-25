@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const settings = {
   countCpfSrs: {
     countCpfAndSrsIn: "Count CPF and SRS in net worth",
@@ -25,8 +26,13 @@ const settings = {
     noPasskeysYetAPasskey:
       "No passkeys yet. A passkey lets you sign in with Face ID, Touch ID or Windows Hello instead of a password.",
     addAPasskey: "Add a passkey",
-    added: (date: string, synced: boolean) =>
-      `Added ${date} · ${synced ? "Synced" : "This device only"}`,
+    added: message<[date: string, synced: boolean]>([
+      "text",
+      "Added ",
+      0,
+      " · ",
+      ["if", 1, "Synced", "This device only"],
+    ]),
   },
   passwordCard: {
     theNewPasswordsDontMatch: "The new passwords don't match.",
@@ -41,9 +47,10 @@ const settings = {
     recommendedIfYouThinkSomeone:
       "Recommended if you think someone else knows your password.",
     changePassword: "Change password",
-    minPassword: (n: number) =>
-      `Use at least ${n} characters for the new password.`,
-    minHint: (n: number) => `At least ${n} characters.`,
+    minPassword: message<[n: number]>(
+      "Use at least {0} characters for the new password.",
+    ),
+    minHint: message<[n: number]>("At least {0} characters."),
   },
   profileCard: {
     enterYourName: "Enter your name.",
@@ -61,17 +68,31 @@ const settings = {
     signOut: "Sign out?",
     signOutText: "Sign out",
     signOutOfAllOther: "Sign out of all other devices",
-    revoked: (n: number) =>
-      n === 1
-        ? "Signed out of 1 other device."
-        : `Signed out of ${n} other devices.`,
-    activity: (ip: string, current: boolean, relative: string, date: string) =>
-      `${ip} · ${current ? "active now" : `active ${relative}`} · signed in ${date}`,
-    confirmDevices: (n: number) =>
-      `Sign out ${n === 1 ? "1 device" : `${n} devices`}?`,
+    revoked: message<[n: number]>([
+      "if",
+      ["===", 0, ["number", 1]],
+      "Signed out of 1 other device.",
+      ["text", "Signed out of ", 0, " other devices."],
+    ]),
+    activity: message<
+      [ip: string, current: boolean, relative: string, date: string]
+    >([
+      "text",
+      0,
+      " · ",
+      ["if", 1, "active now", ["text", "active ", 2]],
+      " · signed in ",
+      3,
+    ]),
+    confirmDevices: message<[n: number]>([
+      "text",
+      "Sign out ",
+      ["if", ["===", 0, ["number", 1]], "1 device", ["text", 0, " devices"]],
+      "?",
+    ]),
     unknownDevice: "Unknown device",
     browser: "Browser",
-    deviceOn: (browser: string, os: string) => `${browser} on ${os}`,
+    deviceOn: message<[browser: string, os: string]>("{0} on {1}"),
     methods: {
       password: "Password",
       two_factor: "Password + two-step",
@@ -125,8 +146,11 @@ const settings = {
     signedinDevices: "Signed-in devices",
     whereYourAccountIsSigned:
       "Where your account is signed in. Sign out anything you don't recognise.",
-    enrolment: (welcome: boolean) =>
-      `${welcome ? "Welcome aboard. " : ""}This instance requires two-step sign-in. Set up an authenticator app below to unlock the rest of the app.`,
+    enrolment: message<[welcome: boolean]>([
+      "text",
+      ["if", 0, "Welcome aboard. ", ""],
+      "This instance requires two-step sign-in. Set up an authenticator app below to unlock the rest of the app.",
+    ]),
   },
 };
 export default settings;

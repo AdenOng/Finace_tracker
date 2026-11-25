@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const landing = {
   meta: {
     title: "Sign in",
@@ -18,8 +19,9 @@ const landing = {
     keepBody:
       "It runs on your own server. New users need an invite. Sign in with email and password or a passkey, with two-step verification for added protection. AI provider keys are stored encrypted.",
     sample: "The poster uses made-up figures, not anyone's real data.",
-    addBody: (count: number, currencies: number) =>
-      `Pick from ${count} brokers and banks (IBKR, moomoo, Tiger, DBS and the rest) or add your own. Each account keeps its own currency, and ${currencies} currencies are supported.`,
+    addBody: message<[count: number, currencies: number]>(
+      "Pick from {0} brokers and banks (IBKR, moomoo, Tiger, DBS and the rest) or add your own. Each account keeps its own currency, and {1} currencies are supported.",
+    ),
   },
   book: {
     accounts: "Accounts",
@@ -38,10 +40,11 @@ const landing = {
       "The accounts on the left add up to the net worth on the right.",
     captionBody:
       "The line shows net worth so far, and the allocation below shows what it's made of. Drag a page corner, click a page or pick a month to turn. Sample figures.",
-    from: (month: string) => `From ${month}`,
-    monthAccounts: (month: string) => `${month} · accounts`,
-    aria: (month: string) =>
-      `Sample ledger, ${month}. Use the arrow keys to turn pages.`,
+    from: message<[month: string]>("From {0}"),
+    monthAccounts: message<[month: string]>("{0} · accounts"),
+    aria: message<[month: string]>(
+      "Sample ledger, {0}. Use the arrow keys to turn pages.",
+    ),
   },
   chart: {
     overTime: "NET WORTH OVER TIME",
@@ -49,17 +52,18 @@ const landing = {
     lastDecember: "last December",
     up: "up",
     down: "down",
-    aria: (
-      start: string,
-      end: string,
-      worth: string,
-      direction: string,
-      change: string,
-    ) =>
-      `Sample portfolio, ${start} to ${end}: net worth ${worth}, ${direction} ${change} on the month.`,
-    page: (page: string) => `PAGE ${page} OF 12`,
-    worthMonth: (month: string) => `NET WORTH · ${month}`,
-    onMonth: (month: string) => `on ${month}`,
+    aria: message<
+      [
+        start: string,
+        end: string,
+        worth: string,
+        direction: string,
+        change: string,
+      ]
+    >("Sample portfolio, {0} to {1}: net worth {2}, {3} {4} on the month."),
+    page: message<[page: string]>("PAGE {0} OF 12"),
+    worthMonth: message<[month: string]>("NET WORTH · {0}"),
+    onMonth: message<[month: string]>("on {0}"),
   },
   sample: {
     classes: {
@@ -86,7 +90,7 @@ const landing = {
     },
   },
   cashFlow: {
-    accountList: (names: string[]) => names.join(" and "),
+    accountList: message<[names: string[]]>(["join", 0, " and "]),
     title: "Cash flow",
     moneyIn: "Money in",
     moneyOut: "Money out",
@@ -97,16 +101,19 @@ const landing = {
     out: "OUT",
     sinceJanuary: "Saved since January",
     averageRate: "Average saving rate",
-    aria: (month: string) => `Sample cash flow for ${month}`,
-    statement: (month: string, page: string) =>
-      `${month} · STATEMENT ${page} OF 12`,
-    savedTo: (percent: string, accounts: string) =>
-      `${percent} of income · added to ${accounts}`,
-    spentShare: (percent: string) => `Spent · ${percent}`,
-    savedShare: (percent: string) => `Saved · ${percent}`,
-    split: (spent: string, saved: string) =>
-      `Income split: spent ${spent}, saved ${saved}`,
-    vs: (month: string) => `VS ${month}`,
+    aria: message<[month: string]>("Sample cash flow for {0}"),
+    statement: message<[month: string, page: string]>(
+      "{0} · STATEMENT {1} OF 12",
+    ),
+    savedTo: message<[percent: string, accounts: string]>(
+      "{0} of income · added to {1}",
+    ),
+    spentShare: message<[percent: string]>("Spent · {0}"),
+    savedShare: message<[percent: string]>("Saved · {0}"),
+    split: message<[spent: string, saved: string]>(
+      "Income split: spent {0}, saved {1}",
+    ),
+    vs: message<[month: string]>("VS {0}"),
   },
   glyphs: {
     netWorth: "NET WORTH",

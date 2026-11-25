@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/common";
 import type { Translation } from "../../types";
 
@@ -31,6 +32,18 @@ const common: Translation<typeof en> = {
     copied: "已复制",
     showMore: "展开更多",
     showLess: "收起",
+    dismiss: "关闭提示",
+  },
+  combobox: {
+    searchPlaceholder: "筛选选项…",
+    noMatches: "没有匹配项",
+  },
+  errors: {
+    pageErrorTitle: "出了点问题",
+    pageErrorBody: "暂时无法加载此页面。请重试，或返回总览。",
+    notFoundTitle: "页面未找到",
+    notFoundBody: "此页面不存在，或你已无权访问。",
+    backToOverview: "返回总览",
   },
   discardChanges: {
     prompt: "放弃未保存的更改？",
@@ -43,7 +56,7 @@ const common: Translation<typeof en> = {
     notRecorded: "未记录",
     asOf: "截至",
     stale: "余额已过时",
-    staleTitle: (days: number) => `余额已超过 ${days} 天未更新`,
+    staleTitle: message<[days: number]>("余额已超过 {0} 天未更新"),
   },
   status: {
     loading: "加载中…",
@@ -70,6 +83,7 @@ const common: Translation<typeof en> = {
     showCard: "显示此卡片的金额",
     hideCard: "隐藏此卡片的金额",
     unsaved: "（未能保存，刷新页面后失效）",
+    reveal: "点击或按回车显示此金额",
   },
   language: {
     label: "语言",

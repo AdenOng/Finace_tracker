@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type { Translation } from "../../types";
 import type en from "../en/imports";
 const imports: Translation<typeof en> = {
@@ -103,56 +104,130 @@ const imports: Translation<typeof en> = {
     noHoldingsOrCashWere: "未找到持仓或现金。",
     noPrice: "暂无价格",
     buysSellsDividendsFeesAnd: "对账单中的买入、卖出、股息、手续费和存入记录。",
-    saved: (counts: {
-      transactions: number;
-      holdings: number;
-      activity: number;
-      balances: number;
-      duplicates: number;
-    }) =>
-      `已保存${[counts.transactions && `${counts.transactions} 笔交易`, counts.holdings && `${counts.holdings} 项持仓`, counts.activity && `${counts.activity} 笔买卖交易与收付款`, counts.balances && "余额"].filter(Boolean).join("、") || " 0 条记录"}。${counts.duplicates ? `已排除 ${counts.duplicates} 条已有记录。` : ""}`,
-    duplicates: (n: number) =>
-      `有 ${n} 条可能的重复记录待处理。保存前，请为每条高亮明细选择保留或跳过。`,
-    historical: (
-      completed: boolean,
-      date: string,
-      banking: boolean,
-      latest: string,
-    ) =>
-      `${completed ? "已保存" : "此对账单将保存为"} ${date} 的记录。账户已有 ${latest} 的较新${banking ? "余额" : "持仓记录"}。当前账户价值仍采用较新记录。`,
-    replaceDate: (date: string) =>
-      `保存将替换 ${date} 已有的对账单持仓或余额。选中的明细将成为该日期的完整记录；现有交易和买卖交易仍会保留。`,
-    selected: (accepted: number, total: number, undecided: number) =>
-      `已选 ${accepted} / ${total} 条${undecided > 0 ? ` · ${undecided} 条待决定` : ""}`,
-    warnings: (n: number) => ` · ${n} 条金额或方向提示（仍可保存）`,
-    saveTo: (n: number, name: string | null) => `保存 ${n} 条至 ${name}`,
-    remove: (label: string) => `移除${label.replace(/^保存/, "")}`,
-    transactions: (n: number) => `交易 · ${n}`,
-    totals: (incoming: string, outgoing: string) =>
-      `已选：收入 ${incoming}，支出 ${outgoing}。取消勾选无需保存的明细。`,
-    saveRow: (label: string) => `保存${label}`,
-    reference: (value: string) => ` · 参考编号 ${value}`,
-    editAmountFor: (label: string) => `编辑${label}的金额`,
-    amountFor: (label: string) => `${label}的金额`,
-    balanceLabel: (currency: string, bucket: string | null) =>
-      `${currency} ${bucket ?? "期末／现金"}余额`,
-    activityLabel: (type: string, symbol: string | null) =>
-      `${type} ${symbol ?? "投资活动"}`,
-    saveBucket: (bucket: string) => `保存${bucket}余额`,
-    holdings: (n: number) => `持仓 · ${n}`,
-    saveSymbol: (symbol: string) => `保存 ${symbol}`,
-    saveCash: (currency: string) => `保存 ${currency} 现金`,
-    activity: (n: number) => `买卖交易与收付款 · ${n}`,
-    saveActivity: (type: string, symbol: string | null) =>
-      `保存${type} ${symbol ?? ""}`.trim(),
-    ref: (value: string) => `参考编号 ${value}`,
-    cash: (currency: string) => `现金 · ${currency}`,
-    printed: (direction: string, amount: string) =>
-      `对账单显示 ${direction}${amount}。`,
-    useAmount: (amount: string) => `使用 ${amount}`,
+    saved: message<
+      [
+        counts: {
+          transactions: number;
+          holdings: number;
+          activity: number;
+          balances: number;
+          duplicates: number;
+        },
+      ]
+    >([
+      "text",
+      "已保存",
+      [
+        "||",
+        [
+          "joinPresent",
+          "、",
+          [
+            "&&",
+            ["field", 0, "transactions"],
+            ["text", ["field", 0, "transactions"], " 笔交易"],
+          ],
+          [
+            "&&",
+            ["field", 0, "holdings"],
+            ["text", ["field", 0, "holdings"], " 项持仓"],
+          ],
+          [
+            "&&",
+            ["field", 0, "activity"],
+            ["text", ["field", 0, "activity"], " 笔买卖交易与收付款"],
+          ],
+          ["&&", ["field", 0, "balances"], "余额"],
+        ],
+        " 0 条记录",
+      ],
+      "。",
+      [
+        "if",
+        ["field", 0, "duplicates"],
+        ["text", "已排除 ", ["field", 0, "duplicates"], " 条已有记录。"],
+        "",
+      ],
+    ]),
+    duplicates: message<[n: number]>(
+      "有 {0} 条可能的重复记录待处理。保存前，请为每条高亮明细选择保留或跳过。",
+    ),
+    historical: message<
+      [completed: boolean, date: string, banking: boolean, latest: string]
+    >([
+      "text",
+      ["if", 0, "已保存", "此对账单将保存为"],
+      " ",
+      1,
+      " 的记录。账户已有 ",
+      3,
+      " 的较新",
+      ["if", 2, "余额", "持仓记录"],
+      "。当前账户价值仍采用较新记录。",
+    ]),
+    replaceDate: message<[date: string]>(
+      "保存将替换 {0} 已有的对账单持仓或余额。选中的明细将成为该日期的完整记录；现有交易和买卖交易仍会保留。",
+    ),
+    selected: message<[accepted: number, total: number, undecided: number]>([
+      "text",
+      "已选 ",
+      0,
+      " / ",
+      1,
+      " 条",
+      ["if", [">", 2, ["number", 0]], ["text", " · ", 2, " 条待决定"], ""],
+    ]),
+    warnings: message<[n: number]>(" · {0} 条金额或方向提示（仍可保存）"),
+    saveTo: message<[n: number, name: string | null]>("保存 {0} 条至 {1}"),
+    remove: message<[label: string]>([
+      "text",
+      "移除",
+      ["stripPrefix", 0, "保存"],
+    ]),
+    transactions: message<[n: number]>("交易 · {0}"),
+    totals: message<[incoming: string, outgoing: string]>(
+      "已选：收入 {0}，支出 {1}。取消勾选无需保存的明细。",
+    ),
+    saveRow: message<[label: string]>("保存{0}"),
+    reference: message<[value: string]>(" · 参考编号 {0}"),
+    editAmountFor: message<[label: string]>("编辑{0}的金额"),
+    amountFor: message<[label: string]>("{0}的金额"),
+    balanceLabel: message<[currency: string, bucket: string | null]>([
+      "text",
+      0,
+      " ",
+      ["??", 1, "期末／现金"],
+      "余额",
+    ]),
+    activityLabel: message<[type: string, symbol: string | null]>([
+      "text",
+      0,
+      " ",
+      ["??", 1, "投资活动"],
+    ]),
+    saveBucket: message<[bucket: string]>("保存{0}余额"),
+    holdings: message<[n: number]>("持仓 · {0}"),
+    saveSymbol: message<[symbol: string]>("保存 {0}"),
+    saveCash: message<[currency: string]>("保存 {0} 现金"),
+    activity: message<[n: number]>("买卖交易与收付款 · {0}"),
+    saveActivity: message<[type: string, symbol: string | null]>([
+      "trim",
+      ["text", "保存", 0, " ", ["??", 1, ""]],
+    ]),
+    ref: message<[value: string]>("参考编号 {0}"),
+    cash: message<[currency: string]>("现金 · {0}"),
+    printed:
+      message<[direction: string, amount: string]>("对账单显示 {0}{1}。"),
+    useAmount: message<[amount: string]>("使用 {0}"),
     recordBefore: "记录",
-    recordAfter: (bucket: string | null, date: string) =>
-      `为 ${date} 的${bucket ?? ""}余额`,
+    recordAfter: message<[bucket: string | null, date: string]>([
+      "text",
+      "为 ",
+      1,
+      " 的",
+      ["??", 0, ""],
+      "余额",
+    ]),
     statementDate: "对账单日期",
   },
   importStatus: {
@@ -192,9 +267,8 @@ const imports: Translation<typeof en> = {
       cpf_srs:
         "提取 SRS 持仓、现金和充值记录，或中央公积金（CPF）余额。之后需手动将公积金分配至各子账户。",
     },
-    statementFor: (name: string) => `${name} 的对账单`,
-    selected: (accepted: number, total: number) =>
-      `已选 ${accepted} / ${total} 条`,
+    statementFor: message<[name: string]>("{0} 的对账单"),
+    selected: message<[accepted: number, total: number]>("已选 {0} / {1} 条"),
   },
   lineRemoval: {
     removeImportedRow: "移除已导入明细",
@@ -215,21 +289,33 @@ const imports: Translation<typeof en> = {
     reviewImport: "导入审核",
   },
   summary: {
-    unverified: (complete: boolean) =>
-      `未核实：缺少${complete ? "完整对账单的" : ""}期初或期末余额，无法核对。`,
-    excluded: (n: number, currency: string) =>
-      `${currency} 的 ${n} 条明细未纳入核对：缺少期初或期末余额。`,
-    balanceCheck: (currency: string) => `余额核对 · ${currency}`,
-    result: (
-      label: string,
-      matches: boolean | null,
-      amount: string,
-      over: boolean,
-    ) =>
-      `${label}：${matches ? "一致" : `${over ? "高于" : "低于"}期末余额 ${amount}`}。`,
-    skipped: (explains: boolean, amount: string) =>
-      `${explains ? "差额由跳过的明细造成" : "跳过的明细不会保存"}：${amount}。已记录明细已计入。`,
-    readBy: (model: string) => `提取模型：${model}`,
+    unverified: message<[complete: boolean]>([
+      "text",
+      "未核实：缺少",
+      ["if", 0, "完整对账单的", ""],
+      "期初或期末余额，无法核对。",
+    ]),
+    excluded: message<[n: number, currency: string]>(
+      "{1} 的 {0} 条明细未纳入核对：缺少期初或期末余额。",
+    ),
+    balanceCheck: message<[currency: string]>("余额核对 · {0}"),
+    result: message<
+      [label: string, matches: boolean | null, amount: string, over: boolean]
+    >([
+      "text",
+      0,
+      "：",
+      ["if", 1, "一致", ["text", ["if", 3, "高于", "低于"], "期末余额 ", 2]],
+      "。",
+    ]),
+    skipped: message<[explains: boolean, amount: string]>([
+      "text",
+      ["if", 0, "差额由跳过的明细造成", "跳过的明细不会保存"],
+      "：",
+      1,
+      "。已记录明细已计入。",
+    ]),
+    readBy: message<[model: string]>("提取模型：{0}"),
   },
 };
 export default imports;

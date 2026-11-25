@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const auth = {
   register: {
     mismatch: "Passwords do not match",
@@ -87,11 +88,13 @@ const auth = {
     existing: "Already have an account?",
     signIn: "Sign in to join",
     submit: "Create account and join",
-    title: (name: string) => `Join ${name}`,
-    body: (role: string) =>
-      `You are invited as a ${role}. Everyone in this workspace can view its shared accounts. Your accounts stay private until you choose to share them.`,
-    wrongEmail: (email: string) =>
-      `This invitation is for ${email}. Sign out from Settings and sign in with that email address.`,
+    title: message<[name: string]>("Join {0}"),
+    body: message<[role: string]>(
+      "You are invited as a {0}. Everyone in this workspace can view its shared accounts. Your accounts stay private until you choose to share them.",
+    ),
+    wrongEmail: message<[email: string]>(
+      "This invitation is for {0}. Sign out from Settings and sign in with that email address.",
+    ),
     signInAfter: ".",
     roles: {
       owner: "owner",

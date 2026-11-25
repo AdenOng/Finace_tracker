@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const workspaces = {
   page: {
     description: "Shared views for family finances, funds, and other groups.",
@@ -21,13 +22,16 @@ const workspaces = {
     joinWorkspace: "Join workspace",
   },
   workspaceDetail: {
-    balances: (currency: string) =>
-      `Latest recorded balances, shown in ${currency}.`,
-    unpricedExcluded: (n: number) =>
-      `${n} holdings without a price are excluded.`,
-    unpriced: (n: number) => `${n} unpriced`,
-    snapshot: (date: string) =>
-      `Latest snapshot: ${date}. Accounts may have different snapshot dates. Balances more than 45 days old are marked stale.`,
+    balances: message<[currency: string]>(
+      "Latest recorded balances, shown in {0}.",
+    ),
+    unpricedExcluded: message<[n: number]>(
+      "{0} holdings without a price are excluded.",
+    ),
+    unpriced: message<[n: number]>("{0} unpriced"),
+    snapshot: message<[date: string]>(
+      "Latest snapshot: {0}. Accounts may have different snapshot dates. Balances more than 45 days old are marked stale.",
+    ),
     archived: " \u00b7 archived",
 
     backToWorkspaces: "Back to workspaces",
@@ -62,8 +66,9 @@ const workspaces = {
   workspaceManagement: {
     archived: " (archived)",
     you: " (you)",
-    invitation: (email: string, role: string, date: string) =>
-      `${email} · ${role} · expires ${date}`,
+    invitation: message<[email: string, role: string, date: string]>(
+      "{0} · {1} · expires {2}",
+    ),
 
     theActionCouldNotBeCompleted: "The action could not be completed",
     accountSharing: "Account sharing",

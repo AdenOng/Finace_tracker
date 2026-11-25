@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/accounts";
 import type { Translation } from "../../types";
 
@@ -34,9 +35,10 @@ const accounts: Translation<typeof en> = {
     weight: "占比",
     noPrice: "暂无价格",
     cash: "现金",
-    sharedBy: (name: string) =>
-      `由 ${name} 共享。所有者可在个人视图中编辑财务数据。`,
-    unpriced: (n: number) => `${n} 项持仓暂无价格，未计入总额。`,
+    sharedBy: message<[name: string]>(
+      "由 {0} 共享。所有者可在个人视图中编辑财务数据。",
+    ),
+    unpriced: message<[n: number]>("{0} 项持仓暂无价格，未计入总额。"),
     period: "。",
   },
   drawer: {
@@ -95,11 +97,12 @@ const accounts: Translation<typeof en> = {
     eGDBSMultiplier: "例如 DBS Multiplier",
     lastFourDigits: "尾号",
     optional: "选填",
-    saved: (name: string) => `已保存 ${name}。`,
-    added: (name: string) => `已添加 ${name}。`,
-    removed: (name: string) => `已移除 ${name}。`,
-    archived: (name: string) =>
-      `${name} 有余额或交易，已归档。可从已归档列表恢复。`,
+    saved: message<[name: string]>("已保存 {0}。"),
+    added: message<[name: string]>("已添加 {0}。"),
+    removed: message<[name: string]>("已移除 {0}。"),
+    archived: message<[name: string]>(
+      "{0} 有余额或交易，已归档。可从已归档列表恢复。",
+    ),
   },
   reconciliation: {
     reconciliation: "对账",
@@ -138,12 +141,13 @@ const accounts: Translation<typeof en> = {
     dateDescription: "日期／摘要",
     noEntriesInThisPeriodAndCurrencyOnlyFinishIf:
       "此周期和币种下暂无记录。请确认余额未变且与对账单一致后再完成对账。",
-    mismatch: (difference: string, currency: string) =>
-      `余额不符。请检查遗漏或重复的交易、金额及对账单日期。在支出中更正记录后重新核对。准确差额：${difference} ${currency}。`,
-    verifiedCount: (verified: number, total: number) =>
-      `已对照对账单核对 ${verified} 条，共 ${total} 条。`,
-    verify: (description: string, date: string) =>
-      `核对 ${date} 的${description}`,
+    mismatch: message<[difference: string, currency: string]>(
+      "余额不符。请检查遗漏或重复的交易、金额及对账单日期。在支出中更正记录后重新核对。准确差额：{0} {1}。",
+    ),
+    verifiedCount: message<[verified: number, total: number]>(
+      "已对照对账单核对 {0} 条，共 {1} 条。",
+    ),
+    verify: message<[description: string, date: string]>("核对 {1} 的{0}"),
   },
   transactions: {
     transactions: "交易",
@@ -157,7 +161,7 @@ const accounts: Translation<typeof en> = {
     transfer: "转账",
     notCategorised: "未分类",
     openInSpending: "在支出中查看",
-    empty: (month: string) => `${month} 暂无记录。`,
+    empty: message<[month: string]>("{0} 暂无记录。"),
   },
   view: {
     investments: "投资",
@@ -195,7 +199,7 @@ const accounts: Translation<typeof en> = {
     actions: "操作",
     notRecorded: "未记录",
     restore: "恢复",
-    unpriced: (n: number) => `${n} 项暂无价格`,
+    unpriced: message<[n: number]>("{0} 项暂无价格"),
   },
   history: {
     entryDeletedTheAccountNowUsesItsLatestRemainingDated:
@@ -217,20 +221,26 @@ const accounts: Translation<typeof en> = {
     manual: "手动录入",
     imported: "已导入",
     synced: "已同步",
-    summary: (
-      source: string,
-      adjusted: boolean,
-      positions: number,
-      cash: number,
-    ) =>
-      `${source}${adjusted ? " · 已调整" : ""} · ${positions} 项持仓 · ${cash} 项现金余额`,
-    viewImport: (date: string) => `查看 ${date} 的导入记录`,
-    editEntry: (date: string) => `编辑 ${date} 的记录`,
-    deleteEntry: (date: string) => `删除 ${date} 的记录`,
+    summary: message<
+      [source: string, adjusted: boolean, positions: number, cash: number]
+    >([
+      "text",
+      0,
+      ["if", 1, " · 已调整", ""],
+      " · ",
+      2,
+      " 项持仓 · ",
+      3,
+      " 项现金余额",
+    ]),
+    viewImport: message<[date: string]>("查看 {0} 的导入记录"),
+    editEntry: message<[date: string]>("编辑 {0} 的记录"),
+    deleteEntry: message<[date: string]>("删除 {0} 的记录"),
     deleteEntryTitle: "删除记录",
-    removeConfirm: (date: string) => `删除 ${date} 记录的持仓和现金？`,
-    removeCount: (positions: number, cash: number) =>
-      `将从此日期的记录中删除 ${positions} 项持仓和 ${cash} 项现金余额。`,
+    removeConfirm: message<[date: string]>("删除 {0} 记录的持仓和现金？"),
+    removeCount: message<[positions: number, cash: number]>(
+      "将从此日期的记录中删除 {0} 项持仓和 {1} 项现金余额。",
+    ),
   },
   snapshot: {
     entryUpdated: "记录已更新。",
@@ -270,13 +280,17 @@ const accounts: Translation<typeof en> = {
     cash: "现金",
     balance: "余额",
     addCurrency: "添加币种",
-    emptyHint: (investments: boolean) =>
-      `请先添加持仓或现金余额再保存。如需记录空账户，请在“${investments ? "现金" : "余额"}”中输入 0。`,
-    holdingNumber: (n: number) => `持仓 ${n}`,
-    removeHolding: (n: number) => `移除持仓 ${n}`,
-    bucketCurrency: (bucket: string) => `${bucket}（SGD）`,
-    removeBalance: (currency: string) => `移除 ${currency} 余额`,
-    unsplit: (balances: string) => `此前的记录中有 ${balances} 未拆分。`,
+    emptyHint: message<[investments: boolean]>([
+      "text",
+      "请先添加持仓或现金余额再保存。如需记录空账户，请在“",
+      ["if", 0, "现金", "余额"],
+      "”中输入 0。",
+    ]),
+    holdingNumber: message<[n: number]>("持仓 {0}"),
+    removeHolding: message<[n: number]>("移除持仓 {0}"),
+    bucketCurrency: message<[bucket: string]>("{0}（SGD）"),
+    removeBalance: message<[currency: string]>("移除 {0} 余额"),
+    unsplit: message<[balances: string]>("此前的记录中有 {0} 未拆分。"),
     unsplitAfter: "，请先录入以上各项余额。",
   },
   meta: {

@@ -1,9 +1,6 @@
-/**
- * Every language has the same shape as English: strings become any string, and message
- * functions (plurals, interpolation) keep their exact signature.
- */
+/** Dictionaries use the English key structure and keep the parameter types of its templates. */
 export type Translation<T> = T extends string
   ? string
-  : T extends (...args: infer A) => string
-    ? (...args: A) => string
+  : T extends { readonly template: unknown }
+    ? T
     : { [K in keyof T]: Translation<T[K]> };

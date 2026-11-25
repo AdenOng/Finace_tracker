@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const admin = {
   overview: {
     nothingNeedsAttention: "Nothing needs attention.",
@@ -25,14 +26,39 @@ const admin = {
     importsReadBeforeProviderTrackingWasAdded:
       "Imports read before provider tracking was added",
     notRecorded: "Not recorded",
-    attentionCount: (n: number) =>
-      `${n} thing${n === 1 ? "" : "s"} to look at, most urgent first.`,
-    usersNote: (n: number, disabled: number) =>
-      `${n} admin${n === 1 ? "" : "s"}${disabled ? `, ${disabled} disabled` : ""}`,
-    sessions: (n: number) => `${n} signed-in session${n === 1 ? "" : "s"}`,
-    withoutTwoStep: (n: number) => `${n} without two-step`,
-    importsDescription: (provider: string | null, n: number, count: string) =>
-      `Default provider: ${provider ?? "none"}. ${count} statement${n === 1 ? "" : "s"} read in the last 7 days.`,
+    attentionCount: message<[n: number]>([
+      "text",
+      0,
+      " thing",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      " to look at, most urgent first.",
+    ]),
+    usersNote: message<[n: number, disabled: number]>([
+      "text",
+      0,
+      " admin",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      ["if", 1, ["text", ", ", 1, " disabled"], ""],
+    ]),
+    sessions: message<[n: number]>([
+      "text",
+      0,
+      " signed-in session",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+    ]),
+    withoutTwoStep: message<[n: number]>("{0} without two-step"),
+    importsDescription: message<
+      [provider: string | null, n: number, count: string]
+    >([
+      "text",
+      "Default provider: ",
+      ["??", 0, "none"],
+      ". ",
+      2,
+      " statement",
+      ["if", ["===", 1, ["number", 1]], "", "s"],
+      " read in the last 7 days.",
+    ]),
   },
   tabs: {
     aiSections: "AI sections",
@@ -114,30 +140,45 @@ const admin = {
     stopSendingImportsHereOnceReached: "Stop sending imports here once reached",
     importsUseTheFallbackProviderInsteadOrFailWithAClearMessage:
       "Imports use the fallback provider instead, or fail with a clear message.",
-    working: (seconds: string) => `Working — answered in ${seconds}s`,
-    failed: (error: string) => `Failed: ${error}`,
-    modelsAvailable: (n: number) => `${n} models available — start typing`,
-    saved: (name: string) => `Saved ${name}.`,
-    added: (name: string) => `Added ${name}. Test it before relying on it.`,
-    deletePromote: (name: string) => `Delete? ${name} becomes default`,
-    deletedPromoted: (name: string, next: string) =>
-      `Deleted ${name}. ${next} is now the default.`,
-    deleted: (name: string) => `Deleted ${name}.`,
-    storedKey: (key: string) => `Stored: ${key}. Leave blank to keep it.`,
-    checked: (when: string) => `· checked ${when}`,
-    noLimit: (n: string) => `${n} tokens this month · no limit`,
-    limitUsage: (
-      used: string,
-      limit: string,
-      reached: boolean,
-      pause: boolean,
-    ) =>
-      `${used} of ${limit} tokens this month${reached ? (pause ? " · paused until next month" : " · over the limit") : ""}`,
-    prices: (input: string, output: string) =>
-      `US$${input} in / US$${output} out per million tokens`,
-    modelOption: (name: string, textOnly: boolean) =>
-      `${name}${textOnly ? " (text only)" : ""}`,
-    usedThisMonth: (n: string) => `Used this month: ${n} tokens.`,
+    working: message<[seconds: string]>("Working — answered in {0}s"),
+    failed: message<[error: string]>("Failed: {0}"),
+    modelsAvailable: message<[n: number]>(
+      "{0} models available — start typing",
+    ),
+    saved: message<[name: string]>("Saved {0}."),
+    added: message<[name: string]>("Added {0}. Test it before relying on it."),
+    deletePromote: message<[name: string]>("Delete? {0} becomes default"),
+    deletedPromoted: message<[name: string, next: string]>(
+      "Deleted {0}. {1} is now the default.",
+    ),
+    deleted: message<[name: string]>("Deleted {0}."),
+    storedKey: message<[key: string]>("Stored: {0}. Leave blank to keep it."),
+    checked: message<[when: string]>("· checked {0}"),
+    noLimit: message<[n: string]>("{0} tokens this month · no limit"),
+    limitUsage: message<
+      [used: string, limit: string, reached: boolean, pause: boolean]
+    >([
+      "text",
+      0,
+      " of ",
+      1,
+      " tokens this month",
+      [
+        "if",
+        2,
+        ["if", 3, " · paused until next month", " · over the limit"],
+        "",
+      ],
+    ]),
+    prices: message<[input: string, output: string]>(
+      "US${0} in / US${1} out per million tokens",
+    ),
+    modelOption: message<[name: string, textOnly: boolean]>([
+      "text",
+      0,
+      ["if", 1, " (text only)", ""],
+    ]),
+    usedThisMonth: message<[n: string]>("Used this month: {0} tokens."),
   },
   usage: {
     noUsageYet: "No usage yet",
@@ -160,17 +201,26 @@ const admin = {
     totalTokens: "Total tokens",
     deletedProvider: "Deleted provider",
     notRecorded: "Not recorded",
-    dayDetail: (tokens: string, jobs: number) =>
-      `· ${tokens} tokens · ${jobs} job${jobs === 1 ? "" : "s"}`,
-    tokenCount: (n: string) => `${n} tokens`,
-    overDays: (n: number) => `over ${n} days. Hover a day for detail.`,
-    peak: (n: string) => `Peak ${n}`,
-    chartLabel: (days: number, total: string) =>
-      `Tokens used per day over the last ${days} days, ${total} in total. The table below has the figures.`,
-    monthSoFar: (month: string) => `${month} so far`,
-    estimatedCost: (cost: string) =>
-      `Estimated cost ${cost} from the list prices you entered. Your provider's bill is the source of truth.`,
-    limitShare: (percent: number, limit: string) => `${percent}% of ${limit}`,
+    dayDetail: message<[tokens: string, jobs: number]>([
+      "text",
+      "· ",
+      0,
+      " tokens · ",
+      1,
+      " job",
+      ["if", ["===", 1, ["number", 1]], "", "s"],
+    ]),
+    tokenCount: message<[n: string]>("{0} tokens"),
+    overDays: message<[n: number]>("over {0} days. Hover a day for detail."),
+    peak: message<[n: string]>("Peak {0}"),
+    chartLabel: message<[days: number, total: string]>(
+      "Tokens used per day over the last {0} days, {1} in total. The table below has the figures.",
+    ),
+    monthSoFar: message<[month: string]>("{0} so far"),
+    estimatedCost: message<[cost: string]>(
+      "Estimated cost {0} from the list prices you entered. Your provider's bill is the source of truth.",
+    ),
+    limitShare: message<[percent: number, limit: string]>("{0}% of {1}"),
   },
   playground: {
     useAPdfPngJpegOrWebpFile: "Use a PDF, PNG, JPEG or WebP file.",
@@ -228,29 +278,57 @@ const admin = {
     value: "Value",
     rawJson: "Raw JSON",
     balancesDoNotReconcile: "Balances do not reconcile.",
-    fileTooLarge: (size: string) => `That file is ${size}; the limit is 20 MB.`,
-    changeFile: (size: string) => `${size} · click to change`,
-    providerOption: (name: string, isDefault: boolean) =>
-      `${name}${isDefault ? " (default)" : ""}`,
-    providerModel: (model: string, vision: boolean) =>
-      `${model}${vision ? "" : " · text only"}`,
-    readingElapsed: (n: number) => `Reading… ${n}s`,
-    compareProviders: (n: number) => `Compare ${n} providers`,
-    duration: (seconds: string) => `${seconds}s`,
-    tokenUsage: (input: number | string, output: number | string) =>
-      `${input} in / ${output} out`,
-    agreement: (percent: number, n: number) =>
-      `${percent}% of ${n} shared lines`,
-    pdfText: (n: number | null) => `PDF text, ${n} pages`,
-    balanceEquation: (
-      opening: string,
-      sum: string,
-      expected: string,
-      closing: string,
-      ok: boolean,
-      diff: string,
-    ) =>
-      `Opening ${opening} + transactions ${sum} = ${expected}; statement closing is ${closing}${ok ? "." : ` (off by ${diff}). Some rows may be missing or misread.`}`,
+    fileTooLarge: message<[size: string]>(
+      "That file is {0}; the limit is 20 MB.",
+    ),
+    changeFile: message<[size: string]>("{0} · click to change"),
+    providerOption: message<[name: string, isDefault: boolean]>([
+      "text",
+      0,
+      ["if", 1, " (default)", ""],
+    ]),
+    providerModel: message<[model: string, vision: boolean]>([
+      "text",
+      0,
+      ["if", 1, "", " · text only"],
+    ]),
+    readingElapsed: message<[n: number]>("Reading… {0}s"),
+    compareProviders: message<[n: number]>("Compare {0} providers"),
+    duration: message<[seconds: string]>("{0}s"),
+    tokenUsage:
+      message<[input: number | string, output: number | string]>(
+        "{0} in / {1} out",
+      ),
+    agreement: message<[percent: number, n: number]>(
+      "{0}% of {1} shared lines",
+    ),
+    pdfText: message<[n: number | null]>("PDF text, {0} pages"),
+    balanceEquation: message<
+      [
+        opening: string,
+        sum: string,
+        expected: string,
+        closing: string,
+        ok: boolean,
+        diff: string,
+      ]
+    >([
+      "text",
+      "Opening ",
+      0,
+      " + transactions ",
+      1,
+      " = ",
+      2,
+      "; statement closing is ",
+      3,
+      [
+        "if",
+        4,
+        ".",
+        ["text", " (off by ", 5, "). Some rows may be missing or misread."],
+      ],
+    ]),
   },
   auditActions: {
     "user.role_changed": "Changed role",
@@ -390,37 +468,91 @@ const admin = {
     withItsParent: "With its parent",
     keepFilesForever: "Keep files forever",
     noFixedSessionLength: "no fixed session length",
-    invitation: (admin: boolean, replaced: boolean) =>
-      `As ${admin ? "an admin" : "a member"}${replaced ? ", replacing an earlier link" : ""}`,
-    sessions: (n: string) => `${n} ${Number(n) === 1 ? "session" : "sessions"}`,
-    model: (model: string) => `Model ${model}`,
-    apiKey: (value: string) => `API key ${value}`,
-    newDefault: (name: string) => `${name} became the default`,
-    archived: (n: string, moved: string, to: string | null) =>
-      `${n} ${Number(n) === 1 ? "category" : "categories"}; ${moved} transaction${Number(moved) === 1 ? "" : "s"} ${to ? `moved to ${to}` : "left uncategorised"}`,
-    categories: (n: string) =>
-      `${n} ${Number(n) === 1 ? "category" : "categories"}`,
-    imported: (
-      created: string,
-      updated: string,
-      unchanged: string,
-      archived: string,
-    ) =>
-      `${created} added, ${updated} updated, ${unchanged} unchanged${Number(archived) > 0 ? `; ${archived} archived with their parent` : ""}`,
-    restored: (inserted: string, restored: string) =>
-      `${inserted} added back, ${restored} restored`,
-    merged: (from: string, n: string) =>
-      `${from} merged in; ${n} account${Number(n) === 1 ? "" : "s"} moved`,
-    preset: (categories: string, institutions: string, currencies: string) =>
-      `${categories} categories, ${institutions} institutions, ${currencies} currencies added`,
-    sessionDays: (n: string) => `sign out after ${n} days`,
-    inviteSignups: (enabled: boolean) =>
-      `workspace invites ${enabled ? "can" : "cannot"} create accounts`,
-    newDevice: (enabled: boolean) =>
-      `new-device emails ${enabled ? "on" : "off"}`,
-    retention: (n: number) => `Delete files after ${n} days`,
-    files: (n: string) => `${n} file${Number(n) === 1 ? "" : "s"}`,
-    twoStep: (policy: string) => `two-step for ${policy}`,
+    invitation: message<[admin: boolean, replaced: boolean]>([
+      "text",
+      "As ",
+      ["if", 0, "an admin", "a member"],
+      ["if", 1, ", replacing an earlier link", ""],
+    ]),
+    sessions: message<[n: string]>([
+      "text",
+      0,
+      " ",
+      ["if", ["===", ["numeric", 0], ["number", 1]], "session", "sessions"],
+    ]),
+    model: message<[model: string]>("Model {0}"),
+    apiKey: message<[value: string]>("API key {0}"),
+    newDefault: message<[name: string]>("{0} became the default"),
+    archived: message<[n: string, moved: string, to: string | null]>([
+      "text",
+      0,
+      " ",
+      ["if", ["===", ["numeric", 0], ["number", 1]], "category", "categories"],
+      "; ",
+      1,
+      " transaction",
+      ["if", ["===", ["numeric", 1], ["number", 1]], "", "s"],
+      " ",
+      ["if", 2, ["text", "moved to ", 2], "left uncategorised"],
+    ]),
+    categories: message<[n: string]>([
+      "text",
+      0,
+      " ",
+      ["if", ["===", ["numeric", 0], ["number", 1]], "category", "categories"],
+    ]),
+    imported: message<
+      [created: string, updated: string, unchanged: string, archived: string]
+    >([
+      "text",
+      0,
+      " added, ",
+      1,
+      " updated, ",
+      2,
+      " unchanged",
+      [
+        "if",
+        [">", ["numeric", 3], ["number", 0]],
+        ["text", "; ", 3, " archived with their parent"],
+        "",
+      ],
+    ]),
+    restored: message<[inserted: string, restored: string]>(
+      "{0} added back, {1} restored",
+    ),
+    merged: message<[from: string, n: string]>([
+      "text",
+      0,
+      " merged in; ",
+      1,
+      " account",
+      ["if", ["===", ["numeric", 1], ["number", 1]], "", "s"],
+      " moved",
+    ]),
+    preset: message<
+      [categories: string, institutions: string, currencies: string]
+    >("{0} categories, {1} institutions, {2} currencies added"),
+    sessionDays: message<[n: string]>("sign out after {0} days"),
+    inviteSignups: message<[enabled: boolean]>([
+      "text",
+      "workspace invites ",
+      ["if", 0, "can", "cannot"],
+      " create accounts",
+    ]),
+    newDevice: message<[enabled: boolean]>([
+      "text",
+      "new-device emails ",
+      ["if", 0, "on", "off"],
+    ]),
+    retention: message<[n: number]>("Delete files after {0} days"),
+    files: message<[n: string]>([
+      "text",
+      0,
+      " file",
+      ["if", ["===", ["numeric", 0], ["number", 1]], "", "s"],
+    ]),
+    twoStep: message<[policy: string]>("two-step for {0}"),
   },
   auditPolicies: {
     everyone: "everyone",

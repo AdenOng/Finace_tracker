@@ -1,3 +1,4 @@
+import { message } from "../../template";
 /** Words and labels used across the whole app. Area-specific copy lives in its own file. */
 const common = {
   actions: {
@@ -29,6 +30,20 @@ const common = {
     copied: "Copied",
     showMore: "Show more",
     showLess: "Show less",
+    dismiss: "Dismiss",
+  },
+  combobox: {
+    searchPlaceholder: "Filter options…",
+    noMatches: "No matching options",
+  },
+  errors: {
+    pageErrorTitle: "Something went wrong",
+    pageErrorBody:
+      "This page couldn't be loaded right now. Try again, or go back to Overview.",
+    notFoundTitle: "Page not found",
+    notFoundBody:
+      "This page doesn't exist, or you no longer have access to it.",
+    backToOverview: "Back to Overview",
   },
   discardChanges: {
     prompt: "Discard your unsaved changes?",
@@ -41,7 +56,7 @@ const common = {
     notRecorded: "Not recorded",
     asOf: "As of",
     stale: "Stale balance",
-    staleTitle: (days: number) => `Balance is more than ${days} days old`,
+    staleTitle: message<[days: number]>("Balance is more than {0} days old"),
   },
   status: {
     loading: "Loading…",
@@ -68,6 +83,7 @@ const common = {
     showCard: "Show amounts in this card",
     hideCard: "Hide amounts in this card",
     unsaved: "(couldn't save; applies until you reload)",
+    reveal: "Click or press Enter to show this amount",
   },
   language: {
     label: "Language",

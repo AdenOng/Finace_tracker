@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const planning = {
   meta: { title: "Cash flow" },
   cardBills: {
@@ -48,20 +49,27 @@ const planning = {
     paymentDueDate: "Payment due date",
     saveStatementBill: "Save statement bill",
     loadingCardBills: "Loading card bills…",
-    paymentBank: (name: string) => `Payment bank: ${name}`,
+    paymentBank: message<[name: string]>("Payment bank: {0}"),
     archivedSuffix: " (archived)",
-    bankFor: (name: string) => `Payment bank for ${name}`,
-    chooseBank: (currency: string) =>
-      `Choose an account in ${currency}. Existing bills keep their original payment bank.`,
-    billTitle: (name: string) => `Statement bill · ${name}`,
-    fullAmount: (currency: string) => `Full amount due (${currency})`,
-    closed: (date: string) => `Statement closed ${date}`,
-    dueFrom: (date: string, bank: string) => `Due ${date} · Pay from ${bank}`,
-    paidOn: (date: string) => `Paid off on ${date}.`,
+    bankFor: message<[name: string]>("Payment bank for {0}"),
+    chooseBank: message<[currency: string]>(
+      "Choose an account in {0}. Existing bills keep their original payment bank.",
+    ),
+    billTitle: message<[name: string]>("Statement bill · {0}"),
+    fullAmount: message<[currency: string]>("Full amount due ({0})"),
+    closed: message<[date: string]>("Statement closed {0}"),
+    dueFrom: message<[date: string, bank: string]>("Due {0} · Pay from {1}"),
+    paidOn: message<[date: string]>("Paid off on {0}."),
   },
   cashFlowView: {
     dailyProjectedAccountBalanceExactDailyBalancesAre:
       "Daily projected account balance. Exact daily balances are listed below.",
+    zeroLine: "Zero",
+    chartDescription: message<
+      [from: string, to: string, start: string, end: string]
+    >(
+      "Projected balance from {0} ({2}) to {1} ({3}). Use Left and Right arrow keys to inspect daily points.",
+    ),
     loadingCashFlow: "Loading cash flow…",
     cashFlow: "Cash flow",
     planRecurringIncomeBillsAndCreditcardPaymentsWithout:
@@ -132,16 +140,21 @@ const planning = {
     chooseTheFirstOccurrenceYouWantToTrack:
       "Choose the first occurrence you want to track. Monthly dates stay anchored to this day, with shorter months using their last day.",
     lastDueDateOptional: "Last due date (optional)",
-    recordBalance: (currency: string, name: string) =>
-      `Record a balance in ${currency} for ${name} under Accounts to calculate projected balances. Planned payments are still listed below.`,
-    startingBalance: (date: string) => `Starting statement balance: ${date}.`,
+    recordBalance: message<[currency: string, name: string]>(
+      "Record a balance in {0} for {1} under Accounts to calculate projected balances. Planned payments are still listed below.",
+    ),
+    startingBalance: message<[date: string]>(
+      "Starting statement balance: {0}.",
+    ),
     frequencies: { weekly: "weekly", monthly: "monthly", yearly: "yearly" },
-    scheduleDates: (frequency: string, start: string, end: string | null) =>
-      `${frequency} from ${start}${end ? ` until ${end}` : ""}`,
-    matched: (description: string, date: string) =>
-      ` · Matched to ${description} (${date})`,
-    matchPayment: (description: string, date: string) =>
-      `Match ${description} · ${date}`,
+    scheduleDates: message<
+      [frequency: string, start: string, end: string | null]
+    >(["text", 0, " from ", 1, ["if", 2, ["text", " until ", 2], ""]]),
+    matched: message<[description: string, date: string]>(
+      " · Matched to {0} ({1})",
+    ),
+    matchPayment:
+      message<[description: string, date: string]>("Match {0} · {1}"),
   },
 };
 export default planning;

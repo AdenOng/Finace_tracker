@@ -84,6 +84,8 @@ test("net worth chart renders nearby large balances without hanging or invalid c
       `
         import { createElement } from "react";
         import { renderToStaticMarkup } from "react-dom/server";
+        import { LocaleProvider } from "./src/i18n/client";
+        import english from "./src/i18n/messages/en";
         import { NetWorthChart } from "./src/components/overview/net-worth-chart";
         for (const totals of [
           ["9007199254740992", "9007199254740994"],
@@ -96,7 +98,7 @@ test("net worth chart renders nearby large balances without hanging or invalid c
             date: i ? "2026-10-19" : "2026-10-18",
             total, estimated: false, backfilled: false, partial: false,
           }));
-          console.log(renderToStaticMarkup(createElement(NetWorthChart, { series: [{ key: "all", label: "Net worth", points, headline: true }], currency: "SGD" })));
+          console.log(renderToStaticMarkup(createElement(LocaleProvider, { locale: "en", messages: english }, createElement(NetWorthChart, { series: [{ key: "all", label: "Net worth", points, headline: true }], currency: "SGD" }))));
         }
       `,
     ],

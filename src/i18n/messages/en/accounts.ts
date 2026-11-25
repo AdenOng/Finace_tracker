@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const accounts = {
   detail: {
     accounts: "Accounts",
@@ -31,10 +32,18 @@ const accounts = {
     weight: "Weight",
     noPrice: "No price",
     cash: "Cash",
-    sharedBy: (name: string) =>
-      `Shared by ${name}. Financial edits are available to the owner in Personal view.`,
-    unpriced: (n: number) =>
-      `${n} holding${n === 1 ? " has" : "s have"} no price and ${n === 1 ? "is" : "are"} not counted.`,
+    sharedBy: message<[name: string]>(
+      "Shared by {0}. Financial edits are available to the owner in Personal view.",
+    ),
+    unpriced: message<[n: number]>([
+      "text",
+      0,
+      " holding",
+      ["if", ["===", 0, ["number", 1]], " has", "s have"],
+      " no price and ",
+      ["if", ["===", 0, ["number", 1]], "is", "are"],
+      " not counted.",
+    ]),
     period: ".",
   },
   drawer: {
@@ -97,11 +106,12 @@ const accounts = {
     eGDBSMultiplier: "e.g. DBS Multiplier",
     lastFourDigits: "Last four digits",
     optional: "Optional",
-    saved: (name: string) => `Saved ${name}.`,
-    added: (name: string) => `Added ${name}.`,
-    removed: (name: string) => `Removed ${name}.`,
-    archived: (name: string) =>
-      `${name} has balances or transactions, so it was archived. Restore it from the archived list.`,
+    saved: message<[name: string]>("Saved {0}."),
+    added: message<[name: string]>("Added {0}."),
+    removed: message<[name: string]>("Removed {0}."),
+    archived: message<[name: string]>(
+      "{0} has balances or transactions, so it was archived. Restore it from the archived list.",
+    ),
   },
   reconciliation: {
     reconciliation: "Reconciliation",
@@ -140,12 +150,13 @@ const accounts = {
     dateDescription: "Date / description",
     noEntriesInThisPeriodAndCurrencyOnlyFinishIf:
       "No entries in this period and currency. Only finish if the unchanged balance matches your statement.",
-    mismatch: (difference: string, currency: string) =>
-      `Balances do not match. Check for missing or duplicate transactions, incorrect amounts, and the statement dates. Correct the entries in Spending, then review again. Exact difference: ${difference} ${currency}.`,
-    verifiedCount: (verified: number, total: number) =>
-      `${verified} of ${total} entries verified against the statement.`,
-    verify: (description: string, date: string) =>
-      `Verify ${description} on ${date}`,
+    mismatch: message<[difference: string, currency: string]>(
+      "Balances do not match. Check for missing or duplicate transactions, incorrect amounts, and the statement dates. Correct the entries in Spending, then review again. Exact difference: {0} {1}.",
+    ),
+    verifiedCount: message<[verified: number, total: number]>(
+      "{0} of {1} entries verified against the statement.",
+    ),
+    verify: message<[description: string, date: string]>("Verify {0} on {1}"),
   },
   transactions: {
     transactions: "Transactions",
@@ -159,7 +170,7 @@ const accounts = {
     transfer: "Transfer",
     notCategorised: "Not categorised",
     openInSpending: "Open in Spending",
-    empty: (month: string) => `Nothing recorded for ${month}.`,
+    empty: message<[month: string]>("Nothing recorded for {0}."),
   },
   view: {
     investments: "Investments",
@@ -197,7 +208,7 @@ const accounts = {
     actions: "Actions",
     notRecorded: "Not recorded",
     restore: "Restore",
-    unpriced: (n: number) => `${n} unpriced`,
+    unpriced: message<[n: number]>("{0} unpriced"),
   },
   history: {
     entryDeletedTheAccountNowUsesItsLatestRemainingDated:
@@ -219,21 +230,40 @@ const accounts = {
     manual: "Manual",
     imported: "Imported",
     synced: "Synced",
-    summary: (
-      source: string,
-      adjusted: boolean,
-      positions: number,
-      cash: number,
-    ) =>
-      `${source}${adjusted ? " · Adjusted" : ""} · ${positions} holding${positions === 1 ? "" : "s"} · ${cash} cash balance${cash === 1 ? "" : "s"}`,
-    viewImport: (date: string) => `View import for ${date}`,
-    editEntry: (date: string) => `Edit entry for ${date}`,
-    deleteEntry: (date: string) => `Delete entry for ${date}`,
+    summary: message<
+      [source: string, adjusted: boolean, positions: number, cash: number]
+    >([
+      "text",
+      0,
+      ["if", 1, " · Adjusted", ""],
+      " · ",
+      2,
+      " holding",
+      ["if", ["===", 2, ["number", 1]], "", "s"],
+      " · ",
+      3,
+      " cash balance",
+      ["if", ["===", 3, ["number", 1]], "", "s"],
+    ]),
+    viewImport: message<[date: string]>("View import for {0}"),
+    editEntry: message<[date: string]>("Edit entry for {0}"),
+    deleteEntry: message<[date: string]>("Delete entry for {0}"),
     deleteEntryTitle: "Delete entry",
-    removeConfirm: (date: string) =>
-      `Remove the holdings and cash recorded for ${date}?`,
-    removeCount: (positions: number, cash: number) =>
-      `This removes ${positions} holding${positions === 1 ? "" : "s"} and ${cash} cash balance${cash === 1 ? "" : "s"} from this dated entry.`,
+    removeConfirm: message<[date: string]>(
+      "Remove the holdings and cash recorded for {0}?",
+    ),
+    removeCount: message<[positions: number, cash: number]>([
+      "text",
+      "This removes ",
+      0,
+      " holding",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      " and ",
+      1,
+      " cash balance",
+      ["if", ["===", 1, ["number", 1]], "", "s"],
+      " from this dated entry.",
+    ]),
   },
   snapshot: {
     entryUpdated: "Entry updated.",
@@ -277,14 +307,19 @@ const accounts = {
     cash: "Cash",
     balance: "Balance",
     addCurrency: "Add currency",
-    emptyHint: (investments: boolean) =>
-      `Add a holding or cash balance before saving. To record an empty account, enter 0 under ${investments ? "Cash" : "Balance"}.`,
-    holdingNumber: (n: number) => `Holding ${n}`,
-    removeHolding: (n: number) => `Remove holding ${n}`,
-    bucketCurrency: (bucket: string) => `${bucket} (SGD)`,
-    removeBalance: (currency: string) => `Remove ${currency} balance`,
-    unsplit: (balances: string) =>
-      `An earlier entry recorded ${balances} without a split.`,
+    emptyHint: message<[investments: boolean]>([
+      "text",
+      "Add a holding or cash balance before saving. To record an empty account, enter 0 under ",
+      ["if", 0, "Cash", "Balance"],
+      ".",
+    ]),
+    holdingNumber: message<[n: number]>("Holding {0}"),
+    removeHolding: message<[n: number]>("Remove holding {0}"),
+    bucketCurrency: message<[bucket: string]>("{0} (SGD)"),
+    removeBalance: message<[currency: string]>("Remove {0} balance"),
+    unsplit: message<[balances: string]>(
+      "An earlier entry recorded {0} without a split.",
+    ),
     unsplitAfter: "once you've entered the balances above.",
   },
   meta: {

@@ -27,6 +27,7 @@ const shell = {
   },
   signOut: "Sign out",
   openMenu: "Open menu",
+  skipToContent: "Skip to main content",
   meta: {
     description: "Net worth and spending across every account you hold.",
   },

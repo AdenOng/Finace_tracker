@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const portfolio = {
   consolidated: {
     notValued: "Not valued",
@@ -41,23 +42,53 @@ const portfolio = {
     synced: "Synced",
     exchangeRateUnavailable: " · Exchange rate unavailable",
     beforeConversion: " before conversion",
-    summary: (positions: number, accounts: number, date: string | null) =>
-      `${positions} holding${positions === 1 ? "" : "s"} across ${accounts} account${accounts === 1 ? "" : "s"}${date ? `, up to ${date}` : ""}.`,
+    summary: message<
+      [positions: number, accounts: number, date: string | null]
+    >([
+      "text",
+      0,
+      " holding",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      " across ",
+      1,
+      " account",
+      ["if", ["===", 1, ["number", 1]], "", "s"],
+      ["if", 2, ["text", ", up to ", 2], ""],
+      ".",
+    ]),
     includesBefore: "Includes",
     includesAfter: "in SRS.",
-    costCount: (percent: string | null, count: number, total: number) =>
-      `${percent !== null ? `${percent} · ` : ""}${count} of ${total} holdings have a cost`,
-    unpriced: (n: number) =>
-      `${n} position${n === 1 ? " has" : "s have"} no price and ${n === 1 ? "is" : "are"} excluded from the value.`,
-    holdingsCount: (n: number) => `Holdings · ${n}`,
-    fxDate: (date: string) => ` Exchange rates as of ${date}.`,
-    archivedBefore: (n: number) =>
-      `${n} archived account${n === 1 ? " is" : "s are"} left out (`,
+    costCount: message<[percent: string | null, count: number, total: number]>([
+      "text",
+      ["if", ["!==", 0, null], ["text", 0, " · "], ""],
+      1,
+      " of ",
+      2,
+      " holdings have a cost",
+    ]),
+    unpriced: message<[n: number]>([
+      "text",
+      0,
+      " position",
+      ["if", ["===", 0, ["number", 1]], " has", "s have"],
+      " no price and ",
+      ["if", ["===", 0, ["number", 1]], "is", "are"],
+      " excluded from the value.",
+    ]),
+    holdingsCount: message<[n: number]>("Holdings · {0}"),
+    fxDate: message<[date: string]>(" Exchange rates as of {0}."),
+    archivedBefore: message<[n: number]>([
+      "text",
+      0,
+      " archived account",
+      ["if", ["===", 0, ["number", 1]], " is", "s are"],
+      " left out (",
+    ]),
     archivedAfter: ").",
-    brokerCount: (n: number) => ` · ${n} brokers`,
-    quoteDate: (date: string) => ` · Quote ${date}`,
+    brokerCount: message<[n: number]>(" · {0} brokers"),
+    quoteDate: message<[date: string]>(" · Quote {0}"),
     unitsWeight: " units · ",
-    unitsDate: (date: string) => `units · ${date}`,
+    unitsDate: message<[date: string]>("units · {0}"),
   },
   meta: {
     title: "Consolidated portfolio",

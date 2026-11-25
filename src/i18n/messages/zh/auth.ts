@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/auth";
 import type { Translation } from "../../types";
 
@@ -85,11 +86,13 @@ const auth: Translation<typeof en> = {
     existing: "已有账号？",
     signIn: "登录并加入",
     submit: "创建账号并加入",
-    title: (name: string) => `加入 ${name}`,
-    body: (role: string) =>
-      `你受邀以${role}身份加入。空间内的所有成员都能查看共享账户。你的账户在主动共享前，仅自己可见。`,
-    wrongEmail: (email: string) =>
-      `此邀请发给 ${email}。请在设置中退出登录，再使用该邮箱登录。`,
+    title: message<[name: string]>("加入 {0}"),
+    body: message<[role: string]>(
+      "你受邀以{0}身份加入。空间内的所有成员都能查看共享账户。你的账户在主动共享前，仅自己可见。",
+    ),
+    wrongEmail: message<[email: string]>(
+      "此邀请发给 {0}。请在设置中退出登录，再使用该邮箱登录。",
+    ),
     signInAfter: "。",
     roles: {
       owner: "所有者",

@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/landing";
 import type { Translation } from "../../types";
 
@@ -21,8 +22,9 @@ const landing: Translation<typeof en> = {
     keepBody:
       "部署在你自己的服务器上。新用户凭邀请加入。支持邮箱和密码或通行密钥登录，并可通过两步验证加强保护。AI 服务商密钥加密保存。",
     sample: "海报中的数字均为虚构，不涉及任何人的真实数据。",
-    addBody: (count: number, currencies: number) =>
-      `从 ${count} 家券商和银行（IBKR、moomoo、Tiger、DBS 等）中选择，也可自行添加。每个账户保留原币种，共支持 ${currencies} 种货币。`,
+    addBody: message<[count: number, currencies: number]>(
+      "从 {0} 家券商和银行（IBKR、moomoo、Tiger、DBS 等）中选择，也可自行添加。每个账户保留原币种，共支持 {1} 种货币。",
+    ),
   },
   book: {
     accounts: "账户",
@@ -40,9 +42,9 @@ const landing: Translation<typeof en> = {
     captionLeft: "左侧账户余额相加，就是右侧的净资产。",
     captionBody:
       "曲线记录净资产的变化，下方色条展示资产配置。拖动页角、点击书页或选择月份，即可翻页。数字均为示例。",
-    from: (month: string) => `${month}余额`,
-    monthAccounts: (month: string) => `${month} · 账户`,
-    aria: (month: string) => `示例账本，${month}。使用方向键翻页。`,
+    from: message<[month: string]>("{0}余额"),
+    monthAccounts: message<[month: string]>("{0} · 账户"),
+    aria: message<[month: string]>("示例账本，{0}。使用方向键翻页。"),
   },
   chart: {
     overTime: "净资产走势",
@@ -50,17 +52,18 @@ const landing: Translation<typeof en> = {
     lastDecember: "去年 12 月",
     up: "上涨",
     down: "下跌",
-    aria: (
-      start: string,
-      end: string,
-      worth: string,
-      direction: string,
-      change: string,
-    ) =>
-      `示例投资组合，${start}至${end}：净资产 ${worth}，本月${direction} ${change}。`,
-    page: (page: string) => `第 ${page} 页，共 12 页`,
-    worthMonth: (month: string) => `净资产 · ${month}`,
-    onMonth: (month: string) => `较${month}`,
+    aria: message<
+      [
+        start: string,
+        end: string,
+        worth: string,
+        direction: string,
+        change: string,
+      ]
+    >("示例投资组合，{0}至{1}：净资产 {2}，本月{3} {4}。"),
+    page: message<[page: string]>("第 {0} 页，共 12 页"),
+    worthMonth: message<[month: string]>("净资产 · {0}"),
+    onMonth: message<[month: string]>("较{0}"),
   },
   sample: {
     classes: {
@@ -87,7 +90,7 @@ const landing: Translation<typeof en> = {
     },
   },
   cashFlow: {
-    accountList: (names: string[]) => names.join(" 和 "),
+    accountList: message<[names: string[]]>(["join", 0, " 和 "]),
     title: "现金流",
     moneyIn: "收入",
     moneyOut: "支出",
@@ -98,16 +101,17 @@ const landing: Translation<typeof en> = {
     out: "支出",
     sinceJanuary: "1 月以来结余",
     averageRate: "平均结余率",
-    aria: (month: string) => `${month}示例现金流`,
-    statement: (month: string, page: string) =>
-      `${month} · 第 ${page} 期，共 12 期`,
-    savedTo: (percent: string, accounts: string) =>
-      `占收入 ${percent} · 存入 ${accounts}`,
-    spentShare: (percent: string) => `支出 · ${percent}`,
-    savedShare: (percent: string) => `结余 · ${percent}`,
-    split: (spent: string, saved: string) =>
-      `收入分配：支出 ${spent}，结余 ${saved}`,
-    vs: (month: string) => `较 ${month}`,
+    aria: message<[month: string]>("{0}示例现金流"),
+    statement: message<[month: string, page: string]>(
+      "{0} · 第 {1} 期，共 12 期",
+    ),
+    savedTo:
+      message<[percent: string, accounts: string]>("占收入 {0} · 存入 {1}"),
+    spentShare: message<[percent: string]>("支出 · {0}"),
+    savedShare: message<[percent: string]>("结余 · {0}"),
+    split:
+      message<[spent: string, saved: string]>("收入分配：支出 {0}，结余 {1}"),
+    vs: message<[month: string]>("较 {0}"),
   },
   glyphs: {
     netWorth: "净资产",
