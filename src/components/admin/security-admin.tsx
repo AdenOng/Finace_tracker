@@ -39,7 +39,7 @@ function PolicyForm() {
   const policyHelp = getPolicyHelp(t);
   const utils = api.useUtils();
   const [settings] = api.admin.security.settings.useSuspenseQuery();
-  const { flash, success, error } = useFlash();
+  const { flash, success, error, clear } = useFlash();
   const [policy, setPolicy] = useState(settings.twoFactorPolicy);
   const [limitSessions, setLimitSessions] = useState(
     settings.maxSessionDays !== null,
@@ -78,7 +78,7 @@ function PolicyForm() {
           });
         }}
       >
-        <FlashNotice flash={flash} />
+        <FlashNotice flash={flash} onDismiss={clear} />
         <div className="grid gap-6 md:grid-cols-2">
           <Field
             label={t.adminManage.security.twoStepPolicyLabel}

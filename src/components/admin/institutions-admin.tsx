@@ -210,7 +210,7 @@ export function InstitutionsAdmin() {
         </div>
       </div>
 
-      <FlashNotice flash={flash} className="mb-6" />
+      <FlashNotice flash={flash} onDismiss={clear} className="mb-6" />
 
       <FilterTabs
         label={t.adminManage.institutions.filterInstitutions}

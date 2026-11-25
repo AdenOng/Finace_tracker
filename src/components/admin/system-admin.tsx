@@ -190,7 +190,7 @@ export function SystemAdmin() {
           ) : null
         }
       >
-        <FlashNotice flash={flash} className="mb-3" />
+        <FlashNotice flash={flash} onDismiss={clear} className="mb-3" />
         <Check ok={info.config.email.configured}>
           <span className="text-sm">
             {info.config.email.configured
