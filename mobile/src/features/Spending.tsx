@@ -30,6 +30,7 @@ import {
 import { MonthStepper, TopBar, TransactionRow } from "../components/finance";
 import { Select } from "../components/Select";
 import { SpendingSheet } from "./Overview";
+import { transactionType } from "../../../src/lib/transaction-classification";
 import { fractionDigits, money, signedAmount } from "../utils/money";
 import { formatMonth } from "../utils/labels";
 import { shiftMonth, today } from "../utils/server";
@@ -277,7 +278,9 @@ export function TransactionDetail({
           {!!t.notes && <Text style={styles.text}>{t.notes}</Text>}
           <Text style={styles.muted}>
             Source: {t.source}
-            {t.isTransfer ? " · transfer" : ""}
+            {transactionType(t.amount, t.isTransfer) === "transfer"
+              ? " · transfer"
+              : ""}
           </Text>
           {t.reconciliationId ? (
             <Notice>
@@ -671,10 +674,7 @@ function TransactionForm({
             }
             icon="check"
             disabled={
-              pending ||
-              !available.length ||
-              !accounts.data ||
-              !categories.data
+              pending || !available.length || !accounts.data || !categories.data
             }
             onPress={() => void save()}
           />

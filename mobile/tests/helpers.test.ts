@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { normalizeServer, shiftMonth } from "../src/utils/server";
-import { formatMoney, signedAmount } from "../src/utils/money";
+import { money, signedAmount } from "../src/utils/money";
 describe("trusted server origins", () => {
   test("canonical HTTPS origin", () =>
     expect(normalizeServer(" HTTPS://Finfolio.example:443/ ")).toBe(
@@ -43,11 +43,12 @@ describe("trusted server origins", () => {
 });
 describe("decimal money", () => {
   test("keeps values above the safe integer limit exact", () =>
-    expect(formatMoney("9999999999999999.1234", "SGD")).toBe(
-      "SGD 9,999,999,999,999,999.12",
+    expect(money("9999999999999999.1234", "SGD")).toBe(
+      "S$9,999,999,999,999,999.12",
     ));
-  test("rounds decimal ties and applies expense direction", () => {
-    expect(formatMoney("1.005")).toBe("1.01");
+  test("rounds decimal ties, minor units, and applies expense direction", () => {
+    expect(money("1.005")).toBe("1.01");
+    expect(money("1234.567", "IDR")).toBe("Rp 1,235");
     expect(signedAmount("0.0001", true)).toBe("-0.0001");
   });
   test("rejects invalid amounts and precision overflow", () => {
@@ -70,9 +71,8 @@ describe("decimal money", () => {
       expect(() => signedAmount(value, true)).toThrow();
   });
   test("privacy masks even missing amounts", () =>
-    expect(formatMoney(null, "SGD", true)).toBe("••••"));
-  test("missing value stays unknown", () =>
-    expect(formatMoney(null)).toBe("Not valued"));
+    expect(money(null, "SGD", { hidden: true })).toBe("••••"));
+  test("missing value stays unknown", () => expect(money(null)).toBe("—"));
 });
 test("month navigation crosses year boundaries", () => {
   expect(shiftMonth("2026-01", -1)).toBe("2025-12");
