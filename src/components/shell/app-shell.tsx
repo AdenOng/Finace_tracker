@@ -200,6 +200,12 @@ export function AppShell({
       data-amounts={hideAmounts ? "hidden" : "shown"}
       className="desk relative isolate min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]"
     >
+      <a
+        href="#main-content"
+        className="bg-ink text-paper rounded-ctl sr-only fixed top-3 left-3 z-50 px-3 py-2 text-sm font-semibold focus:not-sr-only"
+      >
+        {t.shell.skipToContent}
+      </a>
       {/* Desktop: a quiet column on the desk */}
       <aside className="border-line hidden flex-col border-r lg:sticky lg:top-0 lg:flex lg:h-dvh">
         <div className="flex h-20 items-center px-5">
@@ -252,7 +258,7 @@ export function AppShell({
       </aside>
 
       {/* Phone and tablet: wordmark and the account menu, nothing else */}
-      <header className="border-line sticky top-0 z-20 flex h-14 items-center justify-between border-b bg-[#e6dfd0]/85 px-4 backdrop-blur lg:hidden">
+      <header className="border-line bg-desk/85 sticky top-0 z-20 flex h-14 items-center justify-between border-b px-4 backdrop-blur lg:hidden">
         <Link href={enrolling ? "/settings" : "/"}>
           <Wordmark />
         </Link>
@@ -269,14 +275,18 @@ export function AppShell({
         </div>
       </header>
 
-      <main className="min-w-0 px-4 pt-6 pb-28 sm:px-8 lg:px-14 lg:py-12">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="min-w-0 px-4 pt-6 pb-28 outline-none sm:px-8 lg:px-14 lg:py-12"
+      >
         <div className="animate-rise mx-auto max-w-6xl">{children}</div>
       </main>
 
       {tabs.length > 0 ? (
         <nav
           aria-label={t.shell.nav.main}
-          className="border-line fixed inset-x-0 bottom-0 z-20 grid border-t bg-[#f8f4ea]/92 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+          className="border-line bg-surface/92 fixed inset-x-0 bottom-0 z-20 grid border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
           style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, 1fr)` }}
         >
           {tabs.map((item) => {

@@ -12,6 +12,7 @@
   --font-poster: var(--font-bricolage), var(--font-geist), sans-serif;
 
   --color-canvas: #12110f;
+  --color-desk: #e6dfd0;
   --color-surface: #1a1815;
   --color-surface-2: #22201c;
   --color-sunken: #0d0c0a;
@@ -366,17 +367,16 @@
 /* The signed-in workspace: a warm stone desk the sheets are laid on. */
 @utility desk {
   @apply paper;
+  --color-desk: #e6dfd0;
   --color-surface-2: #f3eee3;
   --color-wash: rgb(22 19 15 / 0.06);
-  background-color: #e6dfd0;
-  background-image:
-    radial-gradient(
-      ellipse 70% 50% at 50% 0%,
-      rgb(255 255 255 / 0.45),
-      transparent
-    ),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.09  0 0 0 0 0.07  0 0 0 0 0.05  0 0 0 0.12 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
-  background-attachment: fixed;
+  background-color: var(--color-desk);
+  /* Subtle warm overhead wash; single global grain comes from body::after without fixed attachment jank. */
+  background-image: radial-gradient(
+    ellipse 70% 420px at 50% 0%,
+    rgb(255 255 255 / 0.45),
+    transparent
+  );
 }
 
 /* A sheet laid on the desk. */
