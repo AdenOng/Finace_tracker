@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { categoryLabel, useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
+import { Combobox } from "~/components/ui/combobox";
 import { Drawer } from "~/components/ui/dialog";
 import {
   Checkbox,
@@ -169,12 +170,12 @@ export function BulkEditDrawer({
             label={t.spending.bulkEditDrawer.category}
             htmlFor="bulk-category"
           >
-            <Select
+            <Combobox
               id="bulk-category"
               value={categoryId}
-              onChange={(e) => {
-                setCategoryId(e.target.value);
-                const kind = categoryKind(categories, e.target.value);
+              onChange={(val) => {
+                setCategoryId(val);
+                const kind = categoryKind(categories, val);
                 if (kind)
                   setType(
                     kind === "transfer"
@@ -186,20 +187,22 @@ export function BulkEditDrawer({
                           : "keep",
                   );
               }}
-            >
-              <option value="keep">
-                {t.spending.bulkEditDrawer.keepExistingCategories}
-              </option>
-              <option value="">
-                {t.spending.bulkEditDrawer.clearCategory}
-              </option>
-              {orderCategories(categories).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.parentId ? "— " : ""}
-                  {categoryLabel(t, c.name)}
-                </option>
-              ))}
-            </Select>
+              options={[
+                {
+                  value: "keep",
+                  label: t.spending.bulkEditDrawer.keepExistingCategories,
+                },
+                {
+                  value: "",
+                  label: t.spending.bulkEditDrawer.clearCategory,
+                },
+                ...orderCategories(categories).map((c) => ({
+                  value: c.id,
+                  label: `${c.parentId ? "— " : ""}${categoryLabel(t, c.name)}`,
+                  keywords: c.name,
+                })),
+              ]}
+            />
           </Field>
           <Field
             label={t.spending.bulkEditDrawer.transactionType}

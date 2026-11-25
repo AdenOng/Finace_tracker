@@ -466,9 +466,8 @@ test("editing keeps archived category and inactive currency selected in the actu
       onSaved={async () => undefined}
     />,
   );
-  expect(html).toContain(
-    `<option value="${categoryId}" selected="">Archived category (archived)</option>`,
-  );
+  expect(html).toContain(`name="categoryId" value="${categoryId}"`);
+  expect(html).toContain("Archived category (archived)");
   expect(html).toContain(
     '<option value="USD" selected="">USD (inactive)</option>',
   );

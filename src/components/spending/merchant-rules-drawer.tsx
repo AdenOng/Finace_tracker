@@ -3,9 +3,13 @@
 import { useState } from "react";
 import { categoryLabel, useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
+import { Combobox } from "~/components/ui/combobox";
+import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Drawer } from "~/components/ui/dialog";
-import { Field, Input, Select } from "~/components/ui/field";
+import { Field, Input } from "~/components/ui/field";
+import { FlashNotice } from "~/components/ui/flash-notice";
 import { Notice } from "~/components/ui/panel";
+import { useFlash } from "~/components/ui/use-flash";
 import { orderCategories } from "~/lib/categories";
 import { errorMessage } from "~/lib/errors";
 import { formText } from "~/lib/form";
@@ -19,8 +23,8 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
   const rules = api.merchantRules.list.useQuery();
   const [categories] = api.catalog.categories.useSuspenseQuery();
   const [editing, setEditing] = useState<Rule | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState("");
+  const flash = useFlash();
   const create = api.merchantRules.create.useMutation();
   const update = api.merchantRules.update.useMutation();
   const remove = api.merchantRules.remove.useMutation();
@@ -29,17 +33,19 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!categoryId) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const values = {
       pattern: formText(form, "pattern"),
-      categoryId: formText(form, "categoryId"),
+      categoryId,
     };
     if (editing) await update.mutateAsync({ ...values, id: editing.id });
     else await create.mutateAsync(values);
     formElement.reset();
     setEditing(null);
-    setFlash(
+    setCategoryId("");
+    flash.success(
       t.spending.merchantRulesDrawer
         .ruleSavedNewUncategorisedTransactionsWillUse,
     );
@@ -63,7 +69,7 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
     >
       <div className="space-y-6">
         {error ? <Notice tone="error">{errorMessage(error)}</Notice> : null}
-        {flash ? <Notice tone="success">{flash}</Notice> : null}
+        <FlashNotice flash={flash.flash} onDismiss={flash.clear} />
         <form
           key={editing?.id ?? "new"}
           className="space-y-4"
@@ -88,25 +94,29 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
             label={t.spending.merchantRulesDrawer.assignCategory}
             htmlFor="rule-category"
           >
-            <Select
+            <Combobox
               id="rule-category"
               name="categoryId"
               required
-              defaultValue={editing?.categoryId ?? ""}
-            >
-              <option value="" disabled>
-                {t.spending.merchantRulesDrawer.chooseACategory}
-              </option>
-              {orderCategories(categories).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.parentId ? "— " : ""}
-                  {categoryLabel(t, c.name)}
-                </option>
-              ))}
-            </Select>
+              value={categoryId}
+              onChange={setCategoryId}
+              placeholder={t.spending.merchantRulesDrawer.chooseACategory}
+              options={[
+                {
+                  value: "",
+                  label: t.spending.merchantRulesDrawer.chooseACategory,
+                  disabled: true,
+                },
+                ...orderCategories(categories).map((c) => ({
+                  value: c.id,
+                  label: `${c.parentId ? "— " : ""}${categoryLabel(t, c.name)}`,
+                  keywords: c.name,
+                })),
+              ]}
+            />
           </Field>
           <div className="flex gap-2">
-            <Button type="submit" loading={busy}>
+            <Button type="submit" loading={busy} disabled={!categoryId}>
               {editing
                 ? t.spending.merchantRulesDrawer.saveRule
                 : t.spending.merchantRulesDrawer.addRule}
@@ -115,7 +125,10 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
               <Button
                 type="button"
                 variant="ghost"
-                onClick={() => setEditing(null)}
+                onClick={() => {
+                  setEditing(null);
+                  setCategoryId("");
+                }}
               >
                 {t.spending.merchantRulesDrawer.cancelEdit}
               </Button>
@@ -144,7 +157,8 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
                   disabled={busy}
                   onClick={() => {
                     setEditing(rule);
-                    setFlash(null);
+                    setCategoryId(rule.categoryId);
+                    flash.clear();
                     create.reset();
                     update.reset();
                     remove.reset();
@@ -152,40 +166,28 @@ export function MerchantRulesDrawer({ onClose }: { onClose: () => void }) {
                 >
                   {t.common.actions.edit}
                 </Button>
-                <Button
+                <ConfirmButton
                   size="sm"
                   variant="danger"
-                  loading={remove.isPending && deleting === rule.id}
+                  loading={remove.isPending && remove.variables?.id === rule.id}
                   disabled={busy}
-                  onClick={() => {
-                    if (deleting !== rule.id) {
-                      setDeleting(rule.id);
-                      return;
-                    }
+                  confirmLabel={t.spending.merchantRulesDrawer.confirmDelete}
+                  onConfirm={() => {
                     void remove
                       .mutateAsync({ id: rule.id })
                       .then(async () => {
-                        setDeleting(null);
-                        if (editing?.id === rule.id) setEditing(null);
+                        if (editing?.id === rule.id) {
+                          setEditing(null);
+                          setCategoryId("");
+                        }
                         await utils.merchantRules.list.invalidate();
                         await utils.merchantRules.preview.invalidate();
                       })
                       .catch(() => undefined);
                   }}
                 >
-                  {deleting === rule.id
-                    ? t.spending.merchantRulesDrawer.confirmDelete
-                    : t.common.actions.delete}
-                </Button>
-                {deleting === rule.id ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setDeleting(null)}
-                  >
-                    {t.common.actions.cancel}
-                  </Button>
-                ) : null}
+                  {t.common.actions.delete}
+                </ConfirmButton>
               </div>
             </li>
           ))}
