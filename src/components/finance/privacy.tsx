@@ -47,8 +47,11 @@ const usePrefs = () => useContext(PrefsContext);
 
 /** Hides again every amount shown by clicking its dots. */
 function concealRevealed() {
-  for (const amount of document.querySelectorAll("[data-revealed]"))
+  for (const amount of document.querySelectorAll("[data-revealed]")) {
     amount.removeAttribute("data-revealed");
+    if (amount.hasAttribute("aria-pressed"))
+      amount.setAttribute("aria-pressed", "false");
+  }
 }
 
 export function AmountsProvider({
@@ -73,12 +76,13 @@ export function AmountsProvider({
     );
   }
 
-  // Clicking a hidden amount's dots shows just that amount, until it is clicked again or any
-  // eye is used. Capturing first means dots inside a link reveal rather than navigate.
+  const t = useT();
+  // Clicking or pressing Enter/Space on masked dots shows just that amount, until toggled again
+  // or any eye is used. Capturing first means dots inside a link reveal rather than navigate.
   useEffect(() => {
-    function onClick(event: MouseEvent) {
-      if (!(event.target instanceof Element)) return;
-      let amount = event.target.closest<HTMLElement>(".sensitive");
+    function findAmount(target: EventTarget | null) {
+      if (!(target instanceof Element)) return null;
+      let amount = target.closest<HTMLElement>(".sensitive");
       // Nested amounts reveal together, from the outermost.
       for (
         let outer = amount?.parentElement?.closest<HTMLElement>(".sensitive");
@@ -86,21 +90,90 @@ export function AmountsProvider({
         outer = outer.parentElement?.closest<HTMLElement>(".sensitive")
       )
         amount = outer;
-      if (!amount) return;
+      return amount;
+    }
+
+    function toggleAmount(amount: HTMLElement, event: Event) {
       if (getComputedStyle(amount).getPropertyValue("--masked").trim()) {
         event.preventDefault();
         event.stopPropagation();
         amount.setAttribute("data-revealed", "");
+        amount.setAttribute("aria-pressed", "true");
       } else if (
         amount.hasAttribute("data-revealed") &&
         !amount.closest("a, button, summary, label")
       ) {
+        event.preventDefault();
         amount.removeAttribute("data-revealed");
+        amount.setAttribute("aria-pressed", "false");
       }
     }
+
+    function onClick(event: MouseEvent) {
+      const amount = findAmount(event.target);
+      if (amount) toggleAmount(amount, event);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const amount = findAmount(event.target);
+      if (!amount || amount !== event.target) return;
+      toggleAmount(amount, event);
+    }
+
     document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
   }, []);
+
+  // Keep keyboard focusability in sync on standalone masked amounts without requiring
+  // every server-rendered `.sensitive` span to become a client component.
+  useEffect(() => {
+    const revealLabel = t.common.amounts.reveal;
+    let scheduled = false;
+    function syncFocusable() {
+      scheduled = false;
+      for (const el of document.querySelectorAll<HTMLElement>(".sensitive")) {
+        const isNested = !!el.parentElement?.closest(".sensitive");
+        const insideInteractive = !!el.closest("a, button, summary, label");
+        const isMasked =
+          !isNested &&
+          !insideInteractive &&
+          (!!getComputedStyle(el).getPropertyValue("--masked").trim() ||
+            el.hasAttribute("data-revealed"));
+        if (isMasked) {
+          el.setAttribute("tabindex", "0");
+          el.setAttribute("role", "button");
+          el.setAttribute("aria-label", revealLabel);
+          el.setAttribute(
+            "aria-pressed",
+            el.hasAttribute("data-revealed") ? "true" : "false",
+          );
+        } else if (el.getAttribute("role") === "button") {
+          el.removeAttribute("tabindex");
+          el.removeAttribute("role");
+          el.removeAttribute("aria-label");
+          el.removeAttribute("aria-pressed");
+        }
+      }
+    }
+    syncFocusable();
+    const observer = new MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(syncFocusable);
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-amounts", "data-amounts-scope"],
+    });
+    return () => observer.disconnect();
+  }, [prefs, t.common.amounts.reveal]);
 
   function setHidden(hidden: boolean) {
     // The main switch is the quick way to cover everything, so it resets every card.

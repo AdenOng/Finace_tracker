@@ -111,12 +111,17 @@ await mock.module("~/server/modules/llm", () => ({
   createLlmAdapter: fakeAdapter,
 }));
 let saveUploadCalls = 0;
+let waitForConcurrentUpload: (() => Promise<void>) | undefined;
+const removedUploads: string[] = [];
 await mock.module("~/server/modules/imports/storage", () => ({
   readUpload: async () => new Uint8Array([137, 80, 78, 71]),
-  removeUpload: async () => undefined,
+  removeUpload: async (storageKey: string) => {
+    removedUploads.push(storageKey);
+  },
   saveUpload: async () => {
-    saveUploadCalls++;
-    return "unused";
+    const key = `owner/attempt-${++saveUploadCalls}`;
+    await waitForConcurrentUpload?.();
+    return key;
   },
   sha256: () => "unused",
 }));
@@ -513,6 +518,55 @@ const brokenKey = await provider("broken-key", {
   );
   assert.equal(overStorage.status, 413);
   assert.match(await overStorage.text(), /250 MiB/);
+
+  await db
+    .update(schema.document)
+    .set({ sizeBytes: 100 })
+    .where(eq(schema.document.id, outstanding[0]!.documentId));
+  // Both requests write before either may acquire the lock. Only the losing attempt is removed.
+  let writes = 0;
+  let releaseWrites!: () => void;
+  const bothWrites = new Promise<void>((resolve) => {
+    releaseWrites = resolve;
+  });
+  waitForConcurrentUpload = () => {
+    if (++writes === 2) releaseWrites();
+    return bothWrites;
+  };
+  const raced = await Promise.all(
+    Array.from({ length: 2 }, () =>
+      POST(
+        new Request("http://localhost/api/imports", {
+          method: "POST",
+          body: form,
+        }),
+      ),
+    ),
+  );
+  waitForConcurrentUpload = undefined;
+  assert.equal(writes, 2);
+  assert.deepEqual(raced.map((response) => response.status).sort(), [202, 409]);
+  const results = await Promise.all(
+    raced.map(async (response) => (await response.json()) as { jobId: string }),
+  );
+  assert.equal(results[0]!.jobId, results[1]!.jobId);
+  const [created] = await db
+    .select({ storageKey: schema.document.storageKey })
+    .from(schema.document)
+    .innerJoin(
+      schema.extractionJob,
+      eq(schema.extractionJob.documentId, schema.document.id),
+    )
+    .where(eq(schema.extractionJob.id, results[0]!.jobId));
+  assert.ok(created);
+  const attemptPaths = [
+    `owner/attempt-${callsBefore + 1}`,
+    `owner/attempt-${callsBefore + 2}`,
+  ];
+  assert.deepEqual(
+    removedUploads,
+    attemptPaths.filter((key) => key !== created.storageKey),
+  );
 }
 
 // 5. Spent tokens still count after the import is deleted.

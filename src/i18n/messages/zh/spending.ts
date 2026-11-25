@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/spending";
 import type { Translation } from "../../types";
 const spending: Translation<typeof en> = {
@@ -6,15 +7,16 @@ const spending: Translation<typeof en> = {
     transfers: "转账",
   },
   bulkEditDrawer: {
-    updated: (n: number) => `已更新 ${n} 笔交易。`,
-    categorised: (n: number) => `已为 ${n} 笔交易设置分类。`,
-    deleted: (n: number) => `已删除 ${n} 笔交易。`,
-    selected: (n: number) => `已选择 ${n} 笔交易。`,
-    applyChanges: (n: number) => `应用 ${n} 项更改`,
-    deleteTransactions: (n: number) => `删除 ${n} 笔交易`,
-    previewSummary: (changes: number, skipped: number) =>
-      `${changes} 项更改；${skipped} 条记录保持不变。`,
-    ruleMatch: (name: string, pattern: string) => `${name} · 匹配“${pattern}”`,
+    updated: message<[n: number]>("已更新 {0} 笔交易。"),
+    categorised: message<[n: number]>("已为 {0} 笔交易设置分类。"),
+    deleted: message<[n: number]>("已删除 {0} 笔交易。"),
+    selected: message<[n: number]>("已选择 {0} 笔交易。"),
+    applyChanges: message<[n: number]>("应用 {0} 项更改"),
+    deleteTransactions: message<[n: number]>("删除 {0} 笔交易"),
+    previewSummary: message<[changes: number, skipped: number]>(
+      "{0} 项更改；{1} 条记录保持不变。",
+    ),
+    ruleMatch: message<[name: string, pattern: string]>("{0} · 匹配“{1}”"),
 
     editSelectedTransactions: "编辑所选交易",
     applyMerchantRules: "应用商户规则",
@@ -66,9 +68,9 @@ const spending: Translation<typeof en> = {
     noRulesYet: "暂无规则。",
   },
   mobileTransactionRow: {
-    selectTransaction: (description: string, date: string) =>
-      `选择 ${date} 的交易：${description}`,
-    editTransaction: (description: string) => `编辑 ${description}`,
+    selectTransaction:
+      message<[description: string, date: string]>("选择 {1} 的交易：{0}"),
+    editTransaction: message<[description: string]>("编辑 {0}"),
 
     transferLinked: "转账 · 已配对",
     transfer: "转账",
@@ -78,14 +80,19 @@ const spending: Translation<typeof en> = {
     uncleared: "未核实",
   },
   spendingView: {
-    selectTransaction: (description: string, date: string) =>
-      `选择 ${date} 的交易：${description}`,
-    freshStart: (month: string) => `${month}，新的开始。`,
-    filters: (n: number) => `筛选${n ? ` · ${n}` : ""}`,
-    selected: (n: number) => `已选择 ${n} 条`,
-    matches: (query: string) =>
-      `所有月份中符合“${query}”的记录，按时间从新到旧排列。`,
-    nothingMatches: (query: string) => `没有符合“${query}”的记录`,
+    selectTransaction:
+      message<[description: string, date: string]>("选择 {1} 的交易：{0}"),
+    freshStart: message<[month: string]>("{0}，新的开始。"),
+    filters: message<[n: number]>([
+      "text",
+      "筛选",
+      ["if", 0, ["text", " · ", 0], ""],
+    ]),
+    selected: message<[n: number]>("已选择 {0} 条"),
+    matches: message<[query: string]>(
+      "所有月份中符合“{0}”的记录，按时间从新到旧排列。",
+    ),
+    nothingMatches: message<[query: string]>("没有符合“{0}”的记录"),
 
     description: "摘要",
     merchant: "商户",
@@ -118,6 +125,10 @@ const spending: Translation<typeof en> = {
     transactions: "交易",
     exportTheseTransactionsAsCSV: "将这些交易导出为 CSV",
     exportCSV: "导出 CSV",
+    exportFailed: "导出交易失败，请重试。",
+    allMonthsSearching: "所有月份",
+    monthControlsSummaryOnly:
+      "搜索结果显示所有月份的匹配记录；月份切换仅更新下方的月度总览。",
     clearFilters: "清除筛选",
     searchEveryMonth: "搜索所有月份",
     searchTransactions: "搜索交易",
@@ -144,9 +155,9 @@ const spending: Translation<typeof en> = {
     uncategorised: "未分类",
   },
   transactionDrawer: {
-    accountCurrencyLabel: (currency: string) => `${currency}（账户币种）`,
-    inactiveCurrency: (currency: string) => `${currency}（已停用）`,
-    archivedCategory: (name: string) => `${name}（已归档）`,
+    accountCurrencyLabel: message<[currency: string]>("{0}（账户币种）"),
+    inactiveCurrency: message<[currency: string]>("{0}（已停用）"),
+    archivedCategory: message<[name: string]>("{0}（已归档）"),
 
     transactionSaved: "交易已保存。",
     transactionAdded: "交易已添加。",
@@ -181,16 +192,31 @@ const spending: Translation<typeof en> = {
   },
   transferReview: {
     toLabel: "转入方",
-    suggested: (n: number) => `建议配对（${n} 组）`,
-    unmatched: (n: number) => `未配对（${n} 笔）`,
-    linked: (n: number, more = false) =>
-      `已配对转账（${n}${more ? "+" : ""} 笔）`,
-    excluded: (n: number, more = false) =>
-      `Finfolio 中无另一方记录（${n}${more ? "+" : ""} 笔）`,
-    fx: (out: string, rate: string, incoming: string) =>
-      `近似汇率：1 ${out} = ${rate} ${incoming}`,
-    suggestionPolicy: (date: string | null) =>
-      `建议配对允许日期相差 −1 至 +5 天、手续费不超过 1%（上限为 10）及 3% 的汇率偏差。换汇采用${date ? `截至 ${date} 的` : ""}近似最新汇率；汇差不会视为推算手续费。`,
+    suggested: message<[n: number]>("建议配对（{0} 组）"),
+    unmatched: message<[n: number]>("未配对（{0} 笔）"),
+    linked: message<[n: number, more?: boolean]>([
+      "text",
+      "已配对转账（",
+      0,
+      ["if", 1, "+", ""],
+      " 笔）",
+    ]),
+    excluded: message<[n: number, more?: boolean]>([
+      "text",
+      "Finfolio 中无另一方记录（",
+      0,
+      ["if", 1, "+", ""],
+      " 笔）",
+    ]),
+    fx: message<[out: string, rate: string, incoming: string]>(
+      "近似汇率：1 {0} = {1} {2}",
+    ),
+    suggestionPolicy: message<[date: string | null]>([
+      "text",
+      "建议配对允许日期相差 −1 至 +5 天、手续费不超过 1%（上限为 10）及 3% 的汇率偏差。换汇采用",
+      ["if", 0, ["text", "截至 ", 0, " 的"], ""],
+      "近似最新汇率；汇差不会视为推算手续费。",
+    ]),
 
     outgoing: "转出",
     incoming: "转入",

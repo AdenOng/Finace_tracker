@@ -1,84 +1,30 @@
-import { getT, getLocale } from "~/i18n/server";
-import { and, eq, isNull } from "drizzle-orm";
 import Decimal from "decimal.js";
-import { Check, Minus } from "lucide-react";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { after } from "next/server";
-import { Suspense } from "react";
-
-import { AmountsScope, AmountsToggle } from "~/components/finance/privacy";
-import { cardTools } from "~/components/ui/card-tools";
-import { Allocation } from "~/components/overview/allocation";
-import { AccountRow } from "~/components/overview/account-row";
-import { HeroFigure } from "~/components/overview/hero-figure";
-import {
-  NetWorthChart,
-  type NetWorthPoint,
-} from "~/components/overview/net-worth-chart";
 import { CpfSrsSheet } from "~/components/overview/cpf-srs-sheet";
-import { PortfolioSettings } from "~/components/overview/portfolio-settings";
-import { PriceRefresh } from "~/components/overview/price-refresh";
-import { TransferFreshnessNotices } from "~/components/overview/transfer-freshness-notices";
-import { SheetHeader } from "~/components/overview/sheet-header";
-import { accountGroupOf } from "~/lib/accounts";
-import { cn } from "~/lib/cn";
+import { type NetWorthPoint } from "~/components/overview/net-worth-chart";
+import { SetupChecklist } from "~/components/overview/setup-checklist";
+import { OverviewSpendingCard } from "~/components/overview/spending-card";
+import { getLocale, getT } from "~/i18n/server";
 import { currentMonth, shiftMonth, todayIso } from "~/lib/dates";
 import { type GroupToday, netWorthSeries } from "~/lib/net-worth-series";
 import {
-  formatDate,
-  formatMoney,
-  formatMonth,
-  formatRelative,
-} from "~/lib/format";
+  rollupOverviewSpending,
+  rollupOverviewHoldings,
+} from "~/server/modules/portfolio/overview";
 import { isAdmin, requireEnrolledSession } from "~/server/auth";
 import { db } from "~/server/db";
 import { llmProvider } from "~/server/db/schema";
 import { backfillPriceHistory } from "~/server/modules/portfolio/market-health";
 import { api, HydrateClient } from "~/trpc/server";
+import { NetWorthCard } from "~/components/overview/net-worth-card";
+import { InvestmentsCard } from "~/components/overview/investments-card";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT();
   return { title: t.overview.meta.title };
 }
-
-function ChecklistItem({
-  done,
-  children,
-}: {
-  done: boolean;
-  children: React.ReactNode;
-}) {
-  // Only what is left to do is listed; the count shows the progress.
-  if (done) return null;
-  return (
-    <li className="flex items-center gap-2.5 text-[13px]">
-      <span
-        className={cn(
-          "grid size-5 shrink-0 place-items-center rounded-full",
-          done
-            ? "bg-brand text-on-brand"
-            : "border-line-2 text-ink-3 border border-dashed",
-        )}
-      >
-        {done ? (
-          <Check className="size-3" strokeWidth={3.5} />
-        ) : (
-          <Minus className="size-3" />
-        )}
-      </span>
-      <span className={done ? "text-ink-3 line-through" : undefined}>
-        {children}
-      </span>
-    </li>
-  );
-}
-
-const link =
-  "font-semibold underline decoration-current/30 underline-offset-4 hover:decoration-current";
-
-const sum = (values: (string | null)[]) =>
-  values.reduce((total, v) => (v ? total.plus(v) : total), new Decimal(0));
 
 export default async function OverviewPage() {
   const t = await getT();
@@ -128,40 +74,8 @@ export default async function OverviewPage() {
       : []),
   ];
 
-  // Investments: valued from holdings, split by asset class.
-  const investing = worth.accounts.filter(
-    (a) => accountGroupOf(a.type) === "investments",
-  );
-  const banking = worth.accounts.filter(
-    (a) => accountGroupOf(a.type) === "banking",
-  );
-  const forLater = worth.accounts.filter(
-    (a) => accountGroupOf(a.type) === "cpf_srs",
-  );
-  const forLaterTotal = new Decimal(worth.cpfSrs.total ?? 0);
-  const investTotal = sum(worth.allocation.map((a) => a.total));
-  const investmentIncomplete = investing.some(
-    (a) => a.unconverted.length > 0 || a.unpriced > 0,
-  );
-  const positive = worth.allocation.filter(
-    (a) => a.total && new Decimal(a.total).isPositive(),
-  );
-  const positiveSum = sum(positive.map((a) => a.total));
-  const slices = positive.map((a) => ({
-    assetClass: a.assetClass,
-    share: positiveSum.isZero()
-      ? 0
-      : new Decimal(a.total!).div(positiveSum).times(100).toNumber(),
-    display: formatMoney(a.total!, currency),
-  }));
-
-  // Bank and cards: cash held less what the cards owe.
-  const bankTotal = new Decimal(worth.banking.total ?? 0);
-  const owed = sum(
-    banking.map((a) =>
-      a.total && new Decimal(a.total).isNegative() ? a.total : null,
-    ),
-  ).abs();
+  const holdings = rollupOverviewHoldings(worth);
+  const { investing, banking, forLater, investTotal, bankTotal } = holdings;
 
   const groupToday = (
     accounts: typeof investing,
@@ -187,500 +101,60 @@ export default async function OverviewPage() {
     },
   });
 
-  // This month's spending in the display currency, rolled up to top-level categories.
-  const parentOf = new Map(categories.map((c) => [c.id, c.parentId ?? c.id]));
-  const nameOf = new Map(categories.map((c) => [c.id, c.name]));
-  const otherCurrencies = thisMonth.unconverted;
+  const { shown, rest, largest } = rollupOverviewSpending({
+    categories,
+    spentByCategory: thisMonth.categories,
+    translateCategory: (name) =>
+      (t.common.categories as Record<string, string>)[name] ?? name,
+    notCategorisedLabel: t.overview.page.notCategorised,
+    otherLabel: t.overview.page.other,
+  });
+
   const moneyIn = new Decimal(thisMonth.received);
   const moneyOut = new Decimal(thisMonth.spent);
-  // A partial last month would make the comparison misleading.
   const lastOut = lastMonth.unconverted.length
     ? new Decimal(0)
     : new Decimal(lastMonth.spent);
-  const byCategory = new Map<string, Decimal>();
-  for (const r of thisMonth.categories) {
-    if (new Decimal(r.spent).isZero()) continue;
-    const root = r.categoryId
-      ? (parentOf.get(r.categoryId) ?? r.categoryId)
-      : "none";
-    byCategory.set(
-      root,
-      (byCategory.get(root) ?? new Decimal(0)).plus(r.spent),
-    );
-  }
-  const ranked = [...byCategory]
-    .map(([id, spent]) => ({
-      id,
-      name:
-        id === "none"
-          ? t.overview.page.notCategorised
-          : ((t.common.categories as Record<string, string>)[
-              nameOf.get(id) ?? ""
-            ] ??
-            nameOf.get(id) ??
-            t.overview.page.other),
-      spent,
-    }))
-    .sort((a, b) => b.spent.comparedTo(a.spent));
-  const shown = ranked.slice(0, 6);
-  const rest = sum(ranked.slice(6).map((r) => r.spent.toFixed(4)));
-  const largest = shown[0]?.spent ?? new Decimal(1);
-
-  const checklist = [
-    { done: !!session.user.twoFactorEnabled, key: "2fa" },
-    ...(admin ? [{ done: hasDefaultProvider, key: "ai" }] : []),
-    { done: investing.length > 0, key: "invest" },
-    { done: banking.length > 0, key: "bank" },
-  ];
-  const doneCount = checklist.filter((c) => c.done).length;
-  // Only shown when every move converts; a partial figure would misstate the day.
-  const change = worth.prices?.change;
-  const priceChange =
-    change?.total && change.unconverted.length === 0
-      ? new Decimal(change.total)
-      : null;
-  const share = (part: Decimal) =>
-    worth.total && !new Decimal(worth.total).isZero()
-      ? `${part.div(worth.total).times(100).toFixed(0)}%`
-      : "—";
 
   return (
     <HydrateClient>
-      {/* Net worth */}
-      <AmountsScope
-        scope="overview-net-worth"
-        className="card relative overflow-hidden"
-      >
-        <div className="ink-strip h-1.5" />
-        <div className="p-5 sm:p-10">
-          <div className="flex items-center justify-between gap-4">
-            <p className="eyebrow">{t.overview.page.netWorthName(firstName)}</p>
-            <div className={cardTools}>
-              <AmountsToggle />
-              <Suspense
-                fallback={<div className="bg-wash rounded-ctl h-8 w-20" />}
-              >
-                <PortfolioSettings currency={currency} id="overview-currency" />
-              </Suspense>
-            </div>
-          </div>
-          {worth.unconverted.length > 0 || worth.unpriced > 0 ? (
-            <p className="text-warn mt-3 text-sm font-semibold">
-              {t.overview.page.partialTotal}
-            </p>
-          ) : null}
-          <p className="font-poster figures mt-3 text-[clamp(52px,15vw,104px)] leading-[0.9] font-extrabold">
-            <HeroFigure
-              value={formatMoney(worth.total ?? 0, currency)}
-              muted={!recorded}
-            />
-          </p>
-          <div className="text-ink-2 mt-4 space-y-1 text-sm">
-            {!recorded ? (
-              <p>{t.overview.page.nothingToTotalYetAddAnAccountBelow}</p>
-            ) : (
-              <p>
-                {t.overview.page.recordedBalances(
-                  worth.oldestAsOf
-                    ? formatDate(worth.oldestAsOf, locale)
-                    : null,
-                  formatDate(worth.asOf!, locale),
-                )}
-              </p>
-            )}
-            <TransferFreshnessNotices warnings={worth.transferWarnings} />
-            {recorded && worth.prices ? (
-              <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span>
-                  {worth.prices.oldest
-                    ? t.overview.page.marketPrices(
-                        worth.prices.quoted,
-                        worth.prices.holdings,
-                        formatRelative(worth.prices.oldest, new Date(), locale),
-                      )
-                    : t.overview.page.holdingsAreValuedAtTheirStatementPrices}
-                </span>
-                {priceChange && !priceChange.isZero() ? (
-                  <span
-                    className={cn(
-                      "figures font-semibold",
-                      priceChange.isPositive() ? "text-gain" : "text-loss",
-                    )}
-                  >
-                    <span className="sensitive">
-                      {formatMoney(priceChange.toFixed(2), currency, {
-                        signed: true,
-                      })}
-                    </span>{" "}
-                    {t.overview.page.sinceThePreviousClose}
-                  </span>
-                ) : null}
-                {worth.prices.feed ? <PriceRefresh /> : null}
-              </p>
-            ) : null}
-            {recorded && worth.prices?.implausible.length ? (
-              <p className="text-warn">
-                {t.overview.page.implausible(
-                  worth.prices.implausible.join(", "),
-                )}
-              </p>
-            ) : null}
-            {recorded && !forLaterTotal.isZero() ? (
-              <p>
-                {worth.countCpfSrs ? (
-                  <>
-                    <span className="sensitive">
-                      {formatMoney(
-                        investTotal.plus(bankTotal).toFixed(2),
-                        currency,
-                      )}
-                    </span>{" "}
-                    {t.overview.page.availableToday}{" "}
-                    <span className="sensitive">
-                      {formatMoney(forLaterTotal.toFixed(2), currency)}
-                    </span>{" "}
-                    {t.overview.page.inRetirement}
-                  </>
-                ) : (
-                  <>
-                    {t.overview.page.leavesOut}{" "}
-                    <span className="sensitive">
-                      {formatMoney(forLaterTotal.toFixed(2), currency)}
-                    </span>{" "}
-                    {t.overview.page.retirementAfter}
-                  </>
-                )}
-              </p>
-            ) : null}
-            {worth.fxAsOf ? (
-              <p className="text-ink-3 text-[12px]">
-                {t.overview.page.converted(
-                  currency,
-                  formatDate(worth.fxAsOf, locale),
-                )}
-              </p>
-            ) : null}
-            {worth.unconverted.length > 0 ? (
-              <p className="text-warn">
-                {t.overview.page.notConverted(currency)}{" "}
-                <span className="sensitive">
-                  {worth.unconverted
-                    .map((a) => formatMoney(a.amount, a.currency))
-                    .join(", ")}
-                </span>
-                {t.overview.sentenceEnd}
-              </p>
-            ) : null}
-            {worth.unpriced > 0 ? (
-              <p className="text-warn">
-                {t.overview.page.unpriced(worth.unpriced)}
-              </p>
-            ) : null}
-          </div>
-          {/* Without a convertible total, e.g. only CPF that is not counted, groups still show. */}
-          {chartSeries.length > 0 && history.currency === currency ? (
-            <NetWorthChart
-              series={chartSeries.map((series) => ({
-                ...series,
-                label:
-                  series.key === "all"
-                    ? t.overview.page.netWorth
-                    : t.common.accountGroups[
-                        series.key as keyof typeof t.common.accountGroups
-                      ],
-              }))}
-              currency={currency}
-            />
-          ) : null}
-        </div>
+      <NetWorthCard
+        worth={worth}
+        holdings={holdings}
+        chartSeries={chartSeries}
+        historyCurrency={history.currency}
+        firstName={firstName}
+        t={t}
+        locale={locale}
+      />
 
-        {/* What the number is made of */}
-        <div
-          className={cn(
-            "border-line grid grid-cols-2 border-t",
-            forLater.length > 0 && "sm:grid-cols-3",
-          )}
-        >
-          {[
-            {
-              href: "#investments",
-              label: t.common.accountGroups.investments,
-              value: investTotal,
-              note: t.overview.page.accountsShare(
-                investing.length,
-                share(investTotal),
-              ),
-            },
-            {
-              href: "#banking",
-              label: t.common.accountGroups.banking,
-              value: bankTotal,
-              note: owed.isZero() ? (
-                t.overview.page.accountsShare(banking.length, share(bankTotal))
-              ) : (
-                <>
-                  {t.overview.page.debtBefore}{" "}
-                  <span className="sensitive">
-                    {formatMoney(owed.toFixed(2), currency)}
-                  </span>{" "}
-                  {t.overview.page.debtAfter}
-                </>
-              ),
-            },
-            ...(forLater.length > 0
-              ? [
-                  {
-                    href: "#cpf-srs",
-                    label: t.common.accountGroups.cpf_srs,
-                    value: forLaterTotal,
-                    note: worth.countCpfSrs
-                      ? t.overview.page.locked(share(forLaterTotal))
-                      : t.overview.page.notCountedInNetWorth,
-                  },
-                ]
-              : []),
-          ].map((part, i) => (
-            <a
-              key={part.label}
-              href={part.href}
-              className={cn(
-                "hover:bg-wash group min-w-0 px-5 py-4 transition-colors sm:px-10 sm:py-5",
-                i === 1 && "border-line border-l",
-                i === 2 &&
-                  "border-line col-span-2 border-t sm:col-span-1 sm:border-t-0 sm:border-l",
-              )}
-            >
-              <p className="eyebrow">{part.label}</p>
-              <p className="font-poster figures mt-1 truncate text-[20px] leading-tight font-bold sm:text-[28px]">
-                <span className="sensitive">
-                  {formatMoney(part.value.toFixed(2), currency)}
-                </span>
-              </p>
-              <p className="text-ink-3 text-[12px]">{part.note}</p>
-            </a>
-          ))}
-        </div>
-      </AmountsScope>
-
-      {doneCount < checklist.length ? (
-        <section className="card mt-4 flex flex-wrap items-center gap-x-8 gap-y-3 px-6 py-4 sm:px-10">
-          <p className="eyebrow">
-            {t.overview.page.setup(doneCount, checklist.length)}
-          </p>
-          <ul className="flex flex-wrap gap-x-6 gap-y-2">
-            <ChecklistItem done={!!session.user.twoFactorEnabled}>
-              <Link href="/settings" className={link}>
-                {t.overview.page.twostepSignin}
-              </Link>
-            </ChecklistItem>
-            {admin ? (
-              <ChecklistItem done={hasDefaultProvider}>
-                <Link href="/admin/ai" className={link}>
-                  {t.overview.page.defaultAIProvider}
-                </Link>
-              </ChecklistItem>
-            ) : null}
-            <ChecklistItem done={investing.length > 0}>
-              <Link href="/accounts?add=investments" className={link}>
-                {t.overview.page.anInvestmentAccount}
-              </Link>
-            </ChecklistItem>
-            <ChecklistItem done={banking.length > 0}>
-              <Link href="/accounts?add=banking" className={link}>
-                {t.overview.page.aBankAccountOrCard}
-              </Link>
-            </ChecklistItem>
-          </ul>
-        </section>
-      ) : null}
+      <SetupChecklist
+        t={t}
+        twoFactorEnabled={!!session.user.twoFactorEnabled}
+        admin={admin}
+        hasDefaultProvider={hasDefaultProvider}
+        hasInvestments={investing.length > 0}
+        hasBanking={banking.length > 0}
+      />
 
       <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-        {/* Investments */}
-        <AmountsScope
-          scope="overview-investments"
-          id="investments"
-          className="card min-w-0 scroll-mt-6 p-5 sm:p-8"
-        >
-          <SheetHeader
-            eyebrow={t.common.accountGroups.investments}
-            title={formatMoney(investTotal.toFixed(2), currency)}
-            href="/portfolio"
-            linkLabel={t.overview.page.portfolio}
-            settings={
-              <PortfolioSettings
-                currency={currency}
-                id="investments-currency"
-                iconOnly
-              />
-            }
-          />
-          {investmentIncomplete ? (
-            <p className="text-warn mt-4 text-sm">
-              {
-                t.overview.page
-                  .partialInvestmentTotalAllocationWillAppearWhenEvery
-              }
-            </p>
-          ) : null}
-          {!investmentIncomplete && slices.length > 0 ? (
-            <div className="mt-6">
-              <Allocation slices={slices} />
-            </div>
-          ) : null}
-          {investing.length === 0 ? (
-            <p className="text-ink-2 mt-6 text-sm">
-              {
-                t.overview.page
-                  .brokerageRetirementAndCryptoAccountsAreValuedFrom
-              }{" "}
-              <Link href="/accounts?add=investments" className={link}>
-                {t.overview.page.addOne}
-              </Link>
-              {t.overview.sentenceEnd}
-            </p>
-          ) : (
-            <ul className="mt-6">
-              {investing.map((a) => (
-                <AccountRow key={a.id} account={a} currency={currency} />
-              ))}
-            </ul>
-          )}
-        </AmountsScope>
+        <InvestmentsCard holdings={holdings} currency={currency} t={t} />
 
-        {/* Bank and cards */}
-        <AmountsScope
-          scope="overview-spending"
-          id="banking"
-          className="card min-w-0 scroll-mt-6 p-5 sm:p-8"
-        >
-          <SheetHeader
-            eyebrow={t.overview.page.spendingMonth(formatMonth(month, locale))}
-            title={formatMoney(moneyOut.toFixed(2), currency)}
-            href="/spending"
-            linkLabel={t.overview.page.transactions}
-          />
-          <dl className="mt-5 grid grid-cols-3 gap-4">
-            {[
-              {
-                label: t.overview.page.moneyIn,
-                value: moneyIn,
-                tone: "text-gain",
-              },
-              {
-                label: t.overview.page.moneyOut,
-                value: moneyOut,
-                tone: "text-loss",
-              },
-              {
-                label: t.overview.page.leftOver,
-                value: moneyIn.minus(moneyOut),
-                tone: undefined,
-              },
-            ].map((f) => (
-              <div key={f.label}>
-                <dt className="eyebrow">{f.label}</dt>
-                <dd
-                  className={cn(
-                    "figures mt-1 font-mono text-[15px] font-semibold",
-                    f.tone,
-                  )}
-                >
-                  <span className="sensitive">
-                    {formatMoney(f.value.toFixed(2), currency)}
-                  </span>
-                </dd>
-              </div>
-            ))}
-          </dl>
-          {lastOut.isZero() ? null : (
-            <p className="text-ink-3 mt-2 text-[12px]">
-              <span className="sensitive">
-                {formatMoney(
-                  moneyOut.minus(lastOut).abs().toFixed(2),
-                  currency,
-                )}
-              </span>{" "}
-              {t.overview.page.comparison(
-                moneyOut.lessThan(lastOut),
-                formatMonth(shiftMonth(month, -1), locale),
-              )}
-            </p>
-          )}
-
-          {shown.length > 0 ? (
-            <div className="mt-6">
-              <p className="eyebrow">{t.overview.page.whereItWent}</p>
-              <ul className="mt-2 space-y-1.5">
-                {[
-                  ...shown,
-                  ...(rest.isZero()
-                    ? []
-                    : [
-                        {
-                          id: "rest",
-                          name: t.overview.page.everythingElse,
-                          spent: rest,
-                        },
-                      ]),
-                ].map((c) => (
-                  <li
-                    key={c.id}
-                    className="grid grid-cols-[8rem_1fr_auto] items-center gap-3 text-[13px]"
-                  >
-                    <span className="truncate">{c.name}</span>
-                    <span className="bg-wash h-2.5 overflow-hidden rounded-r-[4px]">
-                      <span
-                        className="bg-ink/80 block h-full rounded-r-[4px]"
-                        style={{
-                          width: `${c.spent.div(largest).times(100).toFixed(1)}%`,
-                        }}
-                        title={c.name}
-                      />
-                    </span>
-                    <span className="figures w-24 text-right font-mono text-[12px]">
-                      <span className="sensitive">
-                        {formatMoney(c.spent.toFixed(2), currency)}
-                      </span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-ink-2 mt-6 text-sm">
-              {t.overview.page.noSpending(formatMonth(month, locale))}
-            </p>
-          )}
-          {otherCurrencies.length > 0 ? (
-            <p className="text-ink-3 mt-2 text-[12px]">
-              {t.overview.page.excludedSpending(otherCurrencies.join(", "))}
-            </p>
-          ) : null}
-
-          <div className="border-ink/80 mt-8 flex items-baseline justify-between border-b-2 pb-2">
-            <p className="eyebrow">{t.common.accountGroups.banking}</p>
-            <p className="figures font-mono text-[13px] font-semibold">
-              <span className="sensitive">
-                {formatMoney(bankTotal.toFixed(2), currency)}
-              </span>
-            </p>
-          </div>
-          {banking.length === 0 ? (
-            <p className="text-ink-2 mt-4 text-sm">
-              {t.overview.page.savingsCurrentAndCreditCardAccountsCarryA}{" "}
-              <Link href="/accounts?add=banking" className={link}>
-                {t.overview.page.addOne}
-              </Link>
-              {t.overview.sentenceEnd}
-            </p>
-          ) : (
-            <ul className="mt-2">
-              {banking.map((a) => (
-                <AccountRow key={a.id} account={a} currency={currency} />
-              ))}
-            </ul>
-          )}
-        </AmountsScope>
+        <OverviewSpendingCard
+          t={t}
+          locale={locale}
+          month={month}
+          currency={currency}
+          moneyIn={moneyIn}
+          moneyOut={moneyOut}
+          lastOut={lastOut}
+          shown={shown}
+          rest={rest}
+          largest={largest}
+          otherCurrencies={thisMonth.unconverted}
+          bankTotal={bankTotal}
+          banking={banking}
+        />
       </div>
 
       {worth.cpfSrsEnabled || forLater.length > 0 ? (

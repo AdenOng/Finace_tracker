@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 export type Flash = {
   tone: "success" | "error" | "warn" | "info";
   message: string;
+  action?: ReactNode;
 };
 
 /**
  * One status message for a screen. Each new message replaces the last, so an old error never
  * sits next to a newer success, and successes clear themselves after a few seconds. Errors stay
- * until the next action.
+ * until dismissed or replaced by the next action.
  */
 export function useFlash(timeoutMs = 6000) {
   const [flash, setFlash] = useState<Flash | null>(null);
@@ -22,7 +23,8 @@ export function useFlash(timeoutMs = 6000) {
   }, [flash, timeoutMs]);
 
   const success = useCallback(
-    (message: string) => setFlash({ tone: "success", message }),
+    (message: string, action?: ReactNode) =>
+      setFlash({ tone: "success", message, action }),
     [],
   );
   const error = useCallback(

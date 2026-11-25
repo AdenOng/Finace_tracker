@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const imports = {
   importReview: {
     bankStatement: "Bank statement",
@@ -109,57 +110,143 @@ const imports = {
     noPrice: "No price",
     buysSellsDividendsFeesAnd:
       "Buys, sells, dividends, fees and deposits listed on the statement.",
-    saved: (counts: {
-      transactions: number;
-      holdings: number;
-      activity: number;
-      balances: number;
-      duplicates: number;
-    }) =>
-      `Saved ${[counts.transactions && `${counts.transactions} transactions`, counts.holdings && `${counts.holdings} holdings`, counts.activity && `${counts.activity} trades and payments`, counts.balances && "the balance"].filter(Boolean).join(", ") || "nothing"}.${counts.duplicates ? ` ${counts.duplicates} already recorded were left out.` : ""}`,
-    duplicates: (n: number) =>
-      `${n} possible ${n === 1 ? "duplicate needs" : "duplicates need"} a decision. Choose Keep or Skip on each highlighted row before saving.`,
-    historical: (
-      completed: boolean,
-      date: string,
-      banking: boolean,
-      latest: string,
-    ) =>
-      `${completed ? "Saved" : "This statement will be saved"} for ${date}. Your account has a newer ${banking ? "balance" : "holdings entry"} dated ${latest}. The newer entry remains the current account value.`,
-    replaceDate: (date: string) =>
-      `Saving replaces the statement holdings or balance already saved for ${date}. The selected rows become the complete entry for that date; existing transactions and trades stay saved.`,
-    selected: (accepted: number, total: number, undecided: number) =>
-      `${accepted} of ${total} selected${undecided > 0 ? ` · ${undecided} undecided` : ""}`,
-    warnings: (n: number) =>
-      ` · ${n} amount/direction warnings (saving allowed)`,
-    saveTo: (n: number, name: string | null) => `Save ${n} to ${name}`,
-    remove: (label: string) => `Remove ${label.replace(/^Save /, "")}`,
-    transactions: (n: number) => `Transactions · ${n}`,
-    totals: (incoming: string, outgoing: string) =>
-      `Selected: ${incoming} in, ${outgoing} out. Uncheck anything you don't want saved.`,
-    saveRow: (label: string) => `Save ${label}`,
-    reference: (value: string) => ` · Ref ${value}`,
-    editAmountFor: (label: string) => `Edit amount for ${label}`,
-    amountFor: (label: string) => `Amount for ${label}`,
-    balanceLabel: (currency: string, bucket: string | null) =>
-      `${currency} ${bucket ?? "closing/cash"} balance`,
-    activityLabel: (type: string, symbol: string | null) =>
-      `${type.toLowerCase()} ${symbol ?? "activity"}`,
-    saveBucket: (bucket: string) => `Save the ${bucket} balance`,
-    holdings: (n: number) => `Holdings · ${n}`,
-    saveSymbol: (symbol: string) => `Save ${symbol}`,
-    saveCash: (currency: string) => `Save ${currency} cash`,
-    activity: (n: number) => `Trades and payments · ${n}`,
-    saveActivity: (type: string, symbol: string | null) =>
-      `Save ${type.toLowerCase()} ${symbol ?? ""}`,
-    ref: (value: string) => `Ref ${value}`,
-    cash: (currency: string) => `Cash · ${currency}`,
-    printed: (direction: string, amount: string) =>
-      `Statement shows ${direction}${amount}.`,
-    useAmount: (amount: string) => `Use ${amount}`,
+    saved: message<
+      [
+        counts: {
+          transactions: number;
+          holdings: number;
+          activity: number;
+          balances: number;
+          duplicates: number;
+        },
+      ]
+    >([
+      "text",
+      "Saved ",
+      [
+        "||",
+        [
+          "joinPresent",
+          ", ",
+          [
+            "&&",
+            ["field", 0, "transactions"],
+            ["text", ["field", 0, "transactions"], " transactions"],
+          ],
+          [
+            "&&",
+            ["field", 0, "holdings"],
+            ["text", ["field", 0, "holdings"], " holdings"],
+          ],
+          [
+            "&&",
+            ["field", 0, "activity"],
+            ["text", ["field", 0, "activity"], " trades and payments"],
+          ],
+          ["&&", ["field", 0, "balances"], "the balance"],
+        ],
+        "nothing",
+      ],
+      ".",
+      [
+        "if",
+        ["field", 0, "duplicates"],
+        [
+          "text",
+          " ",
+          ["field", 0, "duplicates"],
+          " already recorded were left out.",
+        ],
+        "",
+      ],
+    ]),
+    duplicates: message<[n: number]>([
+      "text",
+      0,
+      " possible ",
+      ["if", ["===", 0, ["number", 1]], "duplicate needs", "duplicates need"],
+      " a decision. Choose Keep or Skip on each highlighted row before saving.",
+    ]),
+    historical: message<
+      [completed: boolean, date: string, banking: boolean, latest: string]
+    >([
+      "text",
+      ["if", 0, "Saved", "This statement will be saved"],
+      " for ",
+      1,
+      ". Your account has a newer ",
+      ["if", 2, "balance", "holdings entry"],
+      " dated ",
+      3,
+      ". The newer entry remains the current account value.",
+    ]),
+    replaceDate: message<[date: string]>(
+      "Saving replaces the statement holdings or balance already saved for {0}. The selected rows become the complete entry for that date; existing transactions and trades stay saved.",
+    ),
+    selected: message<[accepted: number, total: number, undecided: number]>([
+      "text",
+      0,
+      " of ",
+      1,
+      " selected",
+      ["if", [">", 2, ["number", 0]], ["text", " · ", 2, " undecided"], ""],
+    ]),
+    warnings: message<[n: number]>(
+      " · {0} amount/direction warnings (saving allowed)",
+    ),
+    saveTo: message<[n: number, name: string | null]>("Save {0} to {1}"),
+    remove: message<[label: string]>([
+      "text",
+      "Remove ",
+      ["stripPrefix", 0, "Save "],
+    ]),
+    transactions: message<[n: number]>("Transactions · {0}"),
+    totals: message<[incoming: string, outgoing: string]>(
+      "Selected: {0} in, {1} out. Uncheck anything you don't want saved.",
+    ),
+    saveRow: message<[label: string]>("Save {0}"),
+    reference: message<[value: string]>(" · Ref {0}"),
+    editAmountFor: message<[label: string]>("Edit amount for {0}"),
+    amountFor: message<[label: string]>("Amount for {0}"),
+    balanceLabel: message<[currency: string, bucket: string | null]>([
+      "text",
+      0,
+      " ",
+      ["??", 1, "closing/cash"],
+      " balance",
+    ]),
+    activityLabel: message<[type: string, symbol: string | null]>([
+      "text",
+      ["toLowerCase", 0],
+      " ",
+      ["??", 1, "activity"],
+    ]),
+    saveBucket: message<[bucket: string]>("Save the {0} balance"),
+    holdings: message<[n: number]>("Holdings · {0}"),
+    saveSymbol: message<[symbol: string]>("Save {0}"),
+    saveCash: message<[currency: string]>("Save {0} cash"),
+    activity: message<[n: number]>("Trades and payments · {0}"),
+    saveActivity: message<[type: string, symbol: string | null]>([
+      "text",
+      "Save ",
+      ["toLowerCase", 0],
+      " ",
+      ["??", 1, ""],
+    ]),
+    ref: message<[value: string]>("Ref {0}"),
+    cash: message<[currency: string]>("Cash · {0}"),
+    printed: message<[direction: string, amount: string]>(
+      "Statement shows {0}{1}.",
+    ),
+    useAmount: message<[amount: string]>("Use {0}"),
     recordBefore: "Record",
-    recordAfter: (bucket: string | null, date: string) =>
-      `as the ${bucket ? `${bucket} ` : ""}balance on ${date}`,
+    recordAfter: message<[bucket: string | null, date: string]>([
+      "text",
+      "as the ",
+      ["if", 0, ["text", 0, " "], ""],
+      "balance on ",
+      1,
+    ]),
     statementDate: "the statement date",
   },
   importStatus: {
@@ -202,9 +289,8 @@ const imports = {
       cpf_srs:
         "SRS holdings, cash and top-ups, or your CPF balance. Split CPF into its accounts by hand afterwards.",
     },
-    statementFor: (name: string) => `Statement for ${name}`,
-    selected: (accepted: number, total: number) =>
-      `${accepted} of ${total} selected`,
+    statementFor: message<[name: string]>("Statement for {0}"),
+    selected: message<[accepted: number, total: number]>("{0} of {1} selected"),
   },
   lineRemoval: {
     removeImportedRow: "Remove imported row",
@@ -225,21 +311,49 @@ const imports = {
     reviewImport: "Review import",
   },
   summary: {
-    unverified: (complete: boolean) =>
-      `Unverified — no opening/closing balance to check against${complete ? " for a complete statement" : ""}.`,
-    excluded: (n: number, currency: string) =>
-      `${n} ${n === 1 ? "line" : "lines"} in ${currency} not included — no opening/closing balances.`,
-    balanceCheck: (currency: string) => `Balance check · ${currency}`,
-    result: (
-      label: string,
-      matches: boolean | null,
-      amount: string,
-      over: boolean,
-    ) =>
-      `${label}: ${matches ? "matches" : `${amount} ${over ? "over" : "short of"} closing`}.`,
-    skipped: (explains: boolean, amount: string) =>
-      `${explains ? "Skipped rows explain the difference" : "Skipped rows not being saved"}: ${amount}. Already recorded rows are included.`,
-    readBy: (model: string) => `READ BY ${model}`,
+    unverified: message<[complete: boolean]>([
+      "text",
+      "Unverified — no opening/closing balance to check against",
+      ["if", 0, " for a complete statement", ""],
+      ".",
+    ]),
+    excluded: message<[n: number, currency: string]>([
+      "text",
+      0,
+      " ",
+      ["if", ["===", 0, ["number", 1]], "line", "lines"],
+      " in ",
+      1,
+      " not included — no opening/closing balances.",
+    ]),
+    balanceCheck: message<[currency: string]>("Balance check · {0}"),
+    result: message<
+      [label: string, matches: boolean | null, amount: string, over: boolean]
+    >([
+      "text",
+      0,
+      ": ",
+      [
+        "if",
+        1,
+        "matches",
+        ["text", 2, " ", ["if", 3, "over", "short of"], " closing"],
+      ],
+      ".",
+    ]),
+    skipped: message<[explains: boolean, amount: string]>([
+      "text",
+      [
+        "if",
+        0,
+        "Skipped rows explain the difference",
+        "Skipped rows not being saved",
+      ],
+      ": ",
+      1,
+      ". Already recorded rows are included.",
+    ]),
+    readBy: message<[model: string]>("READ BY {0}"),
   },
 };
 export default imports;

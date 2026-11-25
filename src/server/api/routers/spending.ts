@@ -10,10 +10,12 @@ import {
   gte,
   getTableColumns,
   inArray,
+  isNull,
   lt,
   or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 import {
@@ -70,6 +72,7 @@ const listInput = z.object({
   month: monthInput,
   accountId: z.uuid().nullable(),
   categoryId: z.uuid().nullable(),
+  uncategorised: z.boolean().optional(),
   search: z.string().trim().max(100).default(""),
 });
 const cursorInput = z.object({
@@ -152,6 +155,8 @@ async function spendingRows(
   // strpos rather than LIKE, so % and _ in the search are ordinary characters.
   const contains = (column: Column) =>
     sql`strpos(lower(coalesce(${column}, '')), lower(${input.search})) > 0`;
+  const outgoingLink = alias(transferLink, "outgoing_transfer_link");
+  const incomingLink = alias(transferLink, "incoming_transfer_link");
   const rows = db
     .select({
       id: transaction.id,
@@ -167,12 +172,7 @@ async function spendingRows(
       categoryName: category.name,
       categoryColor: category.color,
       isTransfer: transaction.isTransfer,
-      transferLinkId: sql<
-        string | null
-      >`(select ${transferLink.id} from ${transferLink}
-            where ${readableAccount(scope, transferLink.ownerId, transaction.accountId)}
-            and (${transferLink.outgoingTransactionId} = ${transaction.id}
-              or ${transferLink.incomingTransactionId} = ${transaction.id}) limit 1)`,
+      transferLinkId: sql<string | null>`coalesce(${outgoingLink.id}, ${incomingLink.id})`,
       notes: transaction.notes,
       source: transaction.source,
       categorySource: transaction.categorySource,
@@ -182,6 +182,20 @@ async function spendingRows(
     .from(transaction)
     .innerJoin(financialAccount, eq(financialAccount.id, transaction.accountId))
     .leftJoin(category, eq(category.id, transaction.categoryId))
+    .leftJoin(
+      outgoingLink,
+      and(
+        eq(outgoingLink.outgoingTransactionId, transaction.id),
+        eq(outgoingLink.ownerId, transaction.ownerId),
+      ),
+    )
+    .leftJoin(
+      incomingLink,
+      and(
+        eq(incomingLink.incomingTransactionId, transaction.id),
+        eq(incomingLink.ownerId, transaction.ownerId),
+      ),
+    )
     .where(
       and(
         readableAccount(scope, transaction.ownerId, transaction.accountId),
@@ -201,9 +215,14 @@ async function spendingRows(
         input.accountId
           ? eq(transaction.accountId, input.accountId)
           : undefined,
-        input.categoryId
-          ? eq(transaction.categoryId, input.categoryId)
-          : undefined,
+        input.uncategorised
+          ? and(isNull(transaction.categoryId), eq(transaction.isTransfer, false))
+          : input.categoryId
+            ? or(
+                eq(transaction.categoryId, input.categoryId),
+                eq(category.parentId, input.categoryId),
+              )
+            : undefined,
       ),
     )
     .orderBy(

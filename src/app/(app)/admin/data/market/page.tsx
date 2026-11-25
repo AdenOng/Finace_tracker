@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { requireAdminSession } from "~/server/auth";
 
 import { DataTabs } from "~/components/admin/admin-tabs";
-import { MarketAdmin } from "~/components/admin/data-admin";
+import { MarketAdmin } from "~/components/admin/market-admin";
 import { PageHeader } from "~/components/ui/panel";
 import { api, HydrateClient } from "~/trpc/server";
 

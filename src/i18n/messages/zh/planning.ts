@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/planning";
 import type { Translation } from "../../types";
 const planning: Translation<typeof en> = {
@@ -48,21 +49,27 @@ const planning: Translation<typeof en> = {
     paymentDueDate: "到期还款日",
     saveStatementBill: "保存账单",
     loadingCardBills: "加载信用卡账单中…",
-    paymentBank: (name: string) => `还款银行账户：${name}`,
+    paymentBank: message<[name: string]>("还款银行账户：{0}"),
     archivedSuffix: "（已归档）",
-    bankFor: (name: string) => `${name} 的还款银行账户`,
-    chooseBank: (currency: string) =>
-      `选择 ${currency} 账户。现有账单保留原还款银行账户。`,
-    billTitle: (name: string) => `账单 · ${name}`,
-    fullAmount: (currency: string) => `全部应还金额（${currency}）`,
-    closed: (date: string) => `账单日 ${date}`,
-    dueFrom: (date: string, bank: string) =>
-      `到期还款日 ${date} · 还款账户 ${bank}`,
-    paidOn: (date: string) => `已于 ${date} 还清。`,
+    bankFor: message<[name: string]>("{0} 的还款银行账户"),
+    chooseBank: message<[currency: string]>(
+      "选择 {0} 账户。现有账单保留原还款银行账户。",
+    ),
+    billTitle: message<[name: string]>("账单 · {0}"),
+    fullAmount: message<[currency: string]>("全部应还金额（{0}）"),
+    closed: message<[date: string]>("账单日 {0}"),
+    dueFrom: message<[date: string, bank: string]>(
+      "到期还款日 {0} · 还款账户 {1}",
+    ),
+    paidOn: message<[date: string]>("已于 {0} 还清。"),
   },
   cashFlowView: {
     dailyProjectedAccountBalanceExactDailyBalancesAre:
       "每日预计账户余额。下方列有每日的具体余额。",
+    zeroLine: "零余额",
+    chartDescription: message<
+      [from: string, to: string, start: string, end: string]
+    >("从 {0}（{2}）到 {1}（{3}）的预计余额。按左右方向键可逐日查看。"),
     loadingCashFlow: "加载现金流中…",
     cashFlow: "现金流",
     planRecurringIncomeBillsAndCreditcardPaymentsWithout:
@@ -130,16 +137,18 @@ const planning: Translation<typeof en> = {
     chooseTheFirstOccurrenceYouWantToTrack:
       "选择开始跟踪的首次到期日。每月按此日期重复，天数不足的月份使用月末日期。",
     lastDueDateOptional: "最后到期日（选填）",
-    recordBalance: (currency: string, name: string) =>
-      `请在“账户”中为 ${name} 记录 ${currency} 余额，以计算预计余额。计划付款仍列于下方。`,
-    startingBalance: (date: string) => `起始对账单余额：${date}。`,
+    recordBalance: message<[currency: string, name: string]>(
+      "请在“账户”中为 {1} 记录 {0} 余额，以计算预计余额。计划付款仍列于下方。",
+    ),
+    startingBalance: message<[date: string]>("起始对账单余额：{0}。"),
     frequencies: { weekly: "每周", monthly: "每月", yearly: "每年" },
-    scheduleDates: (frequency: string, start: string, end: string | null) =>
-      `${frequency}，从 ${start} 起${end ? `，至 ${end}` : ""}`,
-    matched: (description: string, date: string) =>
-      ` · 已配对 ${description}（${date}）`,
-    matchPayment: (description: string, date: string) =>
-      `配对 ${description} · ${date}`,
+    scheduleDates: message<
+      [frequency: string, start: string, end: string | null]
+    >(["text", 0, "，从 ", 1, " 起", ["if", 2, ["text", "，至 ", 2], ""]]),
+    matched:
+      message<[description: string, date: string]>(" · 已配对 {0}（{1}）"),
+    matchPayment:
+      message<[description: string, date: string]>("配对 {0} · {1}"),
   },
 };
 export default planning;

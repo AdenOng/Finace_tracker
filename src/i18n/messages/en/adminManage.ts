@@ -1,3 +1,4 @@
+import { message } from "../../template";
 const adminManage = {
   categories: {
     orange: "Orange",
@@ -65,39 +66,102 @@ const adminManage = {
     chooseAJSONFile: "Choose a JSON file",
     checkingTheFile: "Checking the file…",
     importArchiveHelp: "Archiving through an import never moves transactions.",
-    defaultsRestored: (count: number) =>
-      `Restored ${count} default categor${count === 1 ? "y" : "ies"}.`,
-    add: (names: string) => `Add ${names}`,
-    restoreNamed: (names: string) => `Restore ${names}`,
-    bringBack: (count: number) => `Bring back ${count}?`,
-    restoreDefault: (count: number) =>
-      `Restore ${count} default${count === 1 ? "" : "s"}`,
-    reorderLabel: (name: string) =>
-      `Move ${name}. Use the up and down arrow keys.`,
-    transactionCount: (count: number) =>
-      `${count} txn${count === 1 ? "" : "s"}`,
-    saved: (name: string) => `Saved ${name}.`,
-    added: (name: string) => `Added ${name}.`,
-    keyHelp: (key: string) => `Key: ${key} — stays the same if you rename it.`,
-    inheritedTypeHelp: (parentName: string) =>
-      `Set by ${parentName}: subcategories share their parent's type.`,
-    mergeNamed: (name: string) => `Merge ${name}`,
-    archive: (name: string) => `Archive ${name}`,
-    mergeResult: (sourceName: string, targetName: string, count: number) =>
-      `Merged ${sourceName} into ${targetName}; ${count} transaction${count === 1 ? "" : "s"} moved.`,
-    archiveResult: (categoryCount: number, transactionCount: number) =>
-      `Archived ${categoryCount} categor${categoryCount === 1 ? "y" : "ies"}; ${transactionCount} transaction${transactionCount === 1 ? "" : "s"} moved.`,
-    importResult: (added: number, updated: number, unchanged: number) =>
-      `Imported: ${added} added, ${updated} updated, ${unchanged} unchanged.`,
-    importArchivedChildren: (count: number) =>
-      ` ${count} subcategor${count === 1 ? "y is" : "ies are"} archived along with an archived parent.`,
-    childrenArchived: (n: number) =>
-      `Its ${n} subcategor${n === 1 ? "y is" : "ies are"} archived too, and their transactions move with it.`,
-    recategorises: (n: number, merge: boolean) =>
-      `This recategorises ${n} transaction${n === 1 ? "" : "s"} across all users. Merchant rules move with them${merge ? "" : ", or are deleted if you leave them uncategorised"}. The change is recorded in the activity log.`,
-    fileCount: (n: number | undefined) => `${n} categories in the file.`,
-    previewChanges: (added: number, updated: number, unchanged: number) =>
-      ` Applying adds ${added}, updates ${updated} and leaves ${unchanged} as they are.`,
+    defaultsRestored: message<[count: number]>([
+      "text",
+      "Restored ",
+      0,
+      " default categor",
+      ["if", ["===", 0, ["number", 1]], "y", "ies"],
+      ".",
+    ]),
+    add: message<[names: string]>("Add {0}"),
+    restoreNamed: message<[names: string]>("Restore {0}"),
+    bringBack: message<[count: number]>("Bring back {0}?"),
+    restoreDefault: message<[count: number]>([
+      "text",
+      "Restore ",
+      0,
+      " default",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+    ]),
+    reorderLabel: message<[name: string]>(
+      "Move {0}. Use the up and down arrow keys.",
+    ),
+    transactionCount: message<[count: number]>([
+      "text",
+      0,
+      " txn",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+    ]),
+    saved: message<[name: string]>("Saved {0}."),
+    added: message<[name: string]>("Added {0}."),
+    keyHelp: message<[key: string]>(
+      "Key: {0} — stays the same if you rename it.",
+    ),
+    inheritedTypeHelp: message<[parentName: string]>(
+      "Set by {0}: subcategories share their parent's type.",
+    ),
+    mergeNamed: message<[name: string]>("Merge {0}"),
+    archive: message<[name: string]>("Archive {0}"),
+    mergeResult: message<
+      [sourceName: string, targetName: string, count: number]
+    >([
+      "text",
+      "Merged ",
+      0,
+      " into ",
+      1,
+      "; ",
+      2,
+      " transaction",
+      ["if", ["===", 2, ["number", 1]], "", "s"],
+      " moved.",
+    ]),
+    archiveResult: message<[categoryCount: number, transactionCount: number]>([
+      "text",
+      "Archived ",
+      0,
+      " categor",
+      ["if", ["===", 0, ["number", 1]], "y", "ies"],
+      "; ",
+      1,
+      " transaction",
+      ["if", ["===", 1, ["number", 1]], "", "s"],
+      " moved.",
+    ]),
+    importResult: message<[added: number, updated: number, unchanged: number]>(
+      "Imported: {0} added, {1} updated, {2} unchanged.",
+    ),
+    importArchivedChildren: message<[count: number]>([
+      "text",
+      " ",
+      0,
+      " subcategor",
+      ["if", ["===", 0, ["number", 1]], "y is", "ies are"],
+      " archived along with an archived parent.",
+    ]),
+    childrenArchived: message<[n: number]>([
+      "text",
+      "Its ",
+      0,
+      " subcategor",
+      ["if", ["===", 0, ["number", 1]], "y is", "ies are"],
+      " archived too, and their transactions move with it.",
+    ]),
+    recategorises: message<[n: number, merge: boolean]>([
+      "text",
+      "This recategorises ",
+      0,
+      " transaction",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      " across all users. Merchant rules move with them",
+      ["if", 1, "", ", or are deleted if you leave them uncategorised"],
+      ". The change is recorded in the activity log.",
+    ]),
+    fileCount: message<[n: number | undefined]>("{0} categories in the file."),
+    previewChanges: message<
+      [added: number, updated: number, unchanged: number]
+    >(" Applying adds {0}, updates {1} and leaves {2} as they are."),
   },
   data: {
     backupRequested:
@@ -180,72 +244,149 @@ const adminManage = {
     preview: "Preview",
     addTheseDefaults: "Add these defaults?",
     applyPack: "Apply pack",
-    backupSchedule: (directory: string, days: number) =>
-      `Nightly pg_dump into ${directory}, kept for ${days} days.`,
-    serviceHeartbeat: (time: string) => `Running — last checked in ${time}.`,
-    serviceLastSeen: (time: string) => `Not running — last seen ${time}.`,
-    ratesFetchFailed: (currencies: string) =>
-      `Could not fetch rates for ${currencies}. The rate service may be down; the last stored rates are still used.`,
-    ratesStored: (count: number, currencies: string) =>
-      `Stored ${count} new rate${count === 1 ? "" : "s"} for ${currencies}.`,
-    ratesCurrent: (currencies: string) =>
-      `Rates for ${currencies} are already up to date.`,
-    noPriceFoundFor: (symbols: string) => `no price found for ${symbols}`,
-    quoteCurrencyMismatch: (symbols: string) =>
-      `${symbols} quoted in a different currency than recorded`,
-    pricesUpdated: (updated: number, checked: number) =>
-      `Updated ${updated} of ${checked} price${checked === 1 ? "" : "s"}.`,
-    skipped: (summary: string, problems: string) =>
-      `${summary} Skipped: ${problems}.`,
-    referenceRatesHelp: (source: string | null) =>
-      `Daily reference rates${source ? ` from ${source}` : ""}, fetched for each currency people view totals in. Refreshed every 12 hours.`,
-    retentionSaved: (days: number) =>
-      `Statement files are now deleted ${days} days after their import finishes. The daily clean-up runs automatically.`,
-    filesDeleted: (count: number, size: string) =>
-      `Deleted ${count} file${count === 1 ? "" : "s"}, freeing ${size}.`,
-    cleanupPreview: (count: number, size: string) =>
-      `${count} file${count === 1 ? "" : "s"} (${size}) would be deleted now`,
-    deleteFiles: (count: number) => `Delete ${count} files?`,
-    categoryCount: (count: number) =>
-      `${count} categor${count === 1 ? "y" : "ies"}`,
-    institutionCount: (count: number) =>
-      `${count} institution${count === 1 ? "" : "s"}`,
-    currencyCount: (count: number) =>
-      `${count} currenc${count === 1 ? "y" : "ies"}`,
-    applyingAdds: (summary: string) => `Applying adds ${summary}.`,
-    archivedDefaultsHelp: (count: number) =>
-      ` ${count} of its defaults are archived; restore those from Categories or Brokers & banks.`,
-    packApplied: (
-      categories: number,
-      institutions: number,
-      currencies: number,
-    ) =>
-      `Added ${categories} categories, ${institutions} institutions and ${currencies} currencies. Existing rows were left alone.`,
-    activePack: (name: string) => `Active pack: ${name}`,
-    customPackHelp: (file: string | null) =>
-      `Loaded from PRESET_FILE (${file}). Seeded on every start-up; only missing rows are added.`,
-    builtinPackHelp: (id: string) =>
-      `Built-in pack "${id}" (DATA_PRESET). Seeded on every start-up; only missing rows are added.`,
-    backupInProgress: (date: string) => `Backup in progress since ${date}.`,
-    lastBackup: (ok: boolean, date: string) =>
-      `Last backup ${ok ? "succeeded" : "failed"}${date}.`,
-    newestDump: (date: string) => `Newest dump is from ${date}.`,
-    missingMount: (path: string) =>
-      `Nothing is mounted at ${path}. In Docker, the app needs the ./backups folder mounted (see docker-compose.yml).`,
-    currenciesInUse: (codes: string) =>
-      `Account currencies in use: ${codes || "none"}.`,
-    statementValuations: (n: number) =>
-      `Valued from statements (${n}${n === 50 ? "+" : ""})`,
-    followPack: (on: boolean) => `Follow the pack (${on ? "on" : "off"})`,
-    cpfCurrent: (on: boolean) =>
-      `Currently ${on ? "on" : "off"}. Turning it off hides the account types; existing CPF and SRS accounts are kept.`,
-    customFile: (name: string) => `Custom file: ${name}`,
+    backupSchedule: message<[directory: string, days: number]>(
+      "Nightly pg_dump into {0}, kept for {1} days.",
+    ),
+    serviceHeartbeat: message<[time: string]>("Running — last checked in {0}."),
+    serviceLastSeen: message<[time: string]>("Not running — last seen {0}."),
+    ratesFetchFailed: message<[currencies: string]>(
+      "Could not fetch rates for {0}. The rate service may be down; the last stored rates are still used.",
+    ),
+    ratesStored: message<[count: number, currencies: string]>([
+      "text",
+      "Stored ",
+      0,
+      " new rate",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      " for ",
+      1,
+      ".",
+    ]),
+    ratesCurrent: message<[currencies: string]>(
+      "Rates for {0} are already up to date.",
+    ),
+    noPriceFoundFor: message<[symbols: string]>("no price found for {0}"),
+    quoteCurrencyMismatch: message<[symbols: string]>(
+      "{0} quoted in a different currency than recorded",
+    ),
+    pricesUpdated: message<[updated: number, checked: number]>([
+      "text",
+      "Updated ",
+      0,
+      " of ",
+      1,
+      " price",
+      ["if", ["===", 1, ["number", 1]], "", "s"],
+      ".",
+    ]),
+    skipped: message<[summary: string, problems: string]>("{0} Skipped: {1}."),
+    referenceRatesHelp: message<[source: string | null]>([
+      "text",
+      "Daily reference rates",
+      ["if", 0, ["text", " from ", 0], ""],
+      ", fetched for each currency people view totals in. Refreshed every 12 hours.",
+    ]),
+    retentionSaved: message<[days: number]>(
+      "Statement files are now deleted {0} days after their import finishes. The daily clean-up runs automatically.",
+    ),
+    filesDeleted: message<[count: number, size: string]>([
+      "text",
+      "Deleted ",
+      0,
+      " file",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      ", freeing ",
+      1,
+      ".",
+    ]),
+    cleanupPreview: message<[count: number, size: string]>([
+      "text",
+      0,
+      " file",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      " (",
+      1,
+      ") would be deleted now",
+    ]),
+    deleteFiles: message<[count: number]>("Delete {0} files?"),
+    categoryCount: message<[count: number]>([
+      "text",
+      0,
+      " categor",
+      ["if", ["===", 0, ["number", 1]], "y", "ies"],
+    ]),
+    institutionCount: message<[count: number]>([
+      "text",
+      0,
+      " institution",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+    ]),
+    currencyCount: message<[count: number]>([
+      "text",
+      0,
+      " currenc",
+      ["if", ["===", 0, ["number", 1]], "y", "ies"],
+    ]),
+    applyingAdds: message<[summary: string]>("Applying adds {0}."),
+    archivedDefaultsHelp: message<[count: number]>(
+      " {0} of its defaults are archived; restore those from Categories or Brokers & banks.",
+    ),
+    packApplied: message<
+      [categories: number, institutions: number, currencies: number]
+    >(
+      "Added {0} categories, {1} institutions and {2} currencies. Existing rows were left alone.",
+    ),
+    activePack: message<[name: string]>("Active pack: {0}"),
+    customPackHelp: message<[file: string | null]>(
+      "Loaded from PRESET_FILE ({0}). Seeded on every start-up; only missing rows are added.",
+    ),
+    builtinPackHelp: message<[id: string]>(
+      'Built-in pack "{0}" (DATA_PRESET). Seeded on every start-up; only missing rows are added.',
+    ),
+    backupInProgress: message<[date: string]>("Backup in progress since {0}."),
+    lastBackup: message<[ok: boolean, date: string]>([
+      "text",
+      "Last backup ",
+      ["if", 0, "succeeded", "failed"],
+      1,
+      ".",
+    ]),
+    newestDump: message<[date: string]>("Newest dump is from {0}."),
+    missingMount: message<[path: string]>(
+      "Nothing is mounted at {0}. In Docker, the app needs the ./backups folder mounted (see docker-compose.yml).",
+    ),
+    currenciesInUse: message<[codes: string]>([
+      "text",
+      "Account currencies in use: ",
+      ["||", 0, "none"],
+      ".",
+    ]),
+    statementValuations: message<[n: number]>([
+      "text",
+      "Valued from statements (",
+      0,
+      ["if", ["===", 0, ["number", 50]], "+", ""],
+      ")",
+    ]),
+    followPack: message<[on: boolean]>([
+      "text",
+      "Follow the pack (",
+      ["if", 0, "on", "off"],
+      ")",
+    ]),
+    cpfCurrent: message<[on: boolean]>([
+      "text",
+      "Currently ",
+      ["if", 0, "on", "off"],
+      ". Turning it off hides the account types; existing CPF and SRS accounts are kept.",
+    ]),
+    customFile: message<[name: string]>("Custom file: {0}"),
   },
   imports: {
     all: "All",
     failed: "Failed",
     stuck: "Stuck",
-    attempts: (n: number) => `${n} attempts`,
+    attempts: message<[n: number]>("{0} attempts"),
     waitingForReview: "Waiting for review",
     queued: "Queued",
     running: "Running",
@@ -346,32 +487,72 @@ const adminManage = {
     mergeNow: "Merge now?",
     merge: "Merge",
     mergeIntoPlaceholder: "Merge into…",
-    defaultsRestored: (count: number) =>
-      `Restored ${count} default institution${count === 1 ? "" : "s"}.`,
-    add: (names: string) => `Add ${names}`,
-    restoreNamed: (names: string) => `Restore ${names}`,
-    bringBack: (count: number) => `Bring back ${count}?`,
-    restoreDefault: (count: number) =>
-      `Restore ${count} default${count === 1 ? "" : "s"}`,
-    saved: (name: string) => `Saved ${name}.`,
-    added: (name: string) => `Added ${name}.`,
-    removed: (name: string) => `Removed ${name}.`,
-    defaultArchived: (name: string) =>
-      `${name} is a default, so it was archived. Restore it from the archived list.`,
-    inUseArchived: (name: string) =>
-      `${name} is used by existing accounts, so it was archived instead of deleted.`,
-    key: (key: string) => `Key: ${key}`,
-    archiveUsageHelp: (count: number, uploads: string) =>
-      `Used by ${count} account${count === 1 ? "" : "s"}${uploads}: removing it archives it and keeps their history.`,
-    accountsMerged: (
-      sourceName: string,
-      targetName: string | undefined,
-      count: number,
-    ) =>
-      `Merged ${sourceName} into ${targetName}; ${count} account${count === 1 ? "" : "s"} moved.`,
-    mergeDescription: (n: number) =>
-      `Moves this institution's ${n} account${n === 1 ? "" : "s"} and uploads into another, then removes this one.`,
-    uploadUsage: (n: number) => ` and ${n} upload${n === 1 ? "" : "s"}`,
+    defaultsRestored: message<[count: number]>([
+      "text",
+      "Restored ",
+      0,
+      " default institution",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      ".",
+    ]),
+    add: message<[names: string]>("Add {0}"),
+    restoreNamed: message<[names: string]>("Restore {0}"),
+    bringBack: message<[count: number]>("Bring back {0}?"),
+    restoreDefault: message<[count: number]>([
+      "text",
+      "Restore ",
+      0,
+      " default",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+    ]),
+    saved: message<[name: string]>("Saved {0}."),
+    added: message<[name: string]>("Added {0}."),
+    removed: message<[name: string]>("Removed {0}."),
+    defaultArchived: message<[name: string]>(
+      "{0} is a default, so it was archived. Restore it from the archived list.",
+    ),
+    inUseArchived: message<[name: string]>(
+      "{0} is used by existing accounts, so it was archived instead of deleted.",
+    ),
+    key: message<[key: string]>("Key: {0}"),
+    archiveUsageHelp: message<[count: number, uploads: string]>([
+      "text",
+      "Used by ",
+      0,
+      " account",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      1,
+      ": removing it archives it and keeps their history.",
+    ]),
+    accountsMerged: message<
+      [sourceName: string, targetName: string | undefined, count: number]
+    >([
+      "text",
+      "Merged ",
+      0,
+      " into ",
+      1,
+      "; ",
+      2,
+      " account",
+      ["if", ["===", 2, ["number", 1]], "", "s"],
+      " moved.",
+    ]),
+    mergeDescription: message<[n: number]>([
+      "text",
+      "Moves this institution's ",
+      0,
+      " account",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      " and uploads into another, then removes this one.",
+    ]),
+    uploadUsage: message<[n: number]>([
+      "text",
+      " and ",
+      0,
+      " upload",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+    ]),
   },
   security: {
     password: "Password",
@@ -435,10 +616,18 @@ const adminManage = {
     signedIn: "Signed in",
     new: "New",
     loadOlder: "Load older",
-    missingTwoFactor: (n: number) =>
-      `${n} ${n === 1 ? "person" : "people"} covered by this policy ${n === 1 ? "has" : "have"} not set up two-step. They will be held on Settings until they do.`,
-    noisyAddresses: (addresses: string) =>
-      `Repeated failures from ${addresses}. Sign-in is rate-limited to 5 tries a minute per address.`,
+    missingTwoFactor: message<[n: number]>([
+      "text",
+      0,
+      " ",
+      ["if", ["===", 0, ["number", 1]], "person", "people"],
+      " covered by this policy ",
+      ["if", ["===", 0, ["number", 1]], "has", "have"],
+      " not set up two-step. They will be held on Settings until they do.",
+    ]),
+    noisyAddresses: message<[addresses: string]>(
+      "Repeated failures from {0}. Sign-in is rate-limited to 5 tries a minute per address.",
+    ),
   },
   system: {
     app: "App",
@@ -472,19 +661,45 @@ const adminManage = {
       "Used for invite and reset links, review reminders and new-device alerts. Set SMTP_URL and SMTP_FROM in .env, then restart.",
     sendMeATestEmail: "Send me a test email",
     emailNotConfigured: "Not set up — links are shown to you to hand over",
-    testEmailSent: (email: string) =>
-      `Test email sent to ${email}. Check the inbox (and spam).`,
-    migrationsApplied: (applied: number, expected: number) =>
-      `${applied} of ${expected} applied`,
-    storageSummary: (size: string, files: string, directory: string) =>
-      `${size} in ${files} files · ${directory}`,
-    sendingThrough: (host: string | null) => `Sending through ${host}`,
-    userCount: (n: string) => `${n} user${n === "1" ? "" : "s"}`,
-    accountCount: (n: string) => `${n} account${n === "1" ? "" : "s"}`,
-    transactionCount: (n: string) => `${n} transaction${n === "1" ? "" : "s"}`,
-    uploadCount: (n: string) => `${n} upload${n === "1" ? "" : "s"}`,
-    latestMigration: (tag: string) => `· latest ${tag}`,
-    passwordStatus: (set: boolean) => `· password ${set ? "set" : "not set"}`,
+    testEmailSent: message<[email: string]>(
+      "Test email sent to {0}. Check the inbox (and spam).",
+    ),
+    migrationsApplied:
+      message<[applied: number, expected: number]>("{0} of {1} applied"),
+    storageSummary: message<[size: string, files: string, directory: string]>(
+      "{0} in {1} files · {2}",
+    ),
+    sendingThrough: message<[host: string | null]>("Sending through {0}"),
+    userCount: message<[n: string]>([
+      "text",
+      0,
+      " user",
+      ["if", ["===", 0, "1"], "", "s"],
+    ]),
+    accountCount: message<[n: string]>([
+      "text",
+      0,
+      " account",
+      ["if", ["===", 0, "1"], "", "s"],
+    ]),
+    transactionCount: message<[n: string]>([
+      "text",
+      0,
+      " transaction",
+      ["if", ["===", 0, "1"], "", "s"],
+    ]),
+    uploadCount: message<[n: string]>([
+      "text",
+      0,
+      " upload",
+      ["if", ["===", 0, "1"], "", "s"],
+    ]),
+    latestMigration: message<[tag: string]>("· latest {0}"),
+    passwordStatus: message<[set: boolean]>([
+      "text",
+      "· password ",
+      ["if", 0, "set", "not set"],
+    ]),
   },
   users: {
     people: "People",
@@ -569,24 +784,39 @@ const adminManage = {
     reenable: "Re-enable",
     disableAccount: "Disable account?",
     disable: "Disable",
-    adminGranted: (name: string | undefined) => `${name} is now an admin.`,
-    memberGranted: (name: string | undefined) => `${name} is now a member.`,
-    sessionsRevoked: (count: number) =>
-      `Signed out of ${count} session${count === 1 ? "" : "s"}.`,
-    resetEmailFailed: (error: string) =>
-      `Reset link created, but the email failed: ${error}`,
-    resetEmailSent: (email: string | undefined) =>
-      `Reset link emailed to ${email}. Older links no longer work.`,
-    emailItTo: (email: string) => `Email it to ${email}`,
-    passkeys: (n: number) => `${n} passkey${n === 1 ? "" : "s"}`,
-    invitedEmail: (email: string) => `Emailed the link to ${email}.`,
-    inviteFailed: (error: string) =>
-      `The invite was created but the email failed: ${error} `,
-    expired: (date: string) => `Expired ${date}`,
-    expires: (date: string) => `Expires ${date}`,
-    resetExpires: (date: string) => `Shown once. Expires ${date}.`,
-    sessionActivity: (ip: string, active: string, signedIn: string) =>
-      `${ip} · active ${active} · signed in ${signedIn}`,
+    adminGranted: message<[name: string | undefined]>("{0} is now an admin."),
+    memberGranted: message<[name: string | undefined]>("{0} is now a member."),
+    sessionsRevoked: message<[count: number]>([
+      "text",
+      "Signed out of ",
+      0,
+      " session",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+      ".",
+    ]),
+    resetEmailFailed: message<[error: string]>(
+      "Reset link created, but the email failed: {0}",
+    ),
+    resetEmailSent: message<[email: string | undefined]>(
+      "Reset link emailed to {0}. Older links no longer work.",
+    ),
+    emailItTo: message<[email: string]>("Email it to {0}"),
+    passkeys: message<[n: number]>([
+      "text",
+      0,
+      " passkey",
+      ["if", ["===", 0, ["number", 1]], "", "s"],
+    ]),
+    invitedEmail: message<[email: string]>("Emailed the link to {0}."),
+    inviteFailed: message<[error: string]>(
+      "The invite was created but the email failed: {0} ",
+    ),
+    expired: message<[date: string]>("Expired {0}"),
+    expires: message<[date: string]>("Expires {0}"),
+    resetExpires: message<[date: string]>("Shown once. Expires {0}."),
+    sessionActivity: message<[ip: string, active: string, signedIn: string]>(
+      "{0} · active {1} · signed in {2}",
+    ),
   },
   pages: {
     security: {

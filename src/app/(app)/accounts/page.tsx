@@ -14,11 +14,11 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function AccountsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ add?: string }>;
+  searchParams: Promise<{ add?: string; tab?: string }>;
 }) {
   const t = await getT();
   await requireEnrolledSession();
-  const { add } = await searchParams;
+  const { add, tab } = await searchParams;
   void api.accounts.list.prefetch();
   void api.catalog.institutions.prefetch();
   void api.catalog.currencies.prefetch();
@@ -30,6 +30,7 @@ export default async function AccountsPage({
         description={t.accounts.meta.description}
       />
       <AccountsView
+        initialTab={tab === "archived" ? "archived" : "open"}
         initialAdd={
           add === "investments" || add === "banking" || add === "cpf_srs"
             ? add

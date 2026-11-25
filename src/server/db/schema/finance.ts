@@ -289,6 +289,7 @@ export const transaction = pgTable(
   (t) => [
     unique("transaction_account_fingerprint_uq").on(t.accountId, t.fingerprint),
     index("transaction_owner_date_idx").on(t.ownerId, t.postedDate),
+    index("transaction_account_date_idx").on(t.accountId, t.postedDate),
     index("transaction_category_idx").on(t.categoryId),
   ],
 );

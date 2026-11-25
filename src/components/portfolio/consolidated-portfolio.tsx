@@ -6,7 +6,7 @@ import type { Messages } from "~/i18n/messages";
 import Decimal from "decimal.js";
 import { ArrowUpRight, ChevronDown, Search } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { BalanceDate } from "~/components/finance/balance-date";
@@ -16,7 +16,13 @@ import { Allocation } from "~/components/overview/allocation";
 import { HeroFigure } from "~/components/overview/hero-figure";
 import { PortfolioSettings } from "~/components/overview/portfolio-settings";
 import { Input } from "~/components/ui/field";
-import { EmptyState, Notice, PageHeader, Tag } from "~/components/ui/panel";
+import {
+  CardSkeleton,
+  EmptyState,
+  Notice,
+  PageHeader,
+  Tag,
+} from "~/components/ui/panel";
 import { FilterTabs } from "~/components/ui/tabs";
 
 import { cn } from "~/lib/cn";
@@ -83,11 +89,31 @@ function Gain({
   );
 }
 
-export function ConsolidatedPortfolio() {
+export function ConsolidatedPortfolio({
+  initialBrokerId = "",
+  initialSearch = "",
+}: {
+  initialBrokerId?: string;
+  initialSearch?: string;
+} = {}) {
   const t = useT();
   const locale = useLocale();
-  const [brokerId, setBrokerId] = useState("");
-  const [search, setSearch] = useState("");
+  const [brokerId, setBrokerId] = useState(initialBrokerId);
+  const [search, setSearch] = useState(initialSearch);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (brokerId) url.searchParams.set("broker", brokerId);
+    else url.searchParams.delete("broker");
+    const trimmed = search.trim();
+    if (trimmed) url.searchParams.set("q", trimmed);
+    else url.searchParams.delete("q");
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      window.history.replaceState(null, "", next);
+    }
+  }, [brokerId, search]);
   const query = api.portfolio.consolidated.useQuery(
     brokerId ? { accountId: brokerId } : undefined,
   );
@@ -143,8 +169,12 @@ export function ConsolidatedPortfolio() {
       />
       {query.error ? <Notice tone="error">{query.error.message}</Notice> : null}
       {!data && !query.error ? (
-        <div className="card p-6 text-sm" aria-live="polite">
-          {t.portfolio.consolidated.loadingPortfolio}
+        <div className="space-y-4">
+          <CardSkeleton
+            rows={3}
+            label={t.portfolio.consolidated.loadingPortfolio}
+          />
+          <CardSkeleton rows={4} />
         </div>
       ) : null}
       {data ? (

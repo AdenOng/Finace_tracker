@@ -1,19 +1,20 @@
+import { message } from "../../template";
 const spending = {
   meta: {
     spending: "Spending",
     transfers: "Transfers",
   },
   bulkEditDrawer: {
-    updated: (n: number) => `${n} transactions updated.`,
-    categorised: (n: number) => `${n} transactions categorised.`,
-    deleted: (n: number) => `${n} transactions deleted.`,
-    selected: (n: number) => `${n} selected transactions.`,
-    applyChanges: (n: number) => `Apply ${n} changes`,
-    deleteTransactions: (n: number) => `Delete ${n} transactions`,
-    previewSummary: (changes: number, skipped: number) =>
-      `${changes} changes; ${skipped} entries unchanged.`,
-    ruleMatch: (name: string, pattern: string) =>
-      `${name} · matches “${pattern}”`,
+    updated: message<[n: number]>("{0} transactions updated."),
+    categorised: message<[n: number]>("{0} transactions categorised."),
+    deleted: message<[n: number]>("{0} transactions deleted."),
+    selected: message<[n: number]>("{0} selected transactions."),
+    applyChanges: message<[n: number]>("Apply {0} changes"),
+    deleteTransactions: message<[n: number]>("Delete {0} transactions"),
+    previewSummary: message<[changes: number, skipped: number]>(
+      "{0} changes; {1} entries unchanged.",
+    ),
+    ruleMatch: message<[name: string, pattern: string]>("{0} · matches “{1}”"),
 
     editSelectedTransactions: "Edit selected transactions",
     applyMerchantRules: "Apply merchant rules",
@@ -68,9 +69,9 @@ const spending = {
     noRulesYet: "No rules yet.",
   },
   mobileTransactionRow: {
-    selectTransaction: (description: string, date: string) =>
-      `Select ${description} on ${date}`,
-    editTransaction: (description: string) => `Edit ${description}`,
+    selectTransaction:
+      message<[description: string, date: string]>("Select {0} on {1}"),
+    editTransaction: message<[description: string]>("Edit {0}"),
 
     transferLinked: "Transfer · Linked",
     transfer: "Transfer",
@@ -80,14 +81,19 @@ const spending = {
     uncleared: "Uncleared",
   },
   spendingView: {
-    selectTransaction: (description: string, date: string) =>
-      `Select ${description} on ${date}`,
-    freshStart: (month: string) => `A fresh start for ${month}.`,
-    filters: (n: number) => `Filters${n ? ` · ${n}` : ""}`,
-    selected: (n: number) => `${n} selected`,
-    matches: (query: string) =>
-      `Matches for “${query}” from every month, newest first.`,
-    nothingMatches: (query: string) => `Nothing matches “${query}”`,
+    selectTransaction:
+      message<[description: string, date: string]>("Select {0} on {1}"),
+    freshStart: message<[month: string]>("A fresh start for {0}."),
+    filters: message<[n: number]>([
+      "text",
+      "Filters",
+      ["if", 0, ["text", " · ", 0], ""],
+    ]),
+    selected: message<[n: number]>("{0} selected"),
+    matches: message<[query: string]>(
+      "Matches for “{0}” from every month, newest first.",
+    ),
+    nothingMatches: message<[query: string]>("Nothing matches “{0}”"),
 
     description: "Description",
     merchant: "Merchant",
@@ -122,6 +128,10 @@ const spending = {
     transactions: "Transactions",
     exportTheseTransactionsAsCSV: "Export these transactions as CSV",
     exportCSV: "Export CSV",
+    exportFailed: "Could not export transactions. Try again.",
+    allMonthsSearching: "All months",
+    monthControlsSummaryOnly:
+      "Search shows matches from every month; the month picker updates the monthly overview below.",
     clearFilters: "Clear filters",
     searchEveryMonth: "Search every month",
     searchTransactions: "Search transactions",
@@ -150,9 +160,9 @@ const spending = {
     uncategorised: "Uncategorised",
   },
   transactionDrawer: {
-    accountCurrencyLabel: (currency: string) => `${currency} (account)`,
-    inactiveCurrency: (currency: string) => `${currency} (inactive)`,
-    archivedCategory: (name: string) => `${name} (archived)`,
+    accountCurrencyLabel: message<[currency: string]>("{0} (account)"),
+    inactiveCurrency: message<[currency: string]>("{0} (inactive)"),
+    archivedCategory: message<[name: string]>("{0} (archived)"),
 
     transactionSaved: "Transaction saved.",
     transactionAdded: "Transaction added.",
@@ -188,17 +198,38 @@ const spending = {
   },
   transferReview: {
     toLabel: "To",
-    suggested: (n: number) =>
-      `Suggested matches (${n} ${n === 1 ? "pair" : "pairs"})`,
-    unmatched: (n: number) => `Without a match (${n})`,
-    linked: (n: number, more = false) =>
-      `Linked transfers (${n}${more ? "+" : ""})`,
-    excluded: (n: number, more = false) =>
-      `No counterpart in Finfolio (${n}${more ? "+" : ""})`,
-    fx: (out: string, rate: string, incoming: string) =>
-      `Approximate FX: 1 ${out} = ${rate} ${incoming}`,
-    suggestionPolicy: (date: string | null) =>
-      `Suggestions allow −1 to +5 days, fees up to 1% (capped at 10), and 3% FX variance. FX uses approximate latest rates${date ? ` as of ${date}` : ""}; any FX difference is not an inferred fee.`,
+    suggested: message<[n: number]>([
+      "text",
+      "Suggested matches (",
+      0,
+      " ",
+      ["if", ["===", 0, ["number", 1]], "pair", "pairs"],
+      ")",
+    ]),
+    unmatched: message<[n: number]>("Without a match ({0})"),
+    linked: message<[n: number, more?: boolean]>([
+      "text",
+      "Linked transfers (",
+      0,
+      ["if", 1, "+", ""],
+      ")",
+    ]),
+    excluded: message<[n: number, more?: boolean]>([
+      "text",
+      "No counterpart in Finfolio (",
+      0,
+      ["if", 1, "+", ""],
+      ")",
+    ]),
+    fx: message<[out: string, rate: string, incoming: string]>(
+      "Approximate FX: 1 {0} = {1} {2}",
+    ),
+    suggestionPolicy: message<[date: string | null]>([
+      "text",
+      "Suggestions allow −1 to +5 days, fees up to 1% (capped at 10), and 3% FX variance. FX uses approximate latest rates",
+      ["if", 0, ["text", " as of ", 0], ""],
+      "; any FX difference is not an inferred fee.",
+    ]),
 
     outgoing: "Outgoing",
     incoming: "Incoming",

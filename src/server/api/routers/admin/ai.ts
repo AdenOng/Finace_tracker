@@ -13,6 +13,7 @@ import {
 } from "~/server/modules/llm/providers";
 import {
   checkProvider,
+  invalidateImportAvailability,
   monthlyTokenUsage,
   monthStart,
 } from "~/server/modules/llm/routing";
@@ -112,6 +113,7 @@ export const adminAiRouter = createTRPCRouter({
         targetLabel: input.name,
         details: { kind: input.kind, model: input.defaultModel },
       });
+      invalidateImportAvailability(ctx.db);
       return row;
     }),
 
@@ -155,12 +157,13 @@ export const adminAiRouter = createTRPCRouter({
                 : "cleared",
         },
       });
+      invalidateImportAvailability(ctx.db);
     }),
 
   remove: adminProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) =>
-      ctx.db.transaction(async (tx) => {
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.db.transaction(async (tx) => {
         const [row] = await tx
           .delete(llmProvider)
           .where(sharedProviderFilter(input.id))
@@ -201,8 +204,10 @@ export const adminAiRouter = createTRPCRouter({
           details: promoted ? { newDefault: promoted.name } : undefined,
         });
         return { promoted };
-      }),
-    ),
+      });
+      invalidateImportAvailability(ctx.db);
+      return result;
+    }),
 
   /** The provider imports fall back to when the default fails or is over its limit. */
   setFallback: adminProcedure
@@ -229,6 +234,7 @@ export const adminAiRouter = createTRPCRouter({
         targetId: target?.id,
         targetLabel: target?.name ?? null,
       });
+      invalidateImportAvailability(ctx.db);
     }),
 
   healthChecks: adminProcedure.query(
@@ -328,6 +334,7 @@ export const adminAiRouter = createTRPCRouter({
           targetLabel: target.name,
         });
       });
+      invalidateImportAvailability(ctx.db);
     }),
 
   /**

@@ -150,7 +150,7 @@ export function ImportJobsAdmin({
           />
         </form>
       </div>
-      <FlashNotice flash={flash} className="mb-4" />
+      <FlashNotice flash={flash} onDismiss={clear} className="mb-4" />
 
       {jobs.isLoading ? (
         <p className="text-ink-3 text-sm">{t.common.status.loading}</p>

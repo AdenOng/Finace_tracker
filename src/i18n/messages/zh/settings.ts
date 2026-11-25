@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type { Translation } from "../../types";
 import type en from "../en/settings";
 const settings: Translation<typeof en> = {
@@ -27,8 +28,13 @@ const settings: Translation<typeof en> = {
     noPasskeysYetAPasskey:
       "暂无通行密钥。添加后，你可以通过 Face ID、Touch ID 或 Windows Hello 登录。",
     addAPasskey: "添加通行密钥",
-    added: (date: string, synced: boolean) =>
-      `添加于 ${date} · ${synced ? "已同步" : "仅限本设备"}`,
+    added: message<[date: string, synced: boolean]>([
+      "text",
+      "添加于 ",
+      0,
+      " · ",
+      ["if", 1, "已同步", "仅限本设备"],
+    ]),
   },
   passwordCard: {
     theNewPasswordsDontMatch: "两次输入的新密码不一致。",
@@ -43,8 +49,8 @@ const settings: Translation<typeof en> = {
     recommendedIfYouThinkSomeone:
       "如果你认为其他人知道你的密码，建议勾选此项。",
     changePassword: "更改密码",
-    minPassword: (n: number) => `新密码至少需要 ${n} 个字符。`,
-    minHint: (n: number) => `至少 ${n} 个字符。`,
+    minPassword: message<[n: number]>("新密码至少需要 {0} 个字符。"),
+    minHint: message<[n: number]>("至少 {0} 个字符。"),
   },
   profileCard: {
     enterYourName: "请输入姓名。",
@@ -61,13 +67,21 @@ const settings: Translation<typeof en> = {
     signOut: "确认退出登录？",
     signOutText: "退出登录",
     signOutOfAllOther: "退出所有其他设备",
-    revoked: (n: number) => `已退出其他 ${n} 台设备。`,
-    activity: (ip: string, current: boolean, relative: string, date: string) =>
-      `${ip} · ${current ? "当前在线" : `${relative}活跃`} · 登录于 ${date}`,
-    confirmDevices: (n: number) => `确认退出 ${n} 台设备？`,
+    revoked: message<[n: number]>("已退出其他 {0} 台设备。"),
+    activity: message<
+      [ip: string, current: boolean, relative: string, date: string]
+    >([
+      "text",
+      0,
+      " · ",
+      ["if", 1, "当前在线", ["text", 2, "活跃"]],
+      " · 登录于 ",
+      3,
+    ]),
+    confirmDevices: message<[n: number]>("确认退出 {0} 台设备？"),
     unknownDevice: "未知设备",
     browser: "浏览器",
-    deviceOn: (browser: string, os: string) => `${os} 上的 ${browser}`,
+    deviceOn: message<[browser: string, os: string]>("{1} 上的 {0}"),
     methods: {
       password: "密码",
       two_factor: "密码与两步验证",
@@ -116,8 +130,11 @@ const settings: Translation<typeof en> = {
     signInWithoutAPassword: "使用设备的生物识别功能或安全密钥免密码登录。",
     signedinDevices: "已登录设备",
     whereYourAccountIsSigned: "查看账号的登录设备，退出你不认识的设备。",
-    enrolment: (welcome: boolean) =>
-      `${welcome ? "欢迎使用。" : ""}此实例要求启用两步验证。请在下方设置身份验证器应用，以使用其余功能。`,
+    enrolment: message<[welcome: boolean]>([
+      "text",
+      ["if", 0, "欢迎使用。", ""],
+      "此实例要求启用两步验证。请在下方设置身份验证器应用，以使用其余功能。",
+    ]),
   },
 };
 export default settings;

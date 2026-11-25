@@ -1,10 +1,12 @@
 import { SensitiveValue } from "../components/AmountPrivacy";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { inferRouterOutputs } from "@trpc/server";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
+import { checkImportBalance } from "../../../src/lib/import-balance-check";
+import { moneyPattern } from "../../../src/lib/money";
 import type { AppRouter } from "../../../src/server/api/root";
 import { api } from "../api/client";
 import { useFinfolio } from "../auth/Provider";
@@ -25,13 +27,6 @@ import { Select } from "../components/Select";
 import { DateField, validDate } from "../components/DateField";
 import { money, normalizeDecimal } from "../utils/money";
 
-/** "-12,50" and "1,234.50" as typed on a phone, as a plain signed decimal. */
-const signedDecimal = (input: string) => {
-  const value = input.trim();
-  return value.startsWith("-")
-    ? "-" + normalizeDecimal(value.slice(1))
-    : normalizeDecimal(value);
-};
 import { reading, STATEMENT_TYPES, statementType } from "../utils/imports";
 import { today } from "../utils/server";
 
@@ -48,16 +43,19 @@ export function Imports({
 }: NativeStackScreenProps<MoreStack, "Imports">) {
   const { origin, auth, expireSession } = useFinfolio();
   const accounts = api.accounts.list.useQuery();
-  const jobs = api.imports.list.useInfiniteQuery({}, {
-    getNextPageParam: (last) => {
-      const job = last.at(-1);
-      return last.length === 100 && job
-        ? { id: job.id, createdAt: job.cursorCreatedAt }
-        : undefined;
+  const jobs = api.imports.list.useInfiniteQuery(
+    {},
+    {
+      getNextPageParam: (last) => {
+        const job = last.at(-1);
+        return last.length === 100 && job
+          ? { id: job.id, createdAt: job.cursorCreatedAt }
+          : undefined;
+      },
+      refetchInterval: (q) =>
+        q.state.data?.pages.some((page) => page.some(reading)) ? 2500 : false,
     },
-    refetchInterval: (q) =>
-      q.state.data?.pages.some((page) => page.some(reading)) ? 2500 : false,
-  });
+  );
   const rows = jobs.data?.pages.flat() ?? [];
   const availability = api.imports.availability.useQuery(undefined, {
     staleTime: 30_000,
@@ -368,7 +366,8 @@ export function ImportReview({
     }
   }
   const job = q.data;
-  if (!job)
+  const check = useMemo(() => (job ? checkImportBalance(job) : null), [job]);
+  if (!job || !check)
     return (
       <Page title="Import review">
         <Button
@@ -383,7 +382,6 @@ export function ImportReview({
         />
       </Page>
     );
-  const check = job.balanceCheck;
   const balanceKey = JSON.stringify(check);
   const needsDate = job.rows.some(
     (r) => r.decision === "accept" && r.kind !== "transaction",
@@ -781,9 +779,9 @@ function ReviewRow({
               />
               <Button
                 title="Confirm amount"
-                disabled={!/^-?\d+(\.\d{1,4})?$/.test(signedDecimal(amount))}
+                disabled={!moneyPattern.test(normalizeDecimal(amount))}
                 onPress={() => {
-                  onAmount(signedDecimal(amount));
+                  onAmount(normalizeDecimal(amount));
                   setEditing(false);
                 }}
               />

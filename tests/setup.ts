@@ -1,4 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { setFallbackMessages } from "../src/i18n/client";
+import english from "../src/i18n/messages/en";
+
+setFallbackMessages(english);
 
 // Tests always use throwaway configuration, even when Bun loads a developer's .env.
 Object.assign(process.env, { NODE_ENV: "test" });

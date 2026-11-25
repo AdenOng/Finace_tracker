@@ -8,9 +8,9 @@ import {
   Noto_Sans_SC,
 } from "next/font/google";
 
+import { LocaleProvider } from "~/i18n/client";
+import { commonDictionaries } from "~/i18n/messages";
 import { htmlLang } from "~/i18n/config";
-import EnglishProvider from "~/i18n/providers/en";
-import ChineseProvider from "~/i18n/providers/zh";
 import { getLocale, getT } from "~/i18n/server";
 import { TRPCReactProvider } from "~/trpc/react";
 
@@ -44,9 +44,6 @@ export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const locale = await getLocale();
-  // Both dictionaries are imported statically and ship on every page (~24 KB gzip each);
-  // a next/dynamic provider here broke hydration of useId-based form IDs.
-  const Messages = locale === "zh" ? ChineseProvider : EnglishProvider;
   return (
     <html
       lang={htmlLang[locale]}
@@ -56,7 +53,9 @@ export default async function RootLayout({
         {/* Outside the locale boundary: switching language swaps that provider, and the
             query cache must survive the remount. */}
         <TRPCReactProvider>
-          <Messages>{children}</Messages>
+          <LocaleProvider locale={locale} messages={commonDictionaries[locale]}>
+            {children}
+          </LocaleProvider>
         </TRPCReactProvider>
       </body>
     </html>

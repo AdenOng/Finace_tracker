@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { categoryLabel, useT } from "~/i18n/client";
 import { Button } from "~/components/ui/button";
+import { Combobox } from "~/components/ui/combobox";
 import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Drawer } from "~/components/ui/dialog";
 import {
@@ -309,39 +310,44 @@ export function TransactionDrawer({
           label={t.spending.transactionDrawer.category}
           htmlFor="txn-category"
         >
-          <Select
+          <Combobox
             id="txn-category"
             name="categoryId"
             value={classification.categoryId ?? ""}
-            onChange={(e) =>
+            onChange={(val) =>
               setClassification(
                 classifyTransaction(
                   classification,
-                  { categoryId: e.target.value || null },
+                  { categoryId: val || null },
                   categories,
                 ),
               )
             }
-          >
-            <option value="">
-              {t.spending.transactionDrawer.uncategorised}
-            </option>
-            {existing?.categoryId &&
-            !categories.some((c) => c.id === existing.categoryId) ? (
-              <option value={existing.categoryId}>
-                {t.spending.transactionDrawer.archivedCategory(
-                  categoryLabel(t, existing.categoryName ?? ""),
-                )}
-              </option>
-            ) : null}
-            {orderCategories(categories).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.parentId
+            options={[
+              {
+                value: "",
+                label: t.spending.transactionDrawer.uncategorised,
+              },
+              ...(existing?.categoryId &&
+              !categories.some((c) => c.id === existing.categoryId)
+                ? [
+                    {
+                      value: existing.categoryId,
+                      label: t.spending.transactionDrawer.archivedCategory(
+                        categoryLabel(t, existing.categoryName ?? ""),
+                      ),
+                    },
+                  ]
+                : []),
+              ...orderCategories(categories).map((c) => ({
+                value: c.id,
+                label: c.parentId
                   ? `— ${categoryLabel(t, c.name)}`
-                  : categoryLabel(t, c.name)}
-              </option>
-            ))}
-          </Select>
+                  : categoryLabel(t, c.name),
+                keywords: c.name,
+              })),
+            ]}
+          />
         </Field>
         <Checkbox
           name="cleared"

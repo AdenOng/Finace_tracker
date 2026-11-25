@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/admin";
 import type { Translation } from "../../types";
 const admin: Translation<typeof en> = {
@@ -27,13 +28,27 @@ const admin: Translation<typeof en> = {
     importsReadBeforeProviderTrackingWasAdded:
       "在启用服务商跟踪前读取的导入记录",
     notRecorded: "未记录",
-    attentionCount: (n: number) => `共 ${n} 项待处理事项，按紧急程度排序。`,
-    usersNote: (n: number, disabled: number) =>
-      `${n} 位管理员${disabled ? `，${disabled} 个账号已停用` : ""}`,
-    sessions: (n: number) => `${n} 个登录会话`,
-    withoutTwoStep: (n: number) => `${n} 人未启用两步验证`,
-    importsDescription: (provider: string | null, n: number, count: string) =>
-      `默认服务商：${provider ?? "无"}。过去 7 天已读取 ${count} 份对账单。`,
+    attentionCount: message<[n: number]>(
+      "共 {0} 项待处理事项，按紧急程度排序。",
+    ),
+    usersNote: message<[n: number, disabled: number]>([
+      "text",
+      0,
+      " 位管理员",
+      ["if", 1, ["text", "，", 1, " 个账号已停用"], ""],
+    ]),
+    sessions: message<[n: number]>("{0} 个登录会话"),
+    withoutTwoStep: message<[n: number]>("{0} 人未启用两步验证"),
+    importsDescription: message<
+      [provider: string | null, n: number, count: string]
+    >([
+      "text",
+      "默认服务商：",
+      ["??", 0, "无"],
+      "。过去 7 天已读取 ",
+      2,
+      " 份对账单。",
+    ]),
   },
   tabs: {
     aiSections: "AI 分区",
@@ -114,30 +129,39 @@ const admin: Translation<typeof en> = {
     stopSendingImportsHereOnceReached: "达到上限后停止向此服务商发送导入任务",
     importsUseTheFallbackProviderInsteadOrFailWithAClearMessage:
       "导入任务将改用备用服务商，或显示明确的失败提示。",
-    working: (seconds: string) => `正常，响应耗时 ${seconds} 秒`,
-    failed: (error: string) => `失败：${error}`,
-    modelsAvailable: (n: number) => `${n} 个可用模型，请输入`,
-    saved: (name: string) => `已保存 ${name}。`,
-    added: (name: string) => `已添加 ${name}。请先测试再使用。`,
-    deletePromote: (name: string) => `确认删除？${name} 将成为默认服务商`,
-    deletedPromoted: (name: string, next: string) =>
-      `已删除 ${name}。${next} 已成为默认服务商。`,
-    deleted: (name: string) => `已删除 ${name}。`,
-    storedKey: (key: string) => `已存储：${key}。留空以保留。`,
-    checked: (when: string) => `· 检查于${when}`,
-    noLimit: (n: string) => `本月已用 ${n} 个 Token · 无上限`,
-    limitUsage: (
-      used: string,
-      limit: string,
-      reached: boolean,
-      pause: boolean,
-    ) =>
-      `本月已用 ${used} / ${limit} 个 Token${reached ? (pause ? " · 已暂停至下月" : " · 已超出上限") : ""}`,
-    prices: (input: string, output: string) =>
-      `每百万 Token：输入 US$${input} / 输出 US$${output}`,
-    modelOption: (name: string, textOnly: boolean) =>
-      `${name}${textOnly ? "（仅文本）" : ""}`,
-    usedThisMonth: (n: string) => `本月已用：${n} 个 Token。`,
+    working: message<[seconds: string]>("正常，响应耗时 {0} 秒"),
+    failed: message<[error: string]>("失败：{0}"),
+    modelsAvailable: message<[n: number]>("{0} 个可用模型，请输入"),
+    saved: message<[name: string]>("已保存 {0}。"),
+    added: message<[name: string]>("已添加 {0}。请先测试再使用。"),
+    deletePromote: message<[name: string]>("确认删除？{0} 将成为默认服务商"),
+    deletedPromoted: message<[name: string, next: string]>(
+      "已删除 {0}。{1} 已成为默认服务商。",
+    ),
+    deleted: message<[name: string]>("已删除 {0}。"),
+    storedKey: message<[key: string]>("已存储：{0}。留空以保留。"),
+    checked: message<[when: string]>("· 检查于{0}"),
+    noLimit: message<[n: string]>("本月已用 {0} 个 Token · 无上限"),
+    limitUsage: message<
+      [used: string, limit: string, reached: boolean, pause: boolean]
+    >([
+      "text",
+      "本月已用 ",
+      0,
+      " / ",
+      1,
+      " 个 Token",
+      ["if", 2, ["if", 3, " · 已暂停至下月", " · 已超出上限"], ""],
+    ]),
+    prices: message<[input: string, output: string]>(
+      "每百万 Token：输入 US${0} / 输出 US${1}",
+    ),
+    modelOption: message<[name: string, textOnly: boolean]>([
+      "text",
+      0,
+      ["if", 1, "（仅文本）", ""],
+    ]),
+    usedThisMonth: message<[n: string]>("本月已用：{0} 个 Token。"),
   },
   usage: {
     noUsageYet: "暂无用量",
@@ -160,18 +184,21 @@ const admin: Translation<typeof en> = {
     totalTokens: "Token 总数",
     deletedProvider: "已删除的服务商",
     notRecorded: "未记录",
-    dayDetail: (tokens: string, jobs: number) =>
-      `· ${tokens} 个 Token · ${jobs} 项任务`,
-    tokenCount: (n: string) => `${n} 个 Token`,
-    overDays: (n: number) => `近 ${n} 天用量。将鼠标移到某天可查看详情。`,
-    peak: (n: string) => `峰值 ${n}`,
-    chartLabel: (days: number, total: string) =>
-      `近 ${days} 天的每日 Token 用量，共 ${total} 个 Token。具体数据见下表。`,
-    monthSoFar: (month: string) => `${month}至今`,
-    estimatedCost: (cost: string) =>
-      `根据你填写的标价，预估费用为 ${cost}。实际费用以服务商账单为准。`,
-    limitShare: (percent: number, limit: string) =>
-      `已用上限 ${limit} 的 ${percent}%`,
+    dayDetail: message<[tokens: string, jobs: number]>(
+      "· {0} 个 Token · {1} 项任务",
+    ),
+    tokenCount: message<[n: string]>("{0} 个 Token"),
+    overDays: message<[n: number]>("近 {0} 天用量。将鼠标移到某天可查看详情。"),
+    peak: message<[n: string]>("峰值 {0}"),
+    chartLabel: message<[days: number, total: string]>(
+      "近 {0} 天的每日 Token 用量，共 {1} 个 Token。具体数据见下表。",
+    ),
+    monthSoFar: message<[month: string]>("{0}至今"),
+    estimatedCost: message<[cost: string]>(
+      "根据你填写的标价，预估费用为 {0}。实际费用以服务商账单为准。",
+    ),
+    limitShare:
+      message<[percent: number, limit: string]>("已用上限 {1} 的 {0}%"),
   },
   playground: {
     useAPdfPngJpegOrWebpFile: "请使用 PDF、PNG、JPEG 或 WebP 文件。",
@@ -227,29 +254,55 @@ const admin: Translation<typeof en> = {
     value: "价值",
     rawJson: "原始 JSON",
     balancesDoNotReconcile: "余额对账不一致。",
-    fileTooLarge: (size: string) => `此文件大小为 ${size}，上限为 20 MB。`,
-    changeFile: (size: string) => `${size} · 点击更换`,
-    providerOption: (name: string, isDefault: boolean) =>
-      `${name}${isDefault ? "（默认）" : ""}`,
-    providerModel: (model: string, vision: boolean) =>
-      `${model}${vision ? "" : " · 仅文本"}`,
-    readingElapsed: (n: number) => `读取中… ${n} 秒`,
-    compareProviders: (n: number) => `对比 ${n} 个服务商`,
-    duration: (seconds: string) => `${seconds} 秒`,
-    tokenUsage: (input: number | string, output: number | string) =>
-      `输入 ${input} / 输出 ${output}`,
-    agreement: (percent: number, n: number) =>
-      `${n} 条共同明细中有 ${percent}% 一致`,
-    pdfText: (n: number | null) => `PDF 文本，${n} 页`,
-    balanceEquation: (
-      opening: string,
-      sum: string,
-      expected: string,
-      closing: string,
-      ok: boolean,
-      diff: string,
-    ) =>
-      `期初余额 ${opening} + 交易 ${sum} = ${expected}；对账单期末余额为 ${closing}${ok ? "。" : `（差额 ${diff}）。部分明细可能缺失或识别有误。`}`,
+    fileTooLarge: message<[size: string]>("此文件大小为 {0}，上限为 20 MB。"),
+    changeFile: message<[size: string]>("{0} · 点击更换"),
+    providerOption: message<[name: string, isDefault: boolean]>([
+      "text",
+      0,
+      ["if", 1, "（默认）", ""],
+    ]),
+    providerModel: message<[model: string, vision: boolean]>([
+      "text",
+      0,
+      ["if", 1, "", " · 仅文本"],
+    ]),
+    readingElapsed: message<[n: number]>("读取中… {0} 秒"),
+    compareProviders: message<[n: number]>("对比 {0} 个服务商"),
+    duration: message<[seconds: string]>("{0} 秒"),
+    tokenUsage:
+      message<[input: number | string, output: number | string]>(
+        "输入 {0} / 输出 {1}",
+      ),
+    agreement: message<[percent: number, n: number]>(
+      "{1} 条共同明细中有 {0}% 一致",
+    ),
+    pdfText: message<[n: number | null]>("PDF 文本，{0} 页"),
+    balanceEquation: message<
+      [
+        opening: string,
+        sum: string,
+        expected: string,
+        closing: string,
+        ok: boolean,
+        diff: string,
+      ]
+    >([
+      "text",
+      "期初余额 ",
+      0,
+      " + 交易 ",
+      1,
+      " = ",
+      2,
+      "；对账单期末余额为 ",
+      3,
+      [
+        "if",
+        4,
+        "。",
+        ["text", "（差额 ", 5, "）。部分明细可能缺失或识别有误。"],
+      ],
+    ]),
   },
   auditActions: {
     "user.role_changed": "已更改角色",
@@ -389,35 +442,65 @@ const admin: Translation<typeof en> = {
     withItsParent: "包含父分类",
     keepFilesForever: "永久保留文件",
     noFixedSessionLength: "不限制登录会话时长",
-    invitation: (admin: boolean, replaced: boolean) =>
-      `角色：${admin ? "管理员" : "成员"}${replaced ? "，替换了先前的链接" : ""}`,
-    sessions: (n: string) => `${n} 个登录会话`,
-    model: (model: string) => `模型 ${model}`,
-    apiKey: (value: string) => `API 密钥 ${value}`,
-    newDefault: (name: string) => `${name} 已成为默认服务商`,
-    archived: (n: string, moved: string, to: string | null) =>
-      `${n} 个分类；${moved} 笔交易${to ? `已移至${to}` : "保留为未分类"}`,
-    categories: (n: string) => `${n} 个分类`,
-    imported: (
-      created: string,
-      updated: string,
-      unchanged: string,
-      archived: string,
-    ) =>
-      `新增 ${created} 个，更新 ${updated} 个，未更改 ${unchanged} 个${Number(archived) > 0 ? `；${archived} 个随父分类归档` : ""}`,
-    restored: (inserted: string, restored: string) =>
-      `重新添加 ${inserted} 个，恢复 ${restored} 个`,
-    merged: (from: string, n: string) => `已合并 ${from}；已迁移 ${n} 个账户`,
-    preset: (categories: string, institutions: string, currencies: string) =>
-      `已添加 ${categories} 个分类、${institutions} 家金融机构和 ${currencies} 种币种`,
-    sessionDays: (n: string) => `${n} 天后退出登录`,
-    inviteSignups: (enabled: boolean) =>
-      `共享空间邀请${enabled ? "允许" : "不允许"}创建账号`,
-    newDevice: (enabled: boolean) =>
-      `新设备邮件提醒${enabled ? "开启" : "关闭"}`,
-    retention: (n: number) => `${n} 天后删除文件`,
-    files: (n: string) => `${n} 个文件`,
-    twoStep: (policy: string) => `两步验证：${policy}`,
+    invitation: message<[admin: boolean, replaced: boolean]>([
+      "text",
+      "角色：",
+      ["if", 0, "管理员", "成员"],
+      ["if", 1, "，替换了先前的链接", ""],
+    ]),
+    sessions: message<[n: string]>("{0} 个登录会话"),
+    model: message<[model: string]>("模型 {0}"),
+    apiKey: message<[value: string]>("API 密钥 {0}"),
+    newDefault: message<[name: string]>("{0} 已成为默认服务商"),
+    archived: message<[n: string, moved: string, to: string | null]>([
+      "text",
+      0,
+      " 个分类；",
+      1,
+      " 笔交易",
+      ["if", 2, ["text", "已移至", 2], "保留为未分类"],
+    ]),
+    categories: message<[n: string]>("{0} 个分类"),
+    imported: message<
+      [created: string, updated: string, unchanged: string, archived: string]
+    >([
+      "text",
+      "新增 ",
+      0,
+      " 个，更新 ",
+      1,
+      " 个，未更改 ",
+      2,
+      " 个",
+      [
+        "if",
+        [">", ["numeric", 3], ["number", 0]],
+        ["text", "；", 3, " 个随父分类归档"],
+        "",
+      ],
+    ]),
+    restored: message<[inserted: string, restored: string]>(
+      "重新添加 {0} 个，恢复 {1} 个",
+    ),
+    merged: message<[from: string, n: string]>("已合并 {0}；已迁移 {1} 个账户"),
+    preset: message<
+      [categories: string, institutions: string, currencies: string]
+    >("已添加 {0} 个分类、{1} 家金融机构和 {2} 种币种"),
+    sessionDays: message<[n: string]>("{0} 天后退出登录"),
+    inviteSignups: message<[enabled: boolean]>([
+      "text",
+      "共享空间邀请",
+      ["if", 0, "允许", "不允许"],
+      "创建账号",
+    ]),
+    newDevice: message<[enabled: boolean]>([
+      "text",
+      "新设备邮件提醒",
+      ["if", 0, "开启", "关闭"],
+    ]),
+    retention: message<[n: number]>("{0} 天后删除文件"),
+    files: message<[n: string]>("{0} 个文件"),
+    twoStep: message<[policy: string]>("两步验证：{0}"),
   },
   auditPolicies: {
     everyone: "所有人",

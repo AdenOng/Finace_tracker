@@ -5,16 +5,18 @@ import { useT } from "~/i18n/client";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AccountDrawer } from "~/components/accounts/account-drawer";
 import { InstitutionMark } from "~/components/accounts/institution-mark";
 import { Amounts } from "~/components/finance/amounts";
 import { BalanceDate } from "~/components/finance/balance-date";
 import { Button } from "~/components/ui/button";
-import { Notice, Section, Tag } from "~/components/ui/panel";
+import { FlashNotice } from "~/components/ui/flash-notice";
+import { Section, Tag } from "~/components/ui/panel";
 import { Table, Td, Th, Tr } from "~/components/ui/table";
 import { FilterTabs } from "~/components/ui/tabs";
+import { useFlash } from "~/components/ui/use-flash";
 import { type AccountGroup, accountGroupOf } from "~/lib/accounts";
 import { api, type RouterOutputs } from "~/trpc/react";
 
@@ -23,8 +25,10 @@ type Row = RouterOutputs["accounts"]["list"][number];
 
 export function AccountsView({
   initialAdd,
+  initialTab = "open",
 }: {
   initialAdd?: AccountGroup | null;
+  initialTab?: Filter;
 }) {
   const t = useT();
 
@@ -76,11 +80,24 @@ export function AccountsView({
   const [settings] = api.settings.get.useSuspenseQuery();
   const offered = (group: AccountGroup) =>
     group !== "cpf_srs" || settings.cpfSrsEnabled;
-  const [filter, setFilter] = useState<Filter>("open");
+  const [filter, setFilter] = useState<Filter>(initialTab);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (filter === "archived") url.searchParams.set("tab", "archived");
+    else url.searchParams.delete("tab");
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    if (
+      next !==
+      `${window.location.pathname}${window.location.search}${window.location.hash}`
+    ) {
+      window.history.replaceState(null, "", next);
+    }
+  }, [filter]);
   const [adding, setAdding] = useState<AccountGroup | "choose" | null>(
     initialAdd && offered(initialAdd) ? initialAdd : null,
   );
-  const [flash, setFlash] = useState<string | null>(null);
+  const flash = useFlash();
   const restore = api.accounts.restore.useMutation({
     onSuccess: async () => {
       await Promise.all([
@@ -117,11 +134,11 @@ export function AccountsView({
         </Button>
       </div>
 
-      {flash ? (
-        <Notice tone="success" className="mb-6">
-          {flash}
-        </Notice>
-      ) : null}
+      <FlashNotice
+        flash={flash.flash}
+        onDismiss={flash.clear}
+        className="mb-6"
+      />
 
       <div className="space-y-4">
         {GROUPS.map((g) => {
@@ -205,7 +222,7 @@ export function AccountsView({
             router.push(`/accounts/${createdId}?record=1`);
             return;
           }
-          setFlash(message);
+          flash.success(message);
         }}
       />
     </>
@@ -230,7 +247,67 @@ function AccountTable({
   const t = useT();
 
   return (
-    <Table>
+    <>
+      <ul className="divide-line -mx-1 divide-y sm:hidden">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-start gap-3 px-1 py-3">
+            <InstitutionMark
+              institutionKey={r.institutionKey}
+              name={r.institutionName ?? r.name}
+              className="mt-0.5 size-9 shrink-0"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <Link
+                  href={`/accounts/${r.id}`}
+                  className="min-w-0 truncate text-[14px] font-semibold hover:underline hover:underline-offset-4"
+                >
+                  {r.name}
+                  {r.last4 ? (
+                    <span className="figures text-ink-3 ml-1 text-[12px] font-normal">
+                      ··{r.last4}
+                    </span>
+                  ) : null}
+                </Link>
+                <span className="shrink-0 text-right font-mono text-[13px] font-semibold">
+                  <Amounts
+                    totals={r.totals}
+                    empty={t.accounts.view.notRecorded}
+                  />
+                </span>
+              </div>
+              <div className="text-ink-3 mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px]">
+                <span className="truncate">
+                  {[r.institutionName, t.common.accountTypes[r.type]]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+                <span className="text-ink-2 shrink-0">
+                  <BalanceDate asOf={r.asOf} />
+                </span>
+              </div>
+              {r.unpriced > 0 || archived ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {r.unpriced > 0 ? (
+                    <Tag tone="warn">{t.accounts.view.unpriced(r.unpriced)}</Tag>
+                  ) : null}
+                  {archived ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={restoring === r.id}
+                      onClick={() => onRestore(r.id)}
+                    >
+                      {t.accounts.view.restore}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <Table className="hidden sm:block">
       <thead>
         <tr>
           <Th>{t.accounts.view.account}</Th>
@@ -299,6 +376,7 @@ function AccountTable({
           </Tr>
         ))}
       </tbody>
-    </Table>
+      </Table>
+    </>
   );
 }

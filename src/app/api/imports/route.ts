@@ -4,7 +4,7 @@ import { after, NextResponse } from "next/server";
 import { env } from "~/env";
 import { needsTwoFactorEnrollment } from "~/server/auth/enrollment";
 import { getSessionFor } from "~/server/auth/session-policy";
-import { db } from "~/server/db";
+import { db, type Database } from "~/server/db";
 import {
   document,
   extractionJob,
@@ -30,6 +30,57 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+function duplicateResponse(jobId: string) {
+  return NextResponse.json(
+    { error: "This file has already been uploaded.", jobId },
+    { status: 409 },
+  );
+}
+
+async function checkUpload(
+  db: Pick<Database, "select" | "$count">,
+  ownerId: string,
+  hash: string,
+  size: number,
+) {
+  // A re-upload is reported as a duplicate even when the owner is at a limit.
+  const [seen] = await db
+    .select({ id: extractionJob.id })
+    .from(document)
+    .innerJoin(extractionJob, eq(extractionJob.documentId, document.id))
+    .where(and(eq(document.ownerId, ownerId), eq(document.sha256, hash)))
+    .limit(1);
+  if (seen) return seen.id;
+
+  const outstanding = await db.$count(
+    extractionJob,
+    and(
+      eq(extractionJob.ownerId, ownerId),
+      inArray(extractionJob.status, ["queued", "running"]),
+    ),
+  );
+  if (outstanding >= MAX_OUTSTANDING_IMPORTS) {
+    throw new UploadValidationError(
+      `You already have ${MAX_OUTSTANDING_IMPORTS} queued or running imports. Wait for an import to finish before uploading again.`,
+      429,
+    );
+  }
+  const [stored] = await db
+    .select({
+      bytes: sql<number>`coalesce(sum(${document.sizeBytes}), 0)`.mapWith(
+        Number,
+      ),
+    })
+    .from(document)
+    .where(and(eq(document.ownerId, ownerId), isNull(document.filePurgedAt)));
+  if ((stored?.bytes ?? 0) + size > MAX_USER_UPLOAD_BYTES) {
+    throw new UploadValidationError(
+      "Your stored uploads exceed the 250 MiB budget. Delete older imports before uploading again.",
+      413,
+    );
+  }
+}
 
 /**
  * Upload a statement or screenshot for one of your accounts. The file is stored, a job is queued
@@ -70,7 +121,15 @@ export async function POST(request: Request) {
 
     const data = new Uint8Array(await file.arrayBuffer());
     const hash = sha256(data);
-    let storedKey: string | undefined;
+
+    // Fast pre-check outside the row lock so obvious duplicates or over-budget requests
+    // reject immediately without touching disk; limits are re-checked atomically under FOR UPDATE.
+    const duplicate = await checkUpload(db, scope.userId, hash, file.size);
+    if (duplicate) return duplicateResponse(duplicate);
+
+    // Write to a unique attempt path before acquiring the per-user DB lock so disk I/O
+    // never holds the row lock; clean it up whenever a concurrent race causes rejection.
+    const storedKey = await saveUpload(scope.userId, hash, file.type, data);
     const jobId = await db
       .transaction(async (tx) => {
         // Serialize uploads for this owner so simultaneous requests cannot pass the same limits.
@@ -79,55 +138,8 @@ export async function POST(request: Request) {
           .from(user)
           .where(eq(user.id, scope.userId))
           .for("update");
-        // A re-upload is reported as a duplicate even when the owner is at a limit.
-        const [seen] = await tx
-          .select({ id: extractionJob.id })
-          .from(document)
-          .innerJoin(extractionJob, eq(extractionJob.documentId, document.id))
-          .where(
-            and(eq(document.ownerId, scope.userId), eq(document.sha256, hash)),
-          )
-          .limit(1);
-        if (seen) return { duplicate: seen.id };
-        const outstanding = await tx.$count(
-          extractionJob,
-          and(
-            eq(extractionJob.ownerId, scope.userId),
-            inArray(extractionJob.status, ["queued", "running"]),
-          ),
-        );
-        if (outstanding >= MAX_OUTSTANDING_IMPORTS) {
-          throw new UploadValidationError(
-            `You already have ${MAX_OUTSTANDING_IMPORTS} queued or running imports. Wait for an import to finish before uploading again.`,
-            429,
-          );
-        }
-        const [stored] = await tx
-          .select({
-            bytes: sql<number>`coalesce(sum(${document.sizeBytes}), 0)`.mapWith(
-              Number,
-            ),
-          })
-          .from(document)
-          .where(
-            and(
-              eq(document.ownerId, scope.userId),
-              isNull(document.filePurgedAt),
-            ),
-          );
-        if ((stored?.bytes ?? 0) + file.size > MAX_USER_UPLOAD_BYTES) {
-          throw new UploadValidationError(
-            "Your stored uploads exceed the 250 MiB budget. Delete older imports before uploading again.",
-            413,
-          );
-        }
-        const storageKey = await saveUpload(
-          scope.userId,
-          hash,
-          file.type,
-          data,
-        );
-        storedKey = storageKey;
+        const duplicate = await checkUpload(tx, scope.userId, hash, file.size);
+        if (duplicate) return { duplicate };
         const [doc] = await tx
           .insert(document)
           .values({
@@ -138,7 +150,7 @@ export async function POST(request: Request) {
             mimeType: file.type,
             sizeBytes: file.size,
             sha256: hash,
-            storageKey,
+            storageKey: storedKey,
             kind: file.type.startsWith("image/")
               ? "screenshot"
               : holdsSecurities(account.type)
@@ -154,17 +166,12 @@ export async function POST(request: Request) {
       })
       .catch(async (error: unknown) => {
         // Keep the original error even if the cleanup itself fails.
-        if (storedKey) await removeUpload(storedKey).catch(() => undefined);
+        await removeUpload(storedKey).catch(() => undefined);
         throw error;
       });
     if (jobId.duplicate) {
-      return NextResponse.json(
-        {
-          error: "This file has already been uploaded.",
-          jobId: jobId.duplicate,
-        },
-        { status: 409 },
-      );
+      await removeUpload(storedKey).catch(() => undefined);
+      return duplicateResponse(jobId.duplicate);
     }
 
     after(() => runImportJob(jobId.created!));

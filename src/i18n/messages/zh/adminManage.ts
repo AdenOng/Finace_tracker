@@ -1,3 +1,4 @@
+import { message } from "../../template";
 import type en from "../en/adminManage";
 import type { Translation } from "../../types";
 const adminManage: Translation<typeof en> = {
@@ -64,35 +65,48 @@ const adminManage: Translation<typeof en> = {
     chooseAJSONFile: "选择 JSON 文件",
     checkingTheFile: "正在检查文件…",
     importArchiveHelp: "通过导入归档分类不会移动交易。",
-    defaultsRestored: (count: number) => `已恢复 ${count} 个默认分类。`,
-    add: (names: string) => `添加 ${names}`,
-    restoreNamed: (names: string) => `恢复 ${names}`,
-    bringBack: (count: number) => `恢复 ${count} 个分类？`,
-    restoreDefault: (count: number) => `恢复 ${count} 个默认分类`,
-    reorderLabel: (name: string) => `移动 ${name}。使用上、下方向键调整。`,
-    transactionCount: (count: number) => `${count} 笔交易`,
-    saved: (name: string) => `已保存 ${name}。`,
-    added: (name: string) => `已添加 ${name}。`,
-    keyHelp: (key: string) => `标识：${key}，重命名后保持不变。`,
-    inheritedTypeHelp: (parentName: string) =>
-      `由 ${parentName} 决定：子分类沿用上级分类的类型。`,
-    mergeNamed: (name: string) => `合并 ${name}`,
-    archive: (name: string) => `归档 ${name}`,
-    mergeResult: (sourceName: string, targetName: string, count: number) =>
-      `已将 ${sourceName} 合并至 ${targetName}，移动了 ${count} 笔交易。`,
-    archiveResult: (categoryCount: number, transactionCount: number) =>
-      `已归档 ${categoryCount} 个分类，移动了 ${transactionCount} 笔交易。`,
-    importResult: (added: number, updated: number, unchanged: number) =>
-      `导入完成：新增 ${added} 个，更新 ${updated} 个，${unchanged} 个未变。`,
-    importArchivedChildren: (count: number) =>
-      ` ${count} 个子分类随已归档的上级分类一同归档。`,
-    childrenArchived: (n: number) =>
-      `其 ${n} 个子分类也会归档，交易将一同移动。`,
-    recategorises: (n: number, merge: boolean) =>
-      `这会更改所有用户共 ${n} 笔交易的分类。商户规则将一同移动${merge ? "" : "，若保留为未分类则删除规则"}。此操作会记入活动日志。`,
-    fileCount: (n: number | undefined) => `文件中有 ${n} 个分类。`,
-    previewChanges: (added: number, updated: number, unchanged: number) =>
-      ` 将新增 ${added} 个，更新 ${updated} 个，${unchanged} 个保持不变。`,
+    defaultsRestored: message<[count: number]>("已恢复 {0} 个默认分类。"),
+    add: message<[names: string]>("添加 {0}"),
+    restoreNamed: message<[names: string]>("恢复 {0}"),
+    bringBack: message<[count: number]>("恢复 {0} 个分类？"),
+    restoreDefault: message<[count: number]>("恢复 {0} 个默认分类"),
+    reorderLabel: message<[name: string]>("移动 {0}。使用上、下方向键调整。"),
+    transactionCount: message<[count: number]>("{0} 笔交易"),
+    saved: message<[name: string]>("已保存 {0}。"),
+    added: message<[name: string]>("已添加 {0}。"),
+    keyHelp: message<[key: string]>("标识：{0}，重命名后保持不变。"),
+    inheritedTypeHelp: message<[parentName: string]>(
+      "由 {0} 决定：子分类沿用上级分类的类型。",
+    ),
+    mergeNamed: message<[name: string]>("合并 {0}"),
+    archive: message<[name: string]>("归档 {0}"),
+    mergeResult: message<
+      [sourceName: string, targetName: string, count: number]
+    >("已将 {0} 合并至 {1}，移动了 {2} 笔交易。"),
+    archiveResult: message<[categoryCount: number, transactionCount: number]>(
+      "已归档 {0} 个分类，移动了 {1} 笔交易。",
+    ),
+    importResult: message<[added: number, updated: number, unchanged: number]>(
+      "导入完成：新增 {0} 个，更新 {1} 个，{2} 个未变。",
+    ),
+    importArchivedChildren: message<[count: number]>(
+      " {0} 个子分类随已归档的上级分类一同归档。",
+    ),
+    childrenArchived: message<[n: number]>(
+      "其 {0} 个子分类也会归档，交易将一同移动。",
+    ),
+    recategorises: message<[n: number, merge: boolean]>([
+      "text",
+      "这会更改所有用户共 ",
+      0,
+      " 笔交易的分类。商户规则将一同移动",
+      ["if", 1, "", "，若保留为未分类则删除规则"],
+      "。此操作会记入活动日志。",
+    ]),
+    fileCount: message<[n: number | undefined]>("文件中有 {0} 个分类。"),
+    previewChanges: message<
+      [added: number, updated: number, unchanged: number]
+    >(" 将新增 {0} 个，更新 {1} 个，{2} 个保持不变。"),
   },
   data: {
     backupRequested: "备份请求已提交，备份服务将在一分钟内处理。",
@@ -170,67 +184,101 @@ const adminManage: Translation<typeof en> = {
     preview: "预览",
     addTheseDefaults: "添加这些默认数据？",
     applyPack: "应用数据包",
-    backupSchedule: (directory: string, days: number) =>
-      `每晚使用 pg_dump 备份至 ${directory}，保留 ${days} 天。`,
-    serviceHeartbeat: (time: string) => `运行中，最近报告时间：${time}。`,
-    serviceLastSeen: (time: string) => `未运行，最后在线时间：${time}。`,
-    ratesFetchFailed: (currencies: string) =>
-      `无法获取 ${currencies} 的汇率。汇率服务可能不可用，将继续使用最近存储的汇率。`,
-    ratesStored: (count: number, currencies: string) =>
-      `已为 ${currencies} 存储 ${count} 条新汇率。`,
-    ratesCurrent: (currencies: string) => `${currencies} 的汇率已是最新。`,
-    noPriceFoundFor: (symbols: string) => `未找到 ${symbols} 的价格`,
-    quoteCurrencyMismatch: (symbols: string) =>
-      `${symbols} 的报价币种与记录不符`,
-    pricesUpdated: (updated: number, checked: number) =>
-      `已更新 ${checked} 个价格中的 ${updated} 个。`,
-    skipped: (summary: string, problems: string) =>
-      `${summary} 已跳过：${problems}。`,
-    referenceRatesHelp: (source: string | null) =>
-      `为用户查看总额所用的各币种获取${source ? `来自 ${source} 的` : ""}每日参考汇率，每 12 小时刷新一次。`,
-    retentionSaved: (days: number) =>
-      `对账单文件将在导入完成 ${days} 天后删除。每天自动清理。`,
-    filesDeleted: (count: number, size: string) =>
-      `已删除 ${count} 个文件，释放 ${size}。`,
-    cleanupPreview: (count: number, size: string) =>
-      `现在可删除 ${count} 个文件（${size}）`,
-    deleteFiles: (count: number) => `删除 ${count} 个文件？`,
-    categoryCount: (count: number) => `${count} 个分类`,
-    institutionCount: (count: number) => `${count} 家金融机构`,
-    currencyCount: (count: number) => `${count} 个币种`,
-    applyingAdds: (summary: string) => `应用后将新增 ${summary}。`,
-    archivedDefaultsHelp: (count: number) =>
-      ` ${count} 项默认数据已归档，请前往分类或券商与银行页面恢复。`,
-    packApplied: (
-      categories: number,
-      institutions: number,
-      currencies: number,
-    ) =>
-      `已添加 ${categories} 个分类、${institutions} 家金融机构和 ${currencies} 个币种，现有记录未变。`,
-    activePack: (name: string) => `当前数据包：${name}`,
-    customPackHelp: (file: string | null) =>
-      `从 PRESET_FILE（${file}）加载。每次启动时补充默认数据，仅添加缺失记录。`,
-    builtinPackHelp: (id: string) =>
-      `内置数据包“${id}”（DATA_PRESET）。每次启动时补充默认数据，仅添加缺失记录。`,
-    backupInProgress: (date: string) => `备份开始于 ${date}。`,
-    lastBackup: (ok: boolean, date: string) =>
-      `最近备份${ok ? "成功" : "失败"}${date}。`,
-    newestDump: (date: string) => `最新备份创建于 ${date}。`,
-    missingMount: (path: string) =>
-      `${path} 未挂载任何内容。在 Docker 中，应用须挂载 ./backups 文件夹（参阅 docker-compose.yml）。`,
-    currenciesInUse: (codes: string) => `账户使用的币种：${codes || "无"}。`,
-    statementValuations: (n: number) =>
-      `按对账单估值（${n}${n === 50 ? "+" : ""}）`,
-    followPack: (on: boolean) => `随数据包设置（${on ? "开启" : "关闭"}）`,
-    cpfCurrent: (on: boolean) =>
-      `当前${on ? "开启" : "关闭"}。关闭后会隐藏这些账户类型，现有 CPF 和 SRS 账户会保留。`,
-    customFile: (name: string) => `自定义文件：${name}`,
+    backupSchedule: message<[directory: string, days: number]>(
+      "每晚使用 pg_dump 备份至 {0}，保留 {1} 天。",
+    ),
+    serviceHeartbeat: message<[time: string]>("运行中，最近报告时间：{0}。"),
+    serviceLastSeen: message<[time: string]>("未运行，最后在线时间：{0}。"),
+    ratesFetchFailed: message<[currencies: string]>(
+      "无法获取 {0} 的汇率。汇率服务可能不可用，将继续使用最近存储的汇率。",
+    ),
+    ratesStored: message<[count: number, currencies: string]>(
+      "已为 {1} 存储 {0} 条新汇率。",
+    ),
+    ratesCurrent: message<[currencies: string]>("{0} 的汇率已是最新。"),
+    noPriceFoundFor: message<[symbols: string]>("未找到 {0} 的价格"),
+    quoteCurrencyMismatch:
+      message<[symbols: string]>("{0} 的报价币种与记录不符"),
+    pricesUpdated: message<[updated: number, checked: number]>(
+      "已更新 {1} 个价格中的 {0} 个。",
+    ),
+    skipped: message<[summary: string, problems: string]>("{0} 已跳过：{1}。"),
+    referenceRatesHelp: message<[source: string | null]>([
+      "text",
+      "为用户查看总额所用的各币种获取",
+      ["if", 0, ["text", "来自 ", 0, " 的"], ""],
+      "每日参考汇率，每 12 小时刷新一次。",
+    ]),
+    retentionSaved: message<[days: number]>(
+      "对账单文件将在导入完成 {0} 天后删除。每天自动清理。",
+    ),
+    filesDeleted: message<[count: number, size: string]>(
+      "已删除 {0} 个文件，释放 {1}。",
+    ),
+    cleanupPreview:
+      message<[count: number, size: string]>("现在可删除 {0} 个文件（{1}）"),
+    deleteFiles: message<[count: number]>("删除 {0} 个文件？"),
+    categoryCount: message<[count: number]>("{0} 个分类"),
+    institutionCount: message<[count: number]>("{0} 家金融机构"),
+    currencyCount: message<[count: number]>("{0} 个币种"),
+    applyingAdds: message<[summary: string]>("应用后将新增 {0}。"),
+    archivedDefaultsHelp: message<[count: number]>(
+      " {0} 项默认数据已归档，请前往分类或券商与银行页面恢复。",
+    ),
+    packApplied: message<
+      [categories: number, institutions: number, currencies: number]
+    >("已添加 {0} 个分类、{1} 家金融机构和 {2} 个币种，现有记录未变。"),
+    activePack: message<[name: string]>("当前数据包：{0}"),
+    customPackHelp: message<[file: string | null]>(
+      "从 PRESET_FILE（{0}）加载。每次启动时补充默认数据，仅添加缺失记录。",
+    ),
+    builtinPackHelp: message<[id: string]>(
+      "内置数据包“{0}”（DATA_PRESET）。每次启动时补充默认数据，仅添加缺失记录。",
+    ),
+    backupInProgress: message<[date: string]>("备份开始于 {0}。"),
+    lastBackup: message<[ok: boolean, date: string]>([
+      "text",
+      "最近备份",
+      ["if", 0, "成功", "失败"],
+      1,
+      "。",
+    ]),
+    newestDump: message<[date: string]>("最新备份创建于 {0}。"),
+    missingMount: message<[path: string]>(
+      "{0} 未挂载任何内容。在 Docker 中，应用须挂载 ./backups 文件夹（参阅 docker-compose.yml）。",
+    ),
+    currenciesInUse: message<[codes: string]>([
+      "text",
+      "账户使用的币种：",
+      ["||", 0, "无"],
+      "。",
+    ]),
+    statementValuations: message<[n: number]>([
+      "text",
+      "按对账单估值（",
+      0,
+      ["if", ["===", 0, ["number", 50]], "+", ""],
+      "）",
+    ]),
+    followPack: message<[on: boolean]>([
+      "text",
+      "随数据包设置（",
+      ["if", 0, "开启", "关闭"],
+      "）",
+    ]),
+    cpfCurrent: message<[on: boolean]>([
+      "text",
+      "当前",
+      ["if", 0, "开启", "关闭"],
+      "。关闭后会隐藏这些账户类型，现有 CPF 和 SRS 账户会保留。",
+    ]),
+    customFile: message<[name: string]>("自定义文件：{0}"),
   },
   imports: {
     all: "全部",
     failed: "失败",
     stuck: "停滞",
-    attempts: (n: number) => `已尝试 ${n} 次`,
+    attempts: message<[n: number]>("已尝试 {0} 次"),
     waitingForReview: "等待审核",
     queued: "排队中",
     running: "运行中",
@@ -327,28 +375,29 @@ const adminManage: Translation<typeof en> = {
     mergeNow: "立即合并？",
     merge: "合并",
     mergeIntoPlaceholder: "合并至…",
-    defaultsRestored: (count: number) => `已恢复 ${count} 家默认金融机构。`,
-    add: (names: string) => `添加 ${names}`,
-    restoreNamed: (names: string) => `恢复 ${names}`,
-    bringBack: (count: number) => `恢复 ${count} 家金融机构？`,
-    restoreDefault: (count: number) => `恢复 ${count} 家默认金融机构`,
-    saved: (name: string) => `已保存 ${name}。`,
-    added: (name: string) => `已添加 ${name}。`,
-    removed: (name: string) => `已移除 ${name}。`,
-    defaultArchived: (name: string) =>
-      `${name} 为默认金融机构，已归档，可从归档列表恢复。`,
-    inUseArchived: (name: string) => `${name} 仍有账户使用，已归档。`,
-    key: (key: string) => `标识：${key}`,
-    archiveUsageHelp: (count: number, uploads: string) =>
-      `已有 ${count} 个账户${uploads}使用，移除时将归档并保留历史记录。`,
-    accountsMerged: (
-      sourceName: string,
-      targetName: string | undefined,
-      count: number,
-    ) => `已将 ${sourceName} 合并至 ${targetName}，移动了 ${count} 个账户。`,
-    mergeDescription: (n: number) =>
-      `将此金融机构的 ${n} 个账户及上传文件移至另一金融机构，然后移除此机构。`,
-    uploadUsage: (n: number) => `及 ${n} 个上传文件`,
+    defaultsRestored: message<[count: number]>("已恢复 {0} 家默认金融机构。"),
+    add: message<[names: string]>("添加 {0}"),
+    restoreNamed: message<[names: string]>("恢复 {0}"),
+    bringBack: message<[count: number]>("恢复 {0} 家金融机构？"),
+    restoreDefault: message<[count: number]>("恢复 {0} 家默认金融机构"),
+    saved: message<[name: string]>("已保存 {0}。"),
+    added: message<[name: string]>("已添加 {0}。"),
+    removed: message<[name: string]>("已移除 {0}。"),
+    defaultArchived: message<[name: string]>(
+      "{0} 为默认金融机构，已归档，可从归档列表恢复。",
+    ),
+    inUseArchived: message<[name: string]>("{0} 仍有账户使用，已归档。"),
+    key: message<[key: string]>("标识：{0}"),
+    archiveUsageHelp: message<[count: number, uploads: string]>(
+      "已有 {0} 个账户{1}使用，移除时将归档并保留历史记录。",
+    ),
+    accountsMerged: message<
+      [sourceName: string, targetName: string | undefined, count: number]
+    >("已将 {0} 合并至 {1}，移动了 {2} 个账户。"),
+    mergeDescription: message<[n: number]>(
+      "将此金融机构的 {0} 个账户及上传文件移至另一金融机构，然后移除此机构。",
+    ),
+    uploadUsage: message<[n: number]>("及 {0} 个上传文件"),
   },
   security: {
     password: "密码",
@@ -409,10 +458,12 @@ const adminManage: Translation<typeof en> = {
     signedIn: "已登录",
     new: "新设备",
     loadOlder: "加载更多",
-    missingTwoFactor: (n: number) =>
-      `受此策略影响的 ${n} 位用户尚未设置两步验证，完成设置前只能访问设置页面。`,
-    noisyAddresses: (addresses: string) =>
-      `以下地址多次登录失败：${addresses}。每个地址每分钟最多尝试 5 次。`,
+    missingTwoFactor: message<[n: number]>(
+      "受此策略影响的 {0} 位用户尚未设置两步验证，完成设置前只能访问设置页面。",
+    ),
+    noisyAddresses: message<[addresses: string]>(
+      "以下地址多次登录失败：{0}。每个地址每分钟最多尝试 5 次。",
+    ),
   },
   system: {
     app: "应用",
@@ -445,19 +496,25 @@ const adminManage: Translation<typeof en> = {
       "用于发送邀请、重置链接、审核提醒及新设备通知。请在 .env 中设置 SMTP_URL 和 SMTP_FROM，然后重启。",
     sendMeATestEmail: "向我发送测试邮件",
     emailNotConfigured: "尚未设置 — 链接将显示供你转交",
-    testEmailSent: (email: string) =>
-      `测试邮件已发送至 ${email}，请检查收件箱及垃圾邮件。`,
-    migrationsApplied: (applied: number, expected: number) =>
-      `已应用 ${applied} 项，共 ${expected} 项`,
-    storageSummary: (size: string, files: string, directory: string) =>
-      `${files} 个文件，共 ${size} · ${directory}`,
-    sendingThrough: (host: string | null) => `通过 ${host} 发送`,
-    userCount: (n: string) => `${n} 位用户`,
-    accountCount: (n: string) => `${n} 个账户`,
-    transactionCount: (n: string) => `${n} 笔交易`,
-    uploadCount: (n: string) => `${n} 个上传文件`,
-    latestMigration: (tag: string) => `· 最新 ${tag}`,
-    passwordStatus: (set: boolean) => `· 密码${set ? "已设置" : "未设置"}`,
+    testEmailSent: message<[email: string]>(
+      "测试邮件已发送至 {0}，请检查收件箱及垃圾邮件。",
+    ),
+    migrationsApplied:
+      message<[applied: number, expected: number]>("已应用 {0} 项，共 {1} 项"),
+    storageSummary: message<[size: string, files: string, directory: string]>(
+      "{1} 个文件，共 {0} · {2}",
+    ),
+    sendingThrough: message<[host: string | null]>("通过 {0} 发送"),
+    userCount: message<[n: string]>("{0} 位用户"),
+    accountCount: message<[n: string]>("{0} 个账户"),
+    transactionCount: message<[n: string]>("{0} 笔交易"),
+    uploadCount: message<[n: string]>("{0} 个上传文件"),
+    latestMigration: message<[tag: string]>("· 最新 {0}"),
+    passwordStatus: message<[set: boolean]>([
+      "text",
+      "· 密码",
+      ["if", 0, "已设置", "未设置"],
+    ]),
   },
   users: {
     people: "用户",
@@ -537,22 +594,25 @@ const adminManage: Translation<typeof en> = {
     reenable: "重新启用",
     disableAccount: "停用账号？",
     disable: "停用",
-    adminGranted: (name: string | undefined) => `${name} 已设为管理员。`,
-    memberGranted: (name: string | undefined) => `${name} 已设为成员。`,
-    sessionsRevoked: (count: number) => `已退出 ${count} 个登录会话。`,
-    resetEmailFailed: (error: string) =>
-      `重置链接已创建，但邮件发送失败：${error}`,
-    resetEmailSent: (email: string | undefined) =>
-      `重置链接已发送至 ${email}，旧链接已失效。`,
-    emailItTo: (email: string) => `发送邮件至 ${email}`,
-    passkeys: (n: number) => `${n} 个通行密钥`,
-    invitedEmail: (email: string) => `链接已发送至 ${email}。`,
-    inviteFailed: (error: string) => `邀请已创建，但邮件发送失败：${error}。`,
-    expired: (date: string) => `已过期 ${date}`,
-    expires: (date: string) => `到期时间 ${date}`,
-    resetExpires: (date: string) => `仅显示一次。到期时间：${date}。`,
-    sessionActivity: (ip: string, active: string, signedIn: string) =>
-      `${ip} · 最近活跃 ${active} · 登录于 ${signedIn}`,
+    adminGranted: message<[name: string | undefined]>("{0} 已设为管理员。"),
+    memberGranted: message<[name: string | undefined]>("{0} 已设为成员。"),
+    sessionsRevoked: message<[count: number]>("已退出 {0} 个登录会话。"),
+    resetEmailFailed: message<[error: string]>(
+      "重置链接已创建，但邮件发送失败：{0}",
+    ),
+    resetEmailSent: message<[email: string | undefined]>(
+      "重置链接已发送至 {0}，旧链接已失效。",
+    ),
+    emailItTo: message<[email: string]>("发送邮件至 {0}"),
+    passkeys: message<[n: number]>("{0} 个通行密钥"),
+    invitedEmail: message<[email: string]>("链接已发送至 {0}。"),
+    inviteFailed: message<[error: string]>("邀请已创建，但邮件发送失败：{0}。"),
+    expired: message<[date: string]>("已过期 {0}"),
+    expires: message<[date: string]>("到期时间 {0}"),
+    resetExpires: message<[date: string]>("仅显示一次。到期时间：{0}。"),
+    sessionActivity: message<[ip: string, active: string, signedIn: string]>(
+      "{0} · 最近活跃 {1} · 登录于 {2}",
+    ),
   },
   pages: {
     security: {

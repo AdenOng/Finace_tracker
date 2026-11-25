@@ -84,6 +84,8 @@ test("net worth chart renders nearby large balances without hanging or invalid c
       `
         import { createElement } from "react";
         import { renderToStaticMarkup } from "react-dom/server";
+        import { LocaleProvider } from "./src/i18n/client";
+        import english from "./src/i18n/messages/en";
         import { NetWorthChart } from "./src/components/overview/net-worth-chart";
         for (const totals of [
           ["9007199254740992", "9007199254740994"],
@@ -96,7 +98,7 @@ test("net worth chart renders nearby large balances without hanging or invalid c
             date: i ? "2026-10-19" : "2026-10-18",
             total, estimated: false, backfilled: false, partial: false,
           }));
-          console.log(renderToStaticMarkup(createElement(NetWorthChart, { series: [{ key: "all", label: "Net worth", points, headline: true }], currency: "SGD" })));
+          console.log(renderToStaticMarkup(createElement(LocaleProvider, { locale: "en", messages: english }, createElement(NetWorthChart, { series: [{ key: "all", label: "Net worth", points, headline: true }], currency: "SGD" }))));
         }
       `,
     ],
@@ -464,9 +466,8 @@ test("editing keeps archived category and inactive currency selected in the actu
       onSaved={async () => undefined}
     />,
   );
-  expect(html).toContain(
-    `<option value="${categoryId}" selected="">Archived category (archived)</option>`,
-  );
+  expect(html).toContain(`name="categoryId" value="${categoryId}"`);
+  expect(html).toContain("Archived category (archived)");
   expect(html).toContain(
     '<option value="USD" selected="">USD (inactive)</option>',
   );
@@ -1144,9 +1145,8 @@ test("import review keeps transfer categories editable and exposes sign-aware tr
   );
   expect(html).toContain('value="income" disabled=""');
   expect(html).toContain('aria-label="Category"');
-  expect(html).toContain(
-    `<option value="${categoryId}" selected="">Transfers</option>`,
-  );
+  expect(html).toContain('role="combobox"');
+  expect(html).toContain("Transfers");
 });
 
 test("bank and trade possible duplicates show Keep/Skip actions and block Save until resolved", () => {

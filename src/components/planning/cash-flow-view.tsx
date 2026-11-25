@@ -4,7 +4,9 @@ import { useT, useLocale } from "~/i18n/client";
 import Decimal from "decimal.js";
 import { useState } from "react";
 import { CardBills } from "~/components/planning/card-bills";
+import { ForecastChart } from "~/components/planning/forecast-chart";
 import { Button } from "~/components/ui/button";
+import { ConfirmButton } from "~/components/ui/confirm-button";
 import { Drawer } from "~/components/ui/dialog";
 import {
   type Direction,
@@ -12,60 +14,20 @@ import {
   signedAmount,
 } from "~/components/ui/direction-toggle";
 import { Field, Input, Select } from "~/components/ui/field";
-import { Notice, PageHeader, Section, Tag } from "~/components/ui/panel";
+import {
+  CardSkeleton,
+  Notice,
+  PageHeader,
+  Section,
+  Tag,
+} from "~/components/ui/panel";
 import { isCashFlowAccount } from "~/lib/cash-flow";
 import { isBalanceStale } from "~/lib/balance-freshness";
 import { formText } from "~/lib/form";
 import { formatDate, formatMoney } from "~/lib/format";
-import { api, type RouterOutputs } from "~/trpc/react";
+import { api } from "~/trpc/react";
 
-type Forecast = RouterOutputs["planning"]["overview"]["forecasts"][number];
-
-export function ForecastChart({ points }: { points: Forecast["points"] }) {
-  const t = useT();
-  const locale = useLocale();
-  const values = points.flatMap((p) =>
-    p.balance === null ? [] : [new Decimal(p.balance)],
-  );
-  if (!values.length) return null;
-  const min = Decimal.min(...values);
-  const max = Decimal.max(...values);
-  const range = max.minus(min);
-  const path = values
-    .map(
-      (v, i) =>
-        `${i === 0 ? "M" : "L"}${((i / Math.max(1, values.length - 1)) * 600).toFixed(2)},${range.isZero() ? 70 : (130 - v.minus(min).div(range).times(120).toNumber()).toFixed(2)}`,
-    )
-    .join(" ");
-  return (
-    <figure
-      className="my-5"
-      aria-label={
-        t.planning.cashFlowView
-          .dailyProjectedAccountBalanceExactDailyBalancesAre
-      }
-    >
-      <svg
-        viewBox="0 0 600 140"
-        className="text-brand h-36 w-full"
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <path
-          d={path}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-      <figcaption className="text-ink-2 flex justify-between text-xs">
-        <span>{formatDate(points[0]!.date, locale)}</span>
-        <span>{formatDate(points.at(-1)!.date, locale)}</span>
-      </figcaption>
-    </figure>
-  );
-}
+export { ForecastChart };
 
 export function CashFlowView() {
   const t = useT();
@@ -74,7 +36,6 @@ export function CashFlowView() {
   const [days, setDays] = useState<30 | 60 | 90>(30);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [adding, setAdding] = useState(false);
-  const [deleting, setDeleting] = useState<string | null>(null);
   const [showReviewed, setShowReviewed] = useState(false);
   const query = api.planning.overview.useQuery(
     { days },
@@ -117,7 +78,10 @@ export function CashFlowView() {
   if (query.error) return <Notice tone="error">{query.error.message}</Notice>;
   if (!data)
     return (
-      <p className="text-ink-2">{t.planning.cashFlowView.loadingCashFlow}</p>
+      <div className="space-y-4">
+        <CardSkeleton rows={4} label={t.planning.cashFlowView.loadingCashFlow} />
+        <CardSkeleton rows={3} />
+      </div>
     );
   const cashAccounts = data.accounts.filter(
     (a) => !a.archived && isCashFlowAccount(a.type),
@@ -241,7 +205,11 @@ export function CashFlowView() {
                       }
                     </Notice>
                   ) : null}
-                  <ForecastChart points={forecast.points} />
+                  <ForecastChart
+                    points={forecast.points}
+                    currency={forecast.currency}
+                    events={forecast.events}
+                  />
                   <details className="text-sm">
                     <summary className="cursor-pointer">
                       {t.planning.cashFlowView.dailyProjectedBalances}
@@ -377,7 +345,7 @@ export function CashFlowView() {
                         ? t.planning.cashFlowView.pause
                         : t.planning.cashFlowView.resume}
                     </Button>
-                    <Button
+                    <ConfirmButton
                       size="sm"
                       variant="danger"
                       disabled={
@@ -385,30 +353,11 @@ export function CashFlowView() {
                         data.accounts.find((a) => a.id === s.accountId)
                           ?.archived
                       }
-                      onClick={() => {
-                        if (deleting !== s.id) {
-                          setDeleting(s.id);
-                          return;
-                        }
-                        remove.mutate(
-                          { id: s.id },
-                          { onSuccess: () => setDeleting(null) },
-                        );
-                      }}
+                      confirmLabel={t.planning.cashFlowView.confirmRemovePlan}
+                      onConfirm={() => remove.mutate({ id: s.id })}
                     >
-                      {deleting === s.id
-                        ? t.planning.cashFlowView.confirmRemovePlan
-                        : t.common.actions.remove}
-                    </Button>
-                    {deleting === s.id ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setDeleting(null)}
-                      >
-                        {t.common.actions.cancel}
-                      </Button>
-                    ) : null}
+                      {t.common.actions.remove}
+                    </ConfirmButton>
                   </div>
                 </li>
               ))}

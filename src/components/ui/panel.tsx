@@ -170,3 +170,36 @@ export function EmptyState({
     </div>
   );
 }
+
+/** Consistent animated placeholder card used across route loading and client fetch states. */
+export function CardSkeleton({
+  rows = 3,
+  label,
+  className,
+}: {
+  rows?: number;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("card space-y-4 p-5 sm:p-6", className)}
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+    >
+      <div className="bg-wash h-4 w-32 animate-pulse rounded" />
+      <div className="bg-wash h-9 w-48 animate-pulse rounded" />
+      <div className="space-y-2.5 pt-2">
+        {Array.from({ length: rows }, (_, index) => (
+          <div
+            key={index}
+            className="bg-wash h-4 animate-pulse rounded"
+            style={{ width: `${Math.max(45, 92 - index * 14)}%` }}
+          />
+        ))}
+      </div>
+      {label ? <span className="sr-only">{label}</span> : null}
+    </div>
+  );
+}
