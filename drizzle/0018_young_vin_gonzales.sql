@@ -1,0 +1,1 @@
+CREATE INDEX "transaction_account_date_idx" ON "transaction" USING btree ("account_id","posted_date");
